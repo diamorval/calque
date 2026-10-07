@@ -6,11 +6,13 @@ import { DeckSpec, PatchOp, Slide } from "@calque/deckspec";
 import type { Db } from "./db.ts";
 import type { Decks, Finding } from "./decks.ts";
 import { REPO } from "./engine.ts";
+import type { Models } from "./models.ts";
 import { importPack, listPacks, type User } from "./packs.ts";
 
 export interface App {
   db: Db;
   decks: Decks;
+  models: Models;
   data: string;
   publicUrl: string;
 }

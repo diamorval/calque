@@ -42,7 +42,18 @@ create table if not exists comments (
   author text not null,
   status text not null default 'open' check (status in ('open', 'resolved')),
   created_at timestamptz not null default now()
-);`;
+);
+create table if not exists models (
+  id text primary key,
+  provider text not null,
+  model text not null,
+  base_url text,
+  api_key text,
+  is_default boolean not null default false,
+  updated_by text not null,
+  updated_at timestamptz not null default now()
+);
+create unique index if not exists one_default_model on models (is_default) where is_default;`;
 
 /** Postgres when `url` is a postgres:// URL, else embedded PGlite (a data dir, or in memory). */
 export async function openDb(url = process.env.DATABASE_URL): Promise<Db> {

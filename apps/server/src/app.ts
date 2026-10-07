@@ -1,8 +1,10 @@
-import { mkdirSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { openDb } from "./db.ts";
 import { Decks } from "./decks.ts";
 import { REPO } from "./engine.ts";
+import { Models } from "./models.ts";
 import { seedPacks } from "./packs.ts";
 import type { App } from "./tools.ts";
 
@@ -14,5 +16,14 @@ export async function createApp(opts: { data?: string; db?: string; publicUrl?: 
   await seedPacks(db);
   const port = process.env.PORT ?? "8787";
   const publicUrl = (opts.publicUrl ?? process.env.CALQUE_PUBLIC_URL ?? `http://localhost:${port}`).replace(/\/$/, "");
-  return { db, decks: new Decks(db, data), data, publicUrl };
+  const models = new Models(db, process.env.CALQUE_SECRET ?? localSecret(data));
+  await models.seedFromEnv();
+  return { db, decks: new Decks(db, data), models, data, publicUrl };
+}
+
+/** Dev only: the key sealing model API keys, kept in the data dir. Set CALQUE_SECRET in production. */
+function localSecret(data: string): string {
+  const path = join(data, "secret");
+  if (!existsSync(path)) writeFileSync(path, randomBytes(32).toString("base64"), { mode: 0o600 });
+  return readFileSync(path, "utf8");
 }

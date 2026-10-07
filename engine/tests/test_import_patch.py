@@ -86,3 +86,21 @@ def test_patch_ops():
         apply_ops(d, [{"op": "delete_slide", "slide": "zz"}])
     with pytest.raises(PatchError, match="set_params applies"):
         apply_ops(d, [{"op": "set_params", "slide": "a", "params": {}}])
+
+
+def test_style_only_set_keeps_text():
+    def set_(d, value):
+        return apply_ops(d, [{"op": "set", "slide": "a", "shape_id": 2, "value": value}])
+
+    out = set_(_deck(), {"color": "accent"})
+    assert out["slides"][0]["source"]["values"]["2"] == {
+        "text": "Original title",
+        "color": "accent",
+    }
+    out = set_(out, {"bold": True})
+    assert out["slides"][0]["source"]["values"]["2"] == {
+        "text": "Original title",
+        "color": "accent",
+        "bold": True,
+    }
+    assert set_(_deck(), "New")["slides"][0]["source"]["values"]["2"] == "New"

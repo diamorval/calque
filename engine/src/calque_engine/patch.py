@@ -42,7 +42,13 @@ def apply_ops(deck: dict[str, Any], ops: list[dict[str, Any]]) -> dict[str, Any]
                     raise PatchError(
                         "set writes into cloned shapes; use set_params for drawn slides"
                     )
-                src.setdefault("values", {})[str(op["shape_id"])] = op["value"]
+                values = src.setdefault("values", {})
+                key, value = str(op["shape_id"]), op["value"]
+                # a style-only value ({"color": ...}) keeps the shape's current text
+                if isinstance(value, dict) and "text" not in value and key in values:
+                    old = values[key]
+                    value = {**old, **value} if isinstance(old, dict) else {"text": old, **value}
+                values[key] = value
             elif kind == "set_field":
                 if op["field"] not in ("title", "eyebrow", "notes", "message"):
                     raise PatchError(f"field {op['field']!r} is not patchable")

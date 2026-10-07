@@ -9,10 +9,13 @@
     "stdio": "node src/stdio.ts"
   },
   "dependencies": {
+    "@calque/agent": "workspace:*",
     "@calque/deckspec": "workspace:*",
+    "@calque/llm": "workspace:*",
     "@calque/slide-ui": "workspace:*",
     "@electric-sql/pglite": "0.5.8",
     "@hono/node-server": "2.1.3",
+    "@modelcontextprotocol/client": "2.3.1",
     "@modelcontextprotocol/core": "^2.3.1",
     "@modelcontextprotocol/ext-apps": "2.0.3",
     "@modelcontextprotocol/server": "2.3.1",
@@ -23,7 +26,6 @@
     "zod": "4.6.5"
   },
   "devDependencies": {
-    "@modelcontextprotocol/client": "^2.3.1",
     "@types/node": "^26.6.4",
     "@types/pg": "^8.23.1",
     "typescript": "^6.0.3"
