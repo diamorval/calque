@@ -1,0 +1,26 @@
+{
+  "name": "calque",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.5.1",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "lint": "eslint . && turbo run typecheck",
+    "test": "vitest run --passWithNoTests",
+    "engine:test": "cd engine && uv run pytest",
+    "engine:lint": "cd engine && uv run ruff check . && uv run ruff format --check ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.6.4",
+    "eslint": "^10.12.0",
+    "globals": "^17.13.0",
+    "turbo": "^2.11.7",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.71.1",
+    "vitest": "^5.0.3"
+  }
+}

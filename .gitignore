@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.turbo/
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.pyc
+.env
+.DS_Store
+out/
