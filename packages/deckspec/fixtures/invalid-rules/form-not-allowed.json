@@ -1,0 +1,35 @@
+{
+  "pack_id": "neutral",
+  "language": "en",
+  "title": "Quarterly review",
+  "slides": [
+    {
+      "id": "c",
+      "message": "Slide c says one thing.",
+      "message_type": "process",
+      "form": "line",
+      "source": {
+        "kind": "chart",
+        "type": "line",
+        "params": {
+          "categories": [
+            "Q1",
+            "Q2",
+            "Q3"
+          ],
+          "series": [
+            {
+              "name": "Revenue",
+              "values": [
+                1,
+                2,
+                3
+              ]
+            }
+          ]
+        }
+      },
+      "title": "The verdict, stated."
+    }
+  ]
+}

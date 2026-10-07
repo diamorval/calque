@@ -1,0 +1,29 @@
+{
+  "pack_id": "neutral",
+  "language": "en",
+  "title": "Quarterly review",
+  "slides": [
+    {
+      "id": "c",
+      "message": "Slide c says one thing.",
+      "message_type": "ranking",
+      "form": "bar",
+      "source": {
+        "kind": "chart",
+        "type": "bar",
+        "params": {
+          "series": [
+            {
+              "name": "s",
+              "values": [
+                "1",
+                "2"
+              ]
+            }
+          ]
+        }
+      },
+      "title": "The verdict, stated."
+    }
+  ]
+}

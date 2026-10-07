@@ -1,0 +1,72 @@
+{
+  "pack_id": "neutral",
+  "language": "en",
+  "title": "Quarterly review",
+  "slides": [
+    {
+      "id": "a",
+      "message": "Slide a says one thing.",
+      "message_type": "narrative",
+      "form": "content",
+      "source": {
+        "kind": "clone",
+        "role": "content"
+      }
+    },
+    {
+      "id": "b",
+      "message": "Slide b says one thing.",
+      "message_type": "narrative",
+      "form": "content",
+      "source": {
+        "kind": "clone",
+        "role": "content"
+      }
+    },
+    {
+      "id": "cover",
+      "message": "Slide cover says one thing.",
+      "message_type": "cover",
+      "form": "cover",
+      "source": {
+        "kind": "clone",
+        "role": "cover",
+        "values": {
+          "2": "Quarterly review",
+          "3": "October"
+        }
+      }
+    },
+    {
+      "id": "c",
+      "message": "Slide c says one thing.",
+      "message_type": "narrative",
+      "form": "content",
+      "source": {
+        "kind": "clone",
+        "role": "content"
+      }
+    },
+    {
+      "id": "d",
+      "message": "Slide d says one thing.",
+      "message_type": "narrative",
+      "form": "content",
+      "source": {
+        "kind": "clone",
+        "role": "content"
+      }
+    },
+    {
+      "id": "end",
+      "message": "Slide end says one thing.",
+      "message_type": "closing",
+      "form": "closing",
+      "source": {
+        "kind": "clone",
+        "role": "closing"
+      },
+      "notes": "Thanks."
+    }
+  ]
+}

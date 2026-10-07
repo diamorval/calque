@@ -28,9 +28,18 @@ slides from the official template and draw bespoke content on top with python-pp
 
 - Two runtimes (Node + Python) in one repo; CI runs both.
 - LibreOffice is a runtime dependency of the server image; render latency must be measured
-  (recorded below once Phase 2 step 6 lands).
+  (see Measurements below).
 - Onboarding a company is data, not code: import a template, review the extracted map, publish.
 
 ## Measurements
 
-- Single-slide re-render latency: _to be filled in Phase 2._
+Measured 2026-10-07 on an Apple M5 (32 GB, macOS 27.0.1), LibreOffice 26.8.1.1, poppler
+`pdftoppm`, 96 dpi, `calque_engine.render.render` on a 10-slide deck built from the Diametral pack
+(cover, alternating content and divider clones, closing). Median of 3 runs, each including a
+fresh throwaway LibreOffice profile (pack fonts copied in) and the shape map.
+
+- Full render, 10 slides, empty cache: **2.9 s** (2.92, 2.91, 2.96).
+- Single-slide re-render after editing one slide's text: **1.2 s** (1.15, 1.22, 1.20). Only the
+  changed slide is exported (PDF `PageRange` on the unmodified deck); the other nine are reused
+  from the cache. The floor is LibreOffice start-up and deck load, not the slide itself.
+- Nothing changed: ~0.02 s (hashing only, no LibreOffice).

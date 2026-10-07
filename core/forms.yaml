@@ -63,6 +63,8 @@ forms:
   org_chart: clone
   image_grid: clone
   end_card: clone
+  # a slide of an imported deck, kept as is until someone reworks it
+  imported: clone
 
 # message type -> forms allowed for it
 message_types:
@@ -88,6 +90,7 @@ message_types:
   divider: [divider, subsection]
   closing: [closing, end_card]
   appendix: [appendix]
+  imported: [imported]
 
 # forms the "no 3 consecutive slides of the same form" rule ignores
-signature_forms: [cover, summary, divider, subsection, closing, appendix, end_card]
+signature_forms: [cover, summary, divider, subsection, closing, appendix, end_card, imported]

@@ -1,0 +1,205 @@
+{
+  "pack_id": "neutral",
+  "language": "en",
+  "title": "Quarterly review",
+  "slides": [
+    {
+      "id": "d-flow",
+      "message": "Slide d-flow says one thing.",
+      "message_type": "process",
+      "form": "flow",
+      "source": {
+        "kind": "diagram",
+        "id": "flow",
+        "params": {
+          "steps": [
+            "Plan",
+            {
+              "label": "Build",
+              "sublabel": "two sprints",
+              "icon": "hammer"
+            },
+            "Ship"
+          ],
+          "active": 1,
+          "numbered": true
+        }
+      },
+      "title": "The verdict, stated."
+    },
+    {
+      "id": "d-swim",
+      "message": "Slide d-swim says one thing.",
+      "message_type": "process",
+      "form": "swimlane",
+      "source": {
+        "kind": "diagram",
+        "id": "swimlane",
+        "params": {
+          "lanes": [
+            {
+              "label": "Client",
+              "steps": [
+                "Ask"
+              ]
+            },
+            {
+              "label": "Team",
+              "steps": [
+                "Answer",
+                "Deliver"
+              ]
+            }
+          ],
+          "active": [
+            1,
+            0
+          ]
+        }
+      },
+      "title": "The verdict, stated."
+    },
+    {
+      "id": "d-layers",
+      "message": "Slide d-layers says one thing.",
+      "message_type": "system",
+      "form": "layers",
+      "source": {
+        "kind": "diagram",
+        "id": "layers",
+        "params": {
+          "layers": [
+            "UI",
+            "API",
+            "Data"
+          ],
+          "active": 0
+        }
+      },
+      "title": "The verdict, stated."
+    },
+    {
+      "id": "d-hub",
+      "message": "Slide d-hub says one thing.",
+      "message_type": "system",
+      "form": "hub",
+      "source": {
+        "kind": "diagram",
+        "id": "hub",
+        "params": {
+          "center": "Engine",
+          "spokes": [
+            "MCP",
+            "Web",
+            {
+              "label": "CLI"
+            }
+          ]
+        }
+      },
+      "title": "The verdict, stated."
+    },
+    {
+      "id": "d-matrix",
+      "message": "Slide d-matrix says one thing.",
+      "message_type": "positioning",
+      "form": "matrix2x2",
+      "source": {
+        "kind": "diagram",
+        "id": "matrix2x2",
+        "params": {
+          "x_axis": [
+            "cheap",
+            "costly"
+          ],
+          "y_axis": [
+            "slow",
+            "fast"
+          ],
+          "quadrants": [
+            "a",
+            "b",
+            "c",
+            "d"
+          ],
+          "items": [
+            {
+              "label": "Us",
+              "x": 0.2,
+              "y": 0.9
+            }
+          ],
+          "active": 0
+        }
+      },
+      "title": "The verdict, stated."
+    },
+    {
+      "id": "d-funnel",
+      "message": "Slide d-funnel says one thing.",
+      "message_type": "conversion",
+      "form": "funnel",
+      "source": {
+        "kind": "diagram",
+        "id": "funnel",
+        "params": {
+          "stages": [
+            "Leads",
+            "Calls",
+            "Deals"
+          ],
+          "values": [
+            100,
+            20,
+            5
+          ]
+        }
+      },
+      "title": "The verdict, stated."
+    },
+    {
+      "id": "d-cycle",
+      "message": "Slide d-cycle says one thing.",
+      "message_type": "loop",
+      "form": "cycle",
+      "source": {
+        "kind": "diagram",
+        "id": "cycle",
+        "params": {
+          "steps": [
+            "Measure",
+            "Learn",
+            "Build"
+          ]
+        }
+      },
+      "title": "The verdict, stated."
+    },
+    {
+      "id": "d-ba",
+      "message": "Slide d-ba says one thing.",
+      "message_type": "transformation",
+      "form": "before_after",
+      "source": {
+        "kind": "diagram",
+        "id": "before_after",
+        "params": {
+          "before": {
+            "title": "Before",
+            "lines": [
+              "manual"
+            ]
+          },
+          "after": {
+            "title": "After",
+            "lines": [
+              "automated"
+            ]
+          },
+          "arrow_label": "3 months"
+        }
+      },
+      "title": "The verdict, stated."
+    }
+  ]
+}

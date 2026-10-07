@@ -53,7 +53,8 @@ grid:
   gutter_in: 0.2
   title: { left_in: 0.36, top_in: 0.18, width_in: 6.63, height_in: 0.85, max_chars: 48 }
   body_top_in: 1.5
-  footer_top_in: 5.31
+  # the footer logo starts at T5.21: the body band ends above it
+  footer_top_in: 5.1
   page_number: { left_in: 9.37, top_in: 5.31 }
 
 fonts:
@@ -81,6 +82,8 @@ lint:
     - xx’
     - Week 1
     - Phase 1
+    - TODO
+    - TBD
   # Charter typography and tone-of-voice. The middle-dot ban is left out: the eyebrow grammar
   # "0X · SECTION / SUBJECT" uses it.
   slop_rules:

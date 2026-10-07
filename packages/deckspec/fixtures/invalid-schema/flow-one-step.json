@@ -1,0 +1,23 @@
+{
+  "pack_id": "neutral",
+  "language": "en",
+  "title": "Quarterly review",
+  "slides": [
+    {
+      "id": "f",
+      "message": "Slide f says one thing.",
+      "message_type": "process",
+      "form": "flow",
+      "source": {
+        "kind": "diagram",
+        "id": "flow",
+        "params": {
+          "steps": [
+            "only"
+          ]
+        }
+      },
+      "title": "The verdict, stated."
+    }
+  ]
+}

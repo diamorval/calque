@@ -56,7 +56,17 @@ pnpm lint            # eslint + typecheck (turbo)
 pnpm test            # vitest
 pnpm engine:test     # cd engine && uv run pytest
 pnpm engine:lint     # ruff check + format check
+pnpm design:check    # template theme vs tokens.json gaps, DESIGN.md freshness (every pack)
+pnpm pack:sync <id>  # re-sync a pack from the pinned sources in its source.yaml
+cd engine && uv run pytest -m golden             # render golden decks, compare to committed PNGs
+CALQUE_UPDATE_GOLDEN=1 uv run pytest -m golden   # accept a deliberate visual change
+uv run python -m calque_engine build deck.json --pack ../packs/<id> --out deck.pptx
+uv run python -m calque_engine lint deck.pptx --pack ../packs/<id> --language fr
+echo '{"op": "build", ...}' | uv run python -m calque_engine call   # the server's JSON interface
 ```
+
+DeckSpec source of truth: `packages/deckspec/src/schema.ts` (Zod). After editing it, run
+`pnpm --filter @calque/deckspec schema` to regenerate the JSON Schema used by the engine.
 
 ## Working method
 

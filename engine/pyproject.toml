@@ -29,6 +29,8 @@ ignore = ["E741"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "../packs"]
+markers = ["golden: render decks and compare them to committed images (needs LibreOffice)"]
+addopts = "-m 'not golden'"
 
 [dependency-groups]
 dev = [

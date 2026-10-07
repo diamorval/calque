@@ -1,0 +1,34 @@
+{
+  "pack_id": "neutral",
+  "language": "en",
+  "title": "Quarterly review",
+  "slides": [
+    {
+      "id": "figures",
+      "message": "Slide figures says one thing.",
+      "message_type": "narrative",
+      "form": "content",
+      "source": {
+        "kind": "clone",
+        "role": "content"
+      },
+      "facts": [
+        {
+          "label": "a",
+          "value": 1,
+          "unit": "%"
+        },
+        {
+          "label": "b",
+          "value": 2,
+          "unit": "%"
+        },
+        {
+          "label": "c",
+          "value": 3,
+          "unit": "%"
+        }
+      ]
+    }
+  ]
+}

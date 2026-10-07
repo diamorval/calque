@@ -1,0 +1,197 @@
+{
+  "pack_id": "diametral",
+  "language": "en",
+  "title": "Business presentation",
+  "slides": [
+    {
+      "id": "cover",
+      "message": "A promise to the reader",
+      "message_type": "cover",
+      "form": "cover",
+      "source": {
+        "kind": "clone",
+        "role": "cover",
+        "values": {
+          "26": "Welcome to the new era\nof your performance.",
+          "30": "BUSINESS PRESENTATION",
+          "27": "AI",
+          "31": "10/2026"
+        }
+      }
+    },
+    {
+      "id": "summary",
+      "message": "Five acts, from the client's side",
+      "message_type": "summary",
+      "form": "summary",
+      "source": {
+        "kind": "clone",
+        "slide": 3,
+        "values": {
+          "36": "Summary",
+          "3": "Diametral in a nutshell",
+          "4": "Your needs and stakes",
+          "5": "Your tailored approach",
+          "6": "Our next steps",
+          "8": "Appendix"
+        }
+      }
+    },
+    {
+      "id": "act1",
+      "message": "Act 1 asks who we are",
+      "message_type": "divider",
+      "form": "divider",
+      "source": {
+        "kind": "clone",
+        "slide": 4,
+        "values": {
+          "17": "Who is\nDiametral?",
+          "16": "INTRODUCTION",
+          "11": "Diametral in a nutshell",
+          "20": "7’"
+        }
+      }
+    },
+    {
+      "id": "footprint",
+      "message": "Our footprint is close to our clients",
+      "message_type": "proof",
+      "form": "key_figure",
+      "source": {
+        "kind": "clone",
+        "role": "key_figure",
+        "values": {
+          "2": "FOOTPRINT",
+          "3": "153",
+          "4": "experts across two continents, with 312 successes since 2018."
+        }
+      }
+    },
+    {
+      "id": "conviction",
+      "message": "The AI stake is structural",
+      "message_type": "proof",
+      "form": "statement",
+      "source": {
+        "kind": "clone",
+        "role": "statement",
+        "values": {
+          "450": "The stake around AI is structural.",
+          "451": "Competitiveness moves to the companies that rebuild how they decide, not to the ones that buy a model. Source: MIT."
+        }
+      }
+    },
+    {
+      "id": "act2",
+      "message": "Act 2 hands the floor to the client",
+      "message_type": "divider",
+      "form": "divider",
+      "source": {
+        "kind": "clone",
+        "slide": 5,
+        "values": {
+          "17": "Why are\nwe here?",
+          "16": "DISCOVERY",
+          "12": "Your needs and stakes",
+          "20": "30’"
+        }
+      }
+    },
+    {
+      "id": "offers",
+      "message": "Three ways to work together",
+      "message_type": "catalogue",
+      "form": "cards",
+      "source": {
+        "kind": "clone",
+        "slide": 19,
+        "values": {
+          "2": "Three ways to work together",
+          "599": "Expertise",
+          "598": "Our Data and AI experts join your team in 5 days.",
+          "604": "Process",
+          "603": "A method to move one use case from idea to production.",
+          "606": "Immersion",
+          "605": "Your teams and ours, in one room, for one quarter."
+        }
+      }
+    },
+    {
+      "id": "act3",
+      "message": "Act 3 matches the offer",
+      "message_type": "divider",
+      "form": "divider",
+      "source": {
+        "kind": "clone",
+        "slide": 6,
+        "values": {
+          "17": "What is your\nbest fit?",
+          "16": "APPROACH",
+          "12": "Your tailored approach",
+          "20": "10’"
+        }
+      }
+    },
+    {
+      "id": "quote",
+      "message": "A client says it better",
+      "message_type": "proof",
+      "form": "quote",
+      "source": {
+        "kind": "clone",
+        "role": "quote",
+        "values": {
+          "4": "They did not sell us a model. They changed how our teams decide on Monday morning.",
+          "8": "Claire MARTIN",
+          "9": "Chief Operating Officer"
+        }
+      }
+    },
+    {
+      "id": "act4",
+      "message": "Act 4 closes on a choice",
+      "message_type": "divider",
+      "form": "divider",
+      "source": {
+        "kind": "clone",
+        "slide": 7,
+        "values": {
+          "17": "What is\nnext?",
+          "16": "NEXT STEP",
+          "12": "Our next steps",
+          "20": "5’"
+        }
+      }
+    },
+    {
+      "id": "plan",
+      "message": "Three steps to a first result",
+      "message_type": "sequence",
+      "form": "timeline",
+      "source": {
+        "kind": "clone",
+        "slide": 47,
+        "values": {
+          "5": "Three steps to a first result",
+          "1240": "Scoping workshop with your leads",
+          "1241": "OCTOBER",
+          "1243": "First use case in production",
+          "1244": "NOVEMBER",
+          "1246": "Review and scale decision",
+          "1247": "JANUARY"
+        }
+      }
+    },
+    {
+      "id": "closing",
+      "message": "Thanks",
+      "message_type": "closing",
+      "form": "closing",
+      "source": {
+        "kind": "clone",
+        "role": "closing"
+      }
+    }
+  ]
+}

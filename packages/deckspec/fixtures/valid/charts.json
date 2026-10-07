@@ -1,0 +1,166 @@
+{
+  "pack_id": "neutral",
+  "language": "en",
+  "title": "Quarterly review",
+  "slides": [
+    {
+      "id": "c-line",
+      "message": "Slide c-line says one thing.",
+      "message_type": "trend",
+      "form": "line",
+      "source": {
+        "kind": "chart",
+        "type": "line",
+        "params": {
+          "categories": [
+            "Q1",
+            "Q2",
+            "Q3"
+          ],
+          "series": [
+            {
+              "name": "Revenue",
+              "values": [
+                1,
+                2,
+                3
+              ]
+            }
+          ],
+          "highlight": 2,
+          "unit": "M€",
+          "number_format": "0.0",
+          "x_title": "Quarter",
+          "y_title": "Revenue"
+        }
+      },
+      "title": "The verdict, stated."
+    },
+    {
+      "id": "c-bar",
+      "message": "Slide c-bar says one thing.",
+      "message_type": "ranking",
+      "form": "bar",
+      "source": {
+        "kind": "chart",
+        "type": "bar",
+        "params": {
+          "categories": [
+            "Q1",
+            "Q2",
+            "Q3"
+          ],
+          "series": [
+            {
+              "name": "Revenue",
+              "values": [
+                1,
+                2,
+                3
+              ]
+            }
+          ],
+          "highlight_series": 0,
+          "stacked": true
+        }
+      },
+      "facts": [
+        {
+          "label": "Q1",
+          "value": 1,
+          "unit": "M€"
+        },
+        {
+          "label": "Q2",
+          "value": 2,
+          "unit": "M€"
+        },
+        {
+          "label": "Q3",
+          "value": 3,
+          "unit": "M€"
+        }
+      ],
+      "title": "The verdict, stated."
+    },
+    {
+      "id": "c-barh",
+      "message": "Slide c-barh says one thing.",
+      "message_type": "ranking",
+      "form": "bar_horizontal",
+      "source": {
+        "kind": "chart",
+        "type": "bar_horizontal",
+        "params": {
+          "categories": [
+            "Q1",
+            "Q2",
+            "Q3"
+          ],
+          "series": [
+            {
+              "name": "Revenue",
+              "values": [
+                1,
+                2,
+                3
+              ]
+            }
+          ]
+        }
+      },
+      "title": "The verdict, stated."
+    },
+    {
+      "id": "c-doughnut",
+      "message": "Slide c-doughnut says one thing.",
+      "message_type": "share",
+      "form": "doughnut",
+      "source": {
+        "kind": "chart",
+        "type": "doughnut",
+        "params": {
+          "categories": [
+            "A",
+            "B"
+          ],
+          "series": [
+            {
+              "name": "Share",
+              "values": [
+                60,
+                40
+              ]
+            }
+          ]
+        }
+      },
+      "title": "The verdict, stated."
+    },
+    {
+      "id": "c-scatter",
+      "message": "Slide c-scatter says one thing.",
+      "message_type": "quantity",
+      "form": "scatter",
+      "source": {
+        "kind": "chart",
+        "type": "scatter",
+        "params": {
+          "points": [
+            {
+              "label": "x",
+              "x": 1,
+              "y": 2
+            },
+            {
+              "label": "y",
+              "x": 3,
+              "y": 1.5
+            }
+          ]
+        }
+      },
+      "title": "The verdict, stated."
+    }
+  ]
+}

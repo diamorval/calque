@@ -78,16 +78,30 @@ def build(
     tmap = extract(template) if base else pack.template_map
     tmap_by_n = {s["number"]: s for s in tmap["slides"]}
     originals = list(prs.slides)
+    used: set[int] = set()
     built = []
 
     for s in deck.slides:
         src = s.source
         if src["kind"] == "clone":
-            n = src["slide"] if src.get("from") == "base" else resolve_clone_slide(s, pack)
-            if src.get("from") == "base" and not base:
+            from_base = src.get("from") == "base"
+            if from_base and not base:
                 raise ValueError(f"[{s.id}] clones from base but the deck has no base")
-            new = sl.duplicate_slide(prs, originals[n - 1])
-            _apply_clone(new, s, st, deck.language, report)
+            n = src["slide"] if from_base else resolve_clone_slide(s, pack)
+            if not 1 <= n <= len(originals):
+                raise ValueError(f"[{s.id}] slide {n} not in {template.name} (1..{len(originals)})")
+            if from_base and n not in used:
+                # first use of an imported slide: edit it in place, so notes, animations and
+                # transitions survive untouched
+                new = originals[n - 1]
+                used.add(n)
+            else:
+                new = sl.duplicate_slide(prs, originals[n - 1])
+                if from_base and originals[n - 1].has_notes_slide:
+                    new.notes_slide.notes_text_frame.text = originals[
+                        n - 1
+                    ].notes_slide.notes_text_frame.text
+            _apply_clone(new, s, st, deck.language, report, tmap_by_n[n], holes=not from_base)
         else:
             if base:
                 raise ValueError(f"[{s.id}] drawn slides cannot be added to an imported deck yet")
@@ -112,15 +126,27 @@ def build(
     return report
 
 
-def _apply_clone(slide, s: Slide, st: Style, language: str, report: BuildReport) -> None:
+def _apply_clone(
+    slide,
+    s: Slide,
+    st: Style,
+    language: str,
+    report: BuildReport,
+    tslide: dict[str, Any],
+    holes: bool = True,
+) -> None:
     values: dict[str, Any] = s.source.get("values", {})
+    fit = set(tslide.get("fit", []))
     for key, value in values.items():
         shape = sl.shape_by_id(slide, int(key))
         if value is None:
             sl.delete_shape(shape)
-        else:
-            sl.apply_value(shape, value, st)
-    _fill_holes(slide, s, st, language, report, set(map(int, values)))
+            continue
+        sl.apply_value(shape, value, st)
+        if int(key) in fit and not (isinstance(value, dict) and "fit" in value):
+            sl.fit_box(shape, st)
+    if holes:
+        _fill_holes(slide, s, st, language, report, set(map(int, values)))
 
 
 def _fill_holes(slide, s: Slide, st: Style, language: str, report: BuildReport, done: set[int]):

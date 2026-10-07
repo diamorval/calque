@@ -87,7 +87,7 @@ export const CloneSource = z
   })
   .refine((s) => s.role !== undefined || s.slide !== undefined, { message: "clone needs a role or a slide" });
 
-export const Source = z.union([CloneSource, ChartSource, DiagramSource, CompositionSource]);
+export const Source = z.discriminatedUnion("kind", [CloneSource, ChartSource, DiagramSource, CompositionSource]);
 
 export const Fact = z.strictObject({ label: z.string(), value: z.number(), unit: z.string().optional() });
 
@@ -95,6 +95,7 @@ export const MessageType = z.enum([
   "quantity", "share", "trend", "ranking", "process", "sequence", "system", "positioning", "tradeoff",
   "conversion", "loop", "transformation", "proof", "catalogue", "pricing", "narrative",
   "cover", "summary", "divider", "closing", "appendix",
+  "imported",
 ]);
 
 export const Slide = z.strictObject({

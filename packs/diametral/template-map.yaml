@@ -8,6 +8,7 @@ slides:
   layout: Empty background
   description: Cover
   slots: {title: 26, topic: 30, keyword: 27, date: 31}
+  fit: [30, 27, 31]
   page_number: null
   shapes:
   - id: 15
@@ -282,6 +283,7 @@ slides:
   layout: Empty background
   description: Chapter dividers
   slots: {question: 17, number: 19, subject: 16, chapter: 11, duration: 20, image: 2}
+  fit: [16, 20]
   page_number: 18
   shapes:
   - id: 2
@@ -360,6 +362,7 @@ slides:
   layout: Empty background
   description: Chapter dividers
   slots: {question: 17, number: 19, subject: 16, chapter: 12, duration: 20, image: 2}
+  fit: [16, 20]
   page_number: 14
   shapes:
   - id: 2
@@ -438,6 +441,7 @@ slides:
   layout: Empty background
   description: Chapter dividers
   slots: {question: 17, number: 19, subject: 16, chapter: 12, duration: 20, image: 2}
+  fit: [16, 20]
   page_number: 11
   shapes:
   - id: 2
@@ -516,6 +520,7 @@ slides:
   layout: Empty background
   description: Chapter dividers
   slots: {question: 17, number: 19, subject: 16, chapter: 12, duration: 20, image: 2}
+  fit: [16, 20]
   page_number: 14
   shapes:
   - id: 2
@@ -594,6 +599,7 @@ slides:
   layout: Empty background
   description: Chapter dividers
   slots: {question: 17, number: 19, subject: 16, chapter: 12, duration: 20, image: 2}
+  fit: [16, 20]
   page_number: 14
   shapes:
   - id: 2
@@ -672,6 +678,7 @@ slides:
   layout: Empty background
   description: Chapter dividers
   slots: {question: 17, number: 19, subject: 16, chapter: 12, duration: 20}
+  fit: [16, 20]
   page_number: 11
   shapes:
   - id: 4
@@ -747,6 +754,7 @@ slides:
   layout: 2_Title slide
   description: Subsection divider
   slots: {subject: 170, title: 157}
+  fit: [170]
   page_number: 3
   shapes:
   - id: 159
@@ -1788,6 +1796,7 @@ slides:
 - number: 25
   layout: 6_Title slide
   description: Pull quote + attribution
+  fit: [8]
   page_number: 10
   shapes:
   - id: 3
@@ -4567,6 +4576,7 @@ slides:
 - number: 47
   layout: 3_Title slide
   description: Year-step timelines
+  fit: [1241, 1244, 1247]
   page_number: 6
   shapes:
   - id: 1238
@@ -4640,6 +4650,7 @@ slides:
 - number: 48
   layout: 3_Title slide
   description: Year-step timelines
+  fit: [1264, 1270, 1273, 1267]
   page_number: 5
   shapes:
   - id: 1261
@@ -4727,6 +4738,7 @@ slides:
 - number: 49
   layout: 3_Title slide
   description: Year-step timelines
+  fit: [1290, 1293, 1296, 1299, 1302]
   page_number: 6
   shapes:
   - id: 1287

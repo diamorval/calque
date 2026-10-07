@@ -58,7 +58,8 @@
               "summary",
               "divider",
               "closing",
-              "appendix"
+              "appendix",
+              "imported"
             ]
           },
           "form": {
@@ -67,7 +68,7 @@
             "description": "core/forms.yaml form name: chart type, diagram, composition, role or archetype."
           },
           "source": {
-            "anyOf": [
+            "oneOf": [
               {
                 "type": "object",
                 "properties": {

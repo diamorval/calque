@@ -1,0 +1,46 @@
+{
+  "pack_id": "diametral",
+  "language": "fr",
+  "title": "Revue de programme",
+  "slides": [
+    {"id": "cover", "message": "Revue trimestrielle du programme data", "message_type": "cover", "form": "cover",
+     "source": {"kind": "clone", "role": "cover", "values": {"26": "Le programme data\na tenu son cap.", "30": "REVUE DE PROGRAMME", "27": "DATA", "31": "10/2026"}}},
+    {"id": "swot", "message": "Les forces l'emportent, la dette technique freine", "message_type": "positioning", "form": "swot",
+     "source": {"kind": "clone", "role": "swot", "values": {
+       "21": "Des forces solides, une dette à résorber",
+       "5": "Forces", "6": "Équipe stable, sponsor engagé, trois cas en production.",
+       "8": "Faiblesses", "9": "Dette technique sur l'ingestion, documentation partielle.",
+       "11": "Opportunités", "12": "Deux métiers demandeurs, budget 2027 ouvert.",
+       "14": "Menaces", "15": "Départ prévu d'un expert clé au premier trimestre."}}},
+    {"id": "tiles", "message": "Six indicateurs suivis, quatre en progrès", "message_type": "quantity", "form": "metric_tiles",
+     "source": {"kind": "clone", "role": "metric_tiles", "values": {
+       "33": "Quatre indicateurs sur six progressent",
+       "5": "CAS EN PRODUCTION", "6": "3", "7": "▲ +2 vs. T2",
+       "9": "UTILISATEURS ACTIFS", "10": "412", "11": "▲ +38 % vs. T2",
+       "13": "DÉLAI DE MISE EN PROD", "14": "6 sem.", "15": "▼ −2 sem. vs. T2",
+       "17": "INCIDENTS", "18": "4", "19": "▲ +1 vs. T2",
+       "21": "COÛT PAR CAS", "22": "48 k€", "23": "▼ −12 % vs. T2",
+       "25": "SATISFACTION", "26": "7,9", "27": "▲ +0,4 vs. T2"}}},
+    {"id": "rows", "message": "Cinq chantiers pour le prochain trimestre", "message_type": "process", "form": "numbered_steps",
+     "source": {"kind": "clone", "slide": 54, "values": {
+       "3": "Cinq chantiers pour le\nprochain trimestre",
+       "764": "Ingestion", "763": "Refondre le pipeline d'ingestion et supprimer les reprises manuelles.",
+       "768": "Documentation", "767": "Documenter les trois cas en production pour sécuriser la relève.",
+       "772": "Relève", "771": "Former deux profils internes avant le départ de l'expert.",
+       "776": "Nouveaux cas", "775": "Cadrer les deux demandes métiers et chiffrer leur valeur.",
+       "780": "Budget", "779": "Présenter le budget 2027 au comité de direction."}}},
+    {"id": "kanban", "message": "Où en sont les chantiers", "message_type": "process", "form": "kanban",
+     "source": {"kind": "clone", "role": "kanban", "values": {
+       "30": "Deux chantiers livrés, trois en cours",
+       "5": "À faire", "13": "En cours", "19": "Fait",
+       "7": "Budget 2027", "9": "Nouveaux cas", "11": null, "10": null,
+       "15": "Ingestion", "17": "Relève",
+       "21": "Documentation", "23": "Tableau de bord"}}},
+    {"id": "gantt", "message": "Le calendrier tient en six semaines", "message_type": "sequence", "form": "gantt",
+     "source": {"kind": "clone", "role": "gantt", "values": {
+       "2": "Le calendrier tient\nen six semaines",
+       "1175": "S1", "1176": "S2", "1177": "S3", "1178": "S4", "1179": "S5", "1180": "S6",
+       "1188": "Ingestion", "1189": "Documentation", "1190": "Relève", "1191": "Nouveaux cas", "1192": "Budget"}}},
+    {"id": "closing", "message": "Fin", "message_type": "closing", "form": "closing", "source": {"kind": "clone", "role": "closing"}}
+  ]
+}

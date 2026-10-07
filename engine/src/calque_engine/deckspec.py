@@ -65,6 +65,19 @@ def _validator() -> Draft202012Validator:
     return Draft202012Validator(schema)
 
 
+def _pick(e):
+    """Descend a union error: drop branches whose discriminator (a const) failed, keep the
+    deepest error, so the message names the field that is actually wrong."""
+    if e.validator not in ("anyOf", "oneOf") or not e.context:
+        return e
+    branches: dict[Any, list] = {}
+    for c in e.context:
+        branches.setdefault(c.relative_schema_path[0], []).append(c)
+    live = [cs for cs in branches.values() if not any(c.validator == "const" for c in cs)]
+    pool = [c for cs in (live or list(branches.values())) for c in cs]
+    return _pick(max(pool, key=lambda c: len(c.absolute_path)))
+
+
 def schema_issues(data: Any) -> list[Issue]:
     out = []
     for e in sorted(_validator().iter_errors(data), key=lambda e: list(e.path)):
@@ -75,12 +88,9 @@ def schema_issues(data: Any) -> list[Issue]:
                 slide = data["slides"][path[1]].get("id") or f"#{path[1] + 1}"
             except (KeyError, IndexError, TypeError, AttributeError):
                 slide = f"#{path[1] + 1}"
-        where = "/".join(str(p) for p in path) or "(root)"
-        msg = e.message
-        if e.validator in ("anyOf", "oneOf"):
-            # the union error is useless; name the variant that came closest
-            best = min(e.context or [e], key=lambda c: len(list(c.absolute_path)) * -1)
-            msg = best.message
+        best = _pick(e)
+        where = "/".join(map(str, best.absolute_path)) or "(root)"
+        msg = best.message
         out.append(Issue("ERROR", slide, f"{where}: {msg}"))
     return out
 

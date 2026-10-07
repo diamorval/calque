@@ -1,0 +1,17 @@
+{
+  "pack_id": "neutral",
+  "language": "en",
+  "title": "Quarterly review",
+  "slides": [
+    {
+      "id": "a",
+      "message": "Slide a says one thing.",
+      "message_type": "narrative",
+      "form": "content",
+      "source": {
+        "kind": "clone",
+        "slide": 9
+      }
+    }
+  ]
+}

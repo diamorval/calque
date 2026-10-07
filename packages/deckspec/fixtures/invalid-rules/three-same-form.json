@@ -1,0 +1,37 @@
+{
+  "pack_id": "neutral",
+  "language": "en",
+  "title": "Quarterly review",
+  "slides": [
+    {
+      "id": "a",
+      "message": "Slide a says one thing.",
+      "message_type": "narrative",
+      "form": "content",
+      "source": {
+        "kind": "clone",
+        "role": "content"
+      }
+    },
+    {
+      "id": "b",
+      "message": "Slide b says one thing.",
+      "message_type": "narrative",
+      "form": "content",
+      "source": {
+        "kind": "clone",
+        "role": "content"
+      }
+    },
+    {
+      "id": "c",
+      "message": "Slide c says one thing.",
+      "message_type": "narrative",
+      "form": "content",
+      "source": {
+        "kind": "clone",
+        "role": "content"
+      }
+    }
+  ]
+}

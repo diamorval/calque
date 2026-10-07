@@ -1,0 +1,64 @@
+{
+  "pack_id": "neutral",
+  "language": "en",
+  "title": "Quarterly review",
+  "base": "imported.pptx",
+  "slides": [
+    {
+      "id": "i1",
+      "message": "Slide i1 says one thing.",
+      "message_type": "imported",
+      "form": "imported",
+      "source": {
+        "kind": "clone",
+        "slide": 1,
+        "from": "base"
+      }
+    },
+    {
+      "id": "i2",
+      "message": "Slide i2 says one thing.",
+      "message_type": "imported",
+      "form": "imported",
+      "source": {
+        "kind": "clone",
+        "slide": 2,
+        "from": "base"
+      }
+    },
+    {
+      "id": "i3",
+      "message": "Slide i3 says one thing.",
+      "message_type": "imported",
+      "form": "imported",
+      "source": {
+        "kind": "clone",
+        "slide": 3,
+        "from": "base"
+      }
+    },
+    {
+      "id": "i4",
+      "message": "Slide i4 says one thing.",
+      "message_type": "imported",
+      "form": "imported",
+      "source": {
+        "kind": "clone",
+        "slide": 4,
+        "from": "base"
+      }
+    },
+    {
+      "id": "new",
+      "message": "Slide new says one thing.",
+      "message_type": "narrative",
+      "form": "content",
+      "source": {
+        "kind": "clone",
+        "role": "content"
+      },
+      "eyebrow": "Added",
+      "notes": "A reworked slide."
+    }
+  ]
+}

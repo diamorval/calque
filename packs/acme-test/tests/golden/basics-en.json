@@ -1,0 +1,26 @@
+{
+  "pack_id": "acme-test",
+  "language": "en",
+  "title": "Quarterly review",
+  "slides": [
+    {"id": "cover", "message": "Quarterly review", "message_type": "cover", "form": "cover",
+     "source": {"kind": "clone", "role": "cover", "values": {"2": "Sales grew where we invested", "3": "Q3 2026 review"}}},
+    {"id": "d1", "message": "Results", "message_type": "divider", "form": "divider",
+     "source": {"kind": "clone", "role": "divider", "values": {"2": "Results", "3": "What moved this quarter"}}},
+    {"id": "regions", "message": "The north region led growth", "message_type": "ranking", "form": "bar_horizontal",
+     "title": "The north region led growth",
+     "source": {"kind": "chart", "type": "bar_horizontal", "params": {"categories": ["North", "South", "East", "West"], "series": [{"name": "Growth", "values": [18, 7, 5, 3]}], "highlight": 0, "unit": "%"}}},
+    {"id": "process", "message": "Deals close in four steps", "message_type": "process", "form": "flow",
+     "title": "Deals close in four steps",
+     "source": {"kind": "diagram", "id": "flow", "params": {"steps": ["Lead", "Qualify", {"label": "Proposal", "sublabel": "2 weeks"}, "Close"], "active": 2}}},
+    {"id": "mix", "message": "Two products make most of revenue", "message_type": "share", "form": "chart_takeaway",
+     "title": "Two products make most of revenue",
+     "source": {"kind": "composition", "id": "chart_takeaway", "params": {"chart_type": "doughnut", "chart": {"categories": ["Core", "Plus", "Services", "Other"], "series": [{"name": "Revenue", "values": [52, 31, 12, 5]}], "highlight": 0},
+       "takeaway": {"label": "TAKEAWAY", "lines": ["Core and Plus make 83% of revenue."]}}}},
+    {"id": "plan", "message": "Option B is the plan", "message_type": "tradeoff", "form": "comparison_table",
+     "title": "Option B is the plan",
+     "source": {"kind": "composition", "id": "comparison_table", "params": {"header": ["Option", "Cost", "Time"], "rows": [["A", "$40k", "1 month"], ["B", "$120k", "3 months"]], "recommend": {"row": 2}}}},
+    {"id": "end", "message": "Contact", "message_type": "closing", "form": "closing",
+     "source": {"kind": "clone", "role": "closing", "values": {"2": "Contact", "3": "Jane DOE, jane@example.com"}}}
+  ]
+}

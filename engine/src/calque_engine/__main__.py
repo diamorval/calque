@@ -43,6 +43,31 @@ def cmd_validate(a) -> int:
     return 0
 
 
+def cmd_call(a) -> int:
+    from .api import call
+
+    result = call(json.load(sys.stdin))
+    json.dump(result, sys.stdout, ensure_ascii=False)
+    sys.stdout.write("\n")
+    return 0 if result["ok"] else 1
+
+
+def cmd_build(a) -> int:
+    from .api import call
+
+    deck = json.loads(Path(a.deck).read_text(encoding="utf-8"))
+    r = call({"op": "build", "pack": a.pack, "deck": deck, "out": a.out, "base": a.base})
+    if not r["ok"]:
+        print(r["message"], file=sys.stderr)
+        return 1
+    for h in r["holes"]:
+        print(f"hole [{h['slide']}] shape {h['shape_id']}: {h['was']!r}")
+    for w in r["warnings"]:
+        print(f"WARN [{w['slide']}] {w['message']}")
+    print(f"{len(r['slides'])} slides -> {r['path']}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="calque_engine")
     sub = p.add_subparsers(required=True)
@@ -54,6 +79,23 @@ def main(argv: list[str] | None = None) -> int:
     v = sub.add_parser("validate-pack", help="load a pack and list every problem")
     v.add_argument("pack")
     v.set_defaults(fn=cmd_validate)
+    li = sub.add_parser("lint", help="lint a PPTX against a pack")
+    li.add_argument("pptx")
+    li.add_argument("--pack", required=True)
+    li.add_argument("--language")
+    li.set_defaults(
+        fn=lambda a: __import__("calque_engine.lint", fromlist=["main_lint"]).main_lint(
+            a.pptx, a.pack, a.language
+        )
+    )
+    c = sub.add_parser("call", help="JSON request on stdin -> JSON response on stdout")
+    c.set_defaults(fn=cmd_call)
+    b = sub.add_parser("build", help="DeckSpec JSON -> PPTX")
+    b.add_argument("deck")
+    b.add_argument("--pack", required=True)
+    b.add_argument("--out", required=True)
+    b.add_argument("--base", help="imported deck the DeckSpec edits")
+    b.set_defaults(fn=cmd_build)
     a = p.parse_args(argv)
     return a.fn(a)
 

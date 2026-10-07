@@ -56,7 +56,7 @@ def theme(prs) -> dict[str, Any]:
     return {"colors": colors, "fonts": fonts}
 
 
-def _kind(sh) -> str:
+def shape_kind(sh) -> str:
     st = sh.shape_type
     if st == MSO_SHAPE_TYPE.GROUP:
         return "group"
@@ -89,7 +89,7 @@ def capacity(width_in: float, height_in: float, size_pt: float) -> dict[str, int
     return {"chars_per_line": chars, "lines": lines}
 
 
-def _is_page_number(sh, w_in: float, h_in: float) -> bool:
+def is_page_number(sh, w_in: float, h_in: float) -> bool:
     if not sh.has_text_frame:
         return False
     if sh.element.find(".//a:fld[@type='slidenum']", NS) is not None:
@@ -105,7 +105,7 @@ def _is_page_number(sh, w_in: float, h_in: float) -> bool:
 def _shape(sh, w_in: float, h_in: float) -> dict[str, Any]:
     out: dict[str, Any] = {
         "id": sh.shape_id,
-        "kind": _kind(sh),
+        "kind": shape_kind(sh),
         "bbox": [_in(sh.left), _in(sh.top), _in(sh.width), _in(sh.height)],
     }
     if out["kind"] == "text":
@@ -131,7 +131,7 @@ def extract(template: str | Path, previous: dict[str, Any] | None = None) -> dic
     slides = []
     for i, slide in enumerate(prs.slides, start=1):
         entry: dict[str, Any] = {"number": i, "layout": slide.slide_layout.name}
-        page = [sh.shape_id for sh in slide.shapes if _is_page_number(sh, w_in, h_in)]
+        page = [sh.shape_id for sh in slide.shapes if is_page_number(sh, w_in, h_in)]
         entry["page_number"] = page[0] if page else None
         entry["shapes"] = [_shape(sh, w_in, h_in) for sh in slide.shapes]
         for key in REVIEWED_SLIDE_KEYS:

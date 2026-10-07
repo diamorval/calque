@@ -74,7 +74,7 @@ At most one element per slide may use: `role.color.highlight`.
 - Canvas 10 × 5.62 in. Margin 0.2 in.
 - Columns: 3-up at x = 0.2 / 3.41 / 6.63 in; 4-up at x = 0.2 / 2.61 / 5 / 7.43 in.
 - Title box L0.36 T0.18 W6.63 H0.85, one line of at most 48 characters.
-- Body band from T1.5 in; nothing below the footer line at T5.31 in.
+- Body band from T1.5 in; nothing below the footer line at T5.1 in.
 
 ## Depth & Elevation
 Flat: no shadows, no 3D, no gradients unless the template carries them.

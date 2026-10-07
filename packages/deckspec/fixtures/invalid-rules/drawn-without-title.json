@@ -1,0 +1,30 @@
+{
+  "pack_id": "neutral",
+  "language": "en",
+  "title": "Quarterly review",
+  "slides": [
+    {
+      "id": "f",
+      "message": "Slide f says one thing.",
+      "message_type": "process",
+      "form": "flow",
+      "source": {
+        "kind": "diagram",
+        "id": "flow",
+        "params": {
+          "steps": [
+            "Plan",
+            {
+              "label": "Build",
+              "sublabel": "two sprints",
+              "icon": "hammer"
+            },
+            "Ship"
+          ],
+          "active": 1,
+          "numbered": true
+        }
+      }
+    }
+  ]
+}

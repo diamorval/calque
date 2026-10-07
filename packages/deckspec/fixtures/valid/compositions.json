@@ -1,0 +1,270 @@
+{
+  "pack_id": "neutral",
+  "language": "en",
+  "title": "Quarterly review",
+  "slides": [
+    {
+      "id": "k-chart",
+      "message": "Slide k-chart says one thing.",
+      "message_type": "quantity",
+      "form": "chart_takeaway",
+      "source": {
+        "kind": "composition",
+        "id": "chart_takeaway",
+        "params": {
+          "chart_type": "bar",
+          "chart": {
+            "categories": [
+              "Q1",
+              "Q2",
+              "Q3"
+            ],
+            "series": [
+              {
+                "name": "Revenue",
+                "values": [
+                  1,
+                  2,
+                  3
+                ]
+              }
+            ]
+          },
+          "takeaway": {
+            "label": "So what",
+            "lines": [
+              "Growth doubles"
+            ]
+          },
+          "split": "2/1"
+        }
+      },
+      "facts": [
+        {
+          "label": "Q1",
+          "value": 1,
+          "unit": "M€"
+        },
+        {
+          "label": "Q2",
+          "value": 2,
+          "unit": "M€"
+        },
+        {
+          "label": "Q3",
+          "value": 3,
+          "unit": "M€"
+        }
+      ],
+      "title": "The verdict, stated."
+    },
+    {
+      "id": "k-flow",
+      "message": "Slide k-flow says one thing.",
+      "message_type": "process",
+      "form": "flow_detail",
+      "source": {
+        "kind": "composition",
+        "id": "flow_detail",
+        "params": {
+          "steps": [
+            "a",
+            "b",
+            "c"
+          ],
+          "active": 1,
+          "detail": {
+            "lines": [
+              "why b matters"
+            ]
+          },
+          "orientation": "vertical"
+        }
+      },
+      "title": "The verdict, stated."
+    },
+    {
+      "id": "k-matrix",
+      "message": "Slide k-matrix says one thing.",
+      "message_type": "positioning",
+      "form": "matrix_2x2",
+      "source": {
+        "kind": "composition",
+        "id": "matrix_2x2",
+        "params": {
+          "x_axis": [
+            "low",
+            "high"
+          ],
+          "y_axis": [
+            "low",
+            "high"
+          ],
+          "quadrants": [
+            "a",
+            "b",
+            "c",
+            "d"
+          ],
+          "items": [
+            {
+              "label": "Us",
+              "x": 0.8,
+              "y": 0.8
+            }
+          ]
+        }
+      },
+      "title": "The verdict, stated."
+    },
+    {
+      "id": "k-kpi",
+      "message": "Slide k-kpi says one thing.",
+      "message_type": "trend",
+      "form": "kpi_sparkband",
+      "source": {
+        "kind": "composition",
+        "id": "kpi_sparkband",
+        "params": {
+          "figures": [
+            {
+              "value": "12",
+              "label": "a"
+            },
+            {
+              "value": "34",
+              "label": "b"
+            },
+            {
+              "value": "56",
+              "label": "c"
+            }
+          ],
+          "trend": {
+            "categories": [
+              "Jan",
+              "Feb"
+            ],
+            "values": [
+              1,
+              2
+            ]
+          }
+        }
+      },
+      "facts": [
+        {
+          "label": "a",
+          "value": 12,
+          "unit": "%"
+        },
+        {
+          "label": "b",
+          "value": 34,
+          "unit": "%"
+        },
+        {
+          "label": "c",
+          "value": 56,
+          "unit": "%"
+        }
+      ],
+      "title": "The verdict, stated."
+    },
+    {
+      "id": "k-layers",
+      "message": "Slide k-layers says one thing.",
+      "message_type": "system",
+      "form": "layers_rail",
+      "source": {
+        "kind": "composition",
+        "id": "layers_rail",
+        "params": {
+          "layers": [
+            "a",
+            "b",
+            "c"
+          ],
+          "active": 2,
+          "annotations": [
+            {
+              "layer": 0,
+              "icon": "lock",
+              "text": "secured"
+            }
+          ]
+        }
+      },
+      "title": "The verdict, stated."
+    },
+    {
+      "id": "k-table",
+      "message": "Slide k-table says one thing.",
+      "message_type": "catalogue",
+      "form": "comparison_table",
+      "source": {
+        "kind": "composition",
+        "id": "comparison_table",
+        "params": {
+          "header": [
+            "Option",
+            "Cost"
+          ],
+          "rows": [
+            [
+              "A",
+              "1"
+            ],
+            [
+              "B",
+              "2"
+            ]
+          ],
+          "col_weights": [
+            2,
+            1
+          ],
+          "align": [
+            "left",
+            "right"
+          ],
+          "recommend": {
+            "row": 0
+          }
+        }
+      },
+      "title": "The verdict, stated."
+    },
+    {
+      "id": "k-funnel",
+      "message": "Slide k-funnel says one thing.",
+      "message_type": "conversion",
+      "form": "funnel_rail",
+      "source": {
+        "kind": "composition",
+        "id": "funnel_rail",
+        "params": {
+          "stages": [
+            {
+              "label": "Leads",
+              "value": 100
+            },
+            {
+              "label": "Deals",
+              "value": 5
+            }
+          ],
+          "conversions": [
+            "5%"
+          ],
+          "rail": {
+            "lines": [
+              "one in twenty"
+            ]
+          }
+        }
+      },
+      "title": "The verdict, stated."
+    }
+  ]
+}

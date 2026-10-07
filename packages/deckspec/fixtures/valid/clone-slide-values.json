@@ -1,0 +1,65 @@
+{
+  "pack_id": "neutral",
+  "language": "en",
+  "title": "Quarterly review",
+  "slides": [
+    {
+      "id": "s1",
+      "message": "Slide s1 says one thing.",
+      "message_type": "narrative",
+      "form": "content",
+      "source": {
+        "kind": "clone",
+        "slide": 2,
+        "from": "template",
+        "values": {
+          "2": "A plain paragraph\nwith a line break",
+          "3": [
+            "first paragraph",
+            "second paragraph"
+          ]
+        }
+      }
+    },
+    {
+      "id": "s2",
+      "message": "Slide s2 says one thing.",
+      "message_type": "narrative",
+      "form": "content",
+      "source": {
+        "kind": "clone",
+        "slide": 2,
+        "values": {
+          "2": {
+            "text": "Styled",
+            "color": "accent",
+            "bold": true,
+            "size": 28,
+            "fit": true
+          },
+          "3": null
+        }
+      }
+    },
+    {
+      "id": "s3",
+      "message": "Slide s3 says one thing.",
+      "message_type": "closing",
+      "form": "closing",
+      "source": {
+        "kind": "clone",
+        "slide": 3,
+        "values": {
+          "2": {
+            "text": [
+              "a",
+              "b"
+            ],
+            "size": "body",
+            "width_frac": 0.5
+          }
+        }
+      }
+    }
+  ]
+}

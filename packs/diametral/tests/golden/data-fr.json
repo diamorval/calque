@@ -1,0 +1,461 @@
+{
+  "pack_id": "diametral",
+  "language": "fr",
+  "title": "Diagnostic data",
+  "slides": [
+    {
+      "id": "cover",
+      "message": "Diagnostic de la relation client",
+      "message_type": "cover",
+      "form": "cover",
+      "source": {
+        "kind": "clone",
+        "role": "cover",
+        "values": {
+          "26": "La relation client\nse joue au premier mois.",
+          "30": "DIAGNOSTIC",
+          "27": "CRM",
+          "31": "10/2026"
+        }
+      }
+    },
+    {
+      "id": "churn",
+      "message": "Le premier mois concentre l'attrition",
+      "message_type": "quantity",
+      "form": "chart_takeaway",
+      "title": "Le premier mois concentre l'attrition",
+      "eyebrow": "01 · CONSTAT",
+      "facts": [
+        {
+          "label": "M1",
+          "value": 41,
+          "unit": "%"
+        },
+        {
+          "label": "M2",
+          "value": 18,
+          "unit": "%"
+        },
+        {
+          "label": "M3",
+          "value": 9,
+          "unit": "%"
+        }
+      ],
+      "source": {
+        "kind": "composition",
+        "id": "chart_takeaway",
+        "params": {
+          "chart_type": "bar",
+          "chart": {
+            "categories": [
+              "M1",
+              "M2",
+              "M3",
+              "M4",
+              "M5",
+              "M6"
+            ],
+            "series": [
+              {
+                "name": "Attrition",
+                "values": [
+                  41,
+                  18,
+                  9,
+                  7,
+                  6,
+                  5
+                ]
+              }
+            ],
+            "highlight": 0,
+            "unit": " %"
+          },
+          "takeaway": {
+            "label": "LE MOIS CRITIQUE",
+            "lines": [
+              "41 % des départs ont lieu le premier mois.",
+              "Après le troisième mois, l'attrition se stabilise."
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "trend",
+      "message": "Le volume d'appels baisse depuis la refonte",
+      "message_type": "trend",
+      "form": "line",
+      "title": "Les appels baissent depuis la refonte",
+      "source": {
+        "kind": "chart",
+        "type": "line",
+        "params": {
+          "categories": [
+            "Jan",
+            "Fév",
+            "Mar",
+            "Avr",
+            "Mai",
+            "Juin"
+          ],
+          "series": [
+            {
+              "name": "2025",
+              "values": [
+                120,
+                118,
+                121,
+                119,
+                122,
+                120
+              ]
+            },
+            {
+              "name": "2026",
+              "values": [
+                121,
+                117,
+                104,
+                96,
+                91,
+                88
+              ]
+            }
+          ],
+          "highlight_series": 1
+        }
+      }
+    },
+    {
+      "id": "onboarding",
+      "message": "L'accueil se fait en quatre étapes, la deuxième casse",
+      "message_type": "process",
+      "form": "flow_detail",
+      "title": "L'accueil casse à la deuxième étape",
+      "source": {
+        "kind": "composition",
+        "id": "flow_detail",
+        "params": {
+          "steps": [
+            {
+              "label": "Souscription",
+              "sublabel": "J0"
+            },
+            {
+              "label": "Activation",
+              "sublabel": "J1 à J7"
+            },
+            {
+              "label": "Premier usage",
+              "sublabel": "J7 à J30"
+            },
+            {
+              "label": "Fidélisation",
+              "sublabel": "M2 et après"
+            }
+          ],
+          "active": 1,
+          "detail": {
+            "label": "ACTIVATION",
+            "lines": [
+              "Un client sur trois n'active pas son compte.",
+              "Aucune relance n'est prévue avant J30."
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "kpis",
+      "message": "Trois indicateurs suffisent à piloter",
+      "message_type": "trend",
+      "form": "kpi_sparkband",
+      "title": "Trois indicateurs suffisent à piloter",
+      "source": {
+        "kind": "composition",
+        "id": "kpi_sparkband",
+        "params": {
+          "figures": [
+            {
+              "value": "41 %",
+              "label": "attrition à M1"
+            },
+            {
+              "value": "3,2 j",
+              "label": "délai d'activation"
+            },
+            {
+              "value": "88",
+              "label": "appels par jour"
+            }
+          ],
+          "trend": {
+            "categories": [
+              "Jan",
+              "Fév",
+              "Mar",
+              "Avr",
+              "Mai",
+              "Juin"
+            ],
+            "values": [
+              121,
+              117,
+              104,
+              96,
+              91,
+              88
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "options",
+      "message": "L'option B équilibre coût et délai",
+      "message_type": "ranking",
+      "form": "comparison_table",
+      "title": "L'option B équilibre coût et délai",
+      "source": {
+        "kind": "composition",
+        "id": "comparison_table",
+        "params": {
+          "header": [
+            "Option",
+            "Coût",
+            "Délai",
+            "Risque"
+          ],
+          "rows": [
+            [
+              "A. Relance manuelle",
+              "40 k€",
+              "1 mois",
+              "Élevé"
+            ],
+            [
+              "B. Parcours automatisé",
+              "120 k€",
+              "3 mois",
+              "Faible"
+            ],
+            [
+              "C. Refonte complète",
+              "450 k€",
+              "9 mois",
+              "Moyen"
+            ]
+          ],
+          "col_weights": [
+            3,
+            1,
+            1,
+            1
+          ],
+          "align": [
+            "left",
+            "right",
+            "right",
+            "left"
+          ],
+          "recommend": {
+            "row": 2
+          }
+        }
+      }
+    },
+    {
+      "id": "matrix",
+      "message": "Deux segments méritent l'effort",
+      "message_type": "positioning",
+      "form": "matrix_2x2",
+      "title": "Deux segments méritent l'effort",
+      "source": {
+        "kind": "composition",
+        "id": "matrix_2x2",
+        "params": {
+          "x_axis": [
+            "Effort faible",
+            "Effort élevé"
+          ],
+          "y_axis": [
+            "Valeur faible",
+            "Valeur élevée"
+          ],
+          "quadrants": [
+            "À LANCER",
+            "À PLANIFIER",
+            "À AUTOMATISER",
+            "À ÉVITER"
+          ],
+          "items": [
+            {
+              "label": "Jeunes actifs",
+              "x": 0.25,
+              "y": 0.8
+            },
+            {
+              "label": "Familles",
+              "x": 0.7,
+              "y": 0.75
+            },
+            {
+              "label": "Seniors",
+              "x": 0.35,
+              "y": 0.3
+            },
+            {
+              "label": "Entreprises",
+              "x": 0.8,
+              "y": 0.2
+            }
+          ],
+          "active": 0
+        }
+      }
+    },
+    {
+      "id": "funnel",
+      "message": "La conversion perd la moitié des prospects à l'essai",
+      "message_type": "conversion",
+      "form": "funnel_rail",
+      "title": "L'essai perd la moitié des prospects",
+      "source": {
+        "kind": "composition",
+        "id": "funnel_rail",
+        "params": {
+          "stages": [
+            {
+              "label": "Visites",
+              "value": 10000
+            },
+            {
+              "label": "Inscriptions",
+              "value": 2400
+            },
+            {
+              "label": "Essais",
+              "value": 1100
+            },
+            {
+              "label": "Clients",
+              "value": 520
+            }
+          ],
+          "conversions": [
+            "24 %",
+            "46 %",
+            "47 %"
+          ],
+          "active": 2,
+          "rail": {
+            "label": "ACTION",
+            "lines": [
+              "Un accompagnement à J3 de l'essai."
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "stack",
+      "message": "La donnée client tient en quatre couches",
+      "message_type": "system",
+      "form": "layers_rail",
+      "title": "La donnée client tient en quatre couches",
+      "source": {
+        "kind": "composition",
+        "id": "layers_rail",
+        "params": {
+          "layers": [
+            {
+              "label": "Canaux",
+              "sublabel": "Web, appli, agences"
+            },
+            {
+              "label": "Orchestration",
+              "sublabel": "Parcours et relances"
+            },
+            {
+              "label": "Référentiel client",
+              "sublabel": "Vue unique"
+            },
+            {
+              "label": "Sources",
+              "sublabel": "CRM, facturation, support"
+            }
+          ],
+          "active": 2,
+          "annotations": [
+            {
+              "layer": 2,
+              "icon": "database",
+              "text": "Le chantier prioritaire."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "loop",
+      "message": "Le pilotage tourne chaque mois",
+      "message_type": "loop",
+      "form": "cycle",
+      "title": "Le pilotage tourne chaque mois",
+      "source": {
+        "kind": "diagram",
+        "id": "cycle",
+        "params": {
+          "steps": [
+            "Mesurer",
+            "Analyser",
+            "Décider",
+            "Agir"
+          ],
+          "active": 2
+        }
+      }
+    },
+    {
+      "id": "change",
+      "message": "Le parcours passe du subi au piloté",
+      "message_type": "transformation",
+      "form": "before_after",
+      "title": "Du parcours subi au parcours piloté",
+      "source": {
+        "kind": "diagram",
+        "id": "before_after",
+        "params": {
+          "before": {
+            "title": "Aujourd'hui",
+            "lines": [
+              "Relances manuelles",
+              "Aucun suivi d'activation"
+            ]
+          },
+          "after": {
+            "title": "Demain",
+            "lines": [
+              "Relances automatiques à J3",
+              "Activation suivie chaque semaine"
+            ]
+          },
+          "arrow_label": "3 mois"
+        }
+      }
+    },
+    {
+      "id": "closing",
+      "message": "Fin",
+      "message_type": "closing",
+      "form": "closing",
+      "source": {
+        "kind": "clone",
+        "role": "closing"
+      }
+    }
+  ]
+}
