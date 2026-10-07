@@ -1,0 +1,93 @@
+# Machine-readable half of doctrine.md "Message type -> allowed forms". The engine validates every
+# DeckSpec slide against it. Archetype names are the conventional ones; a pack declares which of
+# them it has under roles.archetypes.
+
+# form -> the DeckSpec source kind that produces it
+forms:
+  # charts (native, editable)
+  line: chart
+  bar: chart
+  bar_horizontal: chart
+  doughnut: chart
+  scatter: chart
+  # diagrams (native shapes)
+  flow: diagram
+  swimlane: diagram
+  layers: diagram
+  hub: diagram
+  matrix2x2: diagram
+  funnel: diagram
+  cycle: diagram
+  before_after: diagram
+  # compositions (core/compositions.md)
+  chart_takeaway: composition
+  flow_detail: composition
+  matrix_2x2: composition
+  kpi_sparkband: composition
+  layers_rail: composition
+  comparison_table: composition
+  funnel_rail: composition
+  # pack roles (signature slides)
+  cover: clone
+  summary: clone
+  divider: clone
+  subsection: clone
+  closing: clone
+  appendix: clone
+  content: clone
+  # conventional archetypes
+  text_well: clone
+  image_split: clone
+  statement: clone
+  cards: clone
+  numbered_steps: clone
+  quote: clone
+  key_figure: clone
+  key_figures: clone
+  metric_tiles: clone
+  swot: clone
+  icon_cards: clone
+  keyword_cloud: clone
+  comparison_matrix: clone
+  journey_map: clone
+  domains_capabilities: clone
+  value_chain: clone
+  pros_cons: clone
+  pricing: clone
+  gantt: clone
+  timeline: clone
+  kanban: clone
+  okr: clone
+  action_table: clone
+  table: clone
+  org_chart: clone
+  image_grid: clone
+  end_card: clone
+
+# message type -> forms allowed for it
+message_types:
+  quantity: [bar, bar_horizontal, line, doughnut, scatter, chart_takeaway, key_figure, key_figures, kpi_sparkband, metric_tiles, table]
+  share: [doughnut, bar, bar_horizontal, chart_takeaway, key_figures]
+  trend: [line, bar, chart_takeaway, kpi_sparkband]
+  ranking: [bar_horizontal, bar, chart_takeaway, comparison_table]
+  process: [flow, swimlane, flow_detail, numbered_steps, cards, value_chain, journey_map, kanban]
+  sequence: [timeline, gantt, flow, numbered_steps]
+  system: [layers, hub, layers_rail, domains_capabilities, org_chart]
+  positioning: [matrix2x2, matrix_2x2, swot, comparison_matrix, comparison_table, pros_cons]
+  tradeoff: [pros_cons, comparison_matrix, comparison_table, matrix2x2, matrix_2x2]
+  conversion: [funnel, funnel_rail, chart_takeaway]
+  loop: [cycle]
+  transformation: [before_after]
+  proof: [key_figure, image_split, quote, statement]
+  catalogue: [cards, icon_cards, comparison_table, comparison_matrix, keyword_cloud, image_grid, action_table, okr]
+  pricing: [pricing, comparison_table]
+  narrative: [text_well, image_split, statement, content]
+  # signature slides: one form each
+  cover: [cover]
+  summary: [summary]
+  divider: [divider, subsection]
+  closing: [closing, end_card]
+  appendix: [appendix]
+
+# forms the "no 3 consecutive slides of the same form" rule ignores
+signature_forms: [cover, summary, divider, subsection, closing, appendix, end_card]

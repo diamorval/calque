@@ -78,6 +78,7 @@ lint:
     - OTHER
     - LABEL
     - XX
+    - xx’
     - Week 1
     - Phase 1
   # Charter typography and tone-of-voice. The middle-dot ban is left out: the eyebrow grammar

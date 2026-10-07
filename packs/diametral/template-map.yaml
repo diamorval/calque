@@ -6,6 +6,8 @@ theme:
 slides:
 - number: 1
   layout: Empty background
+  description: Cover
+  slots: {title: 26, topic: 30, keyword: 27, date: 31}
   page_number: null
   shapes:
   - id: 15
@@ -80,6 +82,9 @@ slides:
     capacity: {chars_per_line: 10, lines: 1}
 - number: 2
   layout: Background yellow with logo
+  description: Summary, 4 chapters
+  slots: {title: 36, ch1_number: 55, ch2_number: 56, ch3_number: 57, ch4_number: 58, ch1_title: 51, ch2_title: 52,
+    ch3_title: 53, ch4_title: 54}
   page_number: 3
   shapes:
   - id: 38
@@ -165,6 +170,9 @@ slides:
     text: '2'
 - number: 3
   layout: Background yellow with logo
+  description: Summary, 5 chapters + photo
+  slots: {title: 36, ch1_number: 11, ch2_number: 12, ch3_number: 13, ch4_number: 14, ch5_number: 9, ch1_title: 3,
+    ch2_title: 4, ch3_title: 5, ch4_title: 6, ch5_title: 8, image: 2}
   page_number: 7
   shapes:
   - id: 2
@@ -272,6 +280,8 @@ slides:
     text: '3'
 - number: 4
   layout: Empty background
+  description: Chapter dividers
+  slots: {question: 17, number: 19, subject: 16, chapter: 11, duration: 20, image: 2}
   page_number: 18
   shapes:
   - id: 2
@@ -348,6 +358,8 @@ slides:
     capacity: {chars_per_line: 79, lines: 1}
 - number: 5
   layout: Empty background
+  description: Chapter dividers
+  slots: {question: 17, number: 19, subject: 16, chapter: 12, duration: 20, image: 2}
   page_number: 14
   shapes:
   - id: 2
@@ -424,6 +436,8 @@ slides:
     text: '5'
 - number: 6
   layout: Empty background
+  description: Chapter dividers
+  slots: {question: 17, number: 19, subject: 16, chapter: 12, duration: 20, image: 2}
   page_number: 11
   shapes:
   - id: 2
@@ -500,6 +514,8 @@ slides:
     text: '6'
 - number: 7
   layout: Empty background
+  description: Chapter dividers
+  slots: {question: 17, number: 19, subject: 16, chapter: 12, duration: 20, image: 2}
   page_number: 14
   shapes:
   - id: 2
@@ -576,6 +592,8 @@ slides:
     text: '7'
 - number: 8
   layout: Empty background
+  description: Chapter dividers
+  slots: {question: 17, number: 19, subject: 16, chapter: 12, duration: 20, image: 2}
   page_number: 14
   shapes:
   - id: 2
@@ -652,6 +670,8 @@ slides:
     text: '8'
 - number: 9
   layout: Empty background
+  description: Chapter dividers
+  slots: {question: 17, number: 19, subject: 16, chapter: 12, duration: 20}
   page_number: 11
   shapes:
   - id: 4
@@ -725,6 +745,8 @@ slides:
     text: '9'
 - number: 10
   layout: 2_Title slide
+  description: Subsection divider
+  slots: {subject: 170, title: 157}
   page_number: 3
   shapes:
   - id: 159
@@ -758,6 +780,8 @@ slides:
     text: '10'
 - number: 11
   layout: 3_Title slide
+  description: Title + full text well
+  slots: {title: 3, body: 186}
   page_number: 4
   shapes:
   - id: 186
@@ -781,6 +805,8 @@ slides:
     text: '11'
 - number: 12
   layout: 3_Title slide
+  description: Title + full text well
+  slots: {title: 3, body: 186}
   page_number: 4
   shapes:
   - id: 186
@@ -804,6 +830,7 @@ slides:
     text: '12'
 - number: 13
   layout: 3_Title slide
+  description: Title + left-half text
   page_number: 12
   shapes:
   - id: 281
@@ -833,6 +860,7 @@ slides:
     text: '13'
 - number: 14
   layout: Empty background
+  description: Title + right-half text + full-bleed LEFT image
   page_number: 5
   shapes:
   - id: 325
@@ -877,6 +905,7 @@ slides:
     bbox: [0.0, 1.16, 10.0, 0.0]
 - number: 15
   layout: Empty background
+  description: Title + left-half text + full-bleed RIGHT image
   page_number: 12
   shapes:
   - id: 281
@@ -924,6 +953,7 @@ slides:
     bbox: [0.2, 5.21, 1.15, 0.22]
 - number: 16
   layout: 3_Title slide
+  description: Title + 2 stacked text blocks + image
   page_number: 7
   shapes:
   - id: 385
@@ -971,6 +1001,7 @@ slides:
     bbox: [0.0, 2.59, 10.0, 0.0]
 - number: 17
   layout: 3_Title slide
+  description: Centred statement + body + 2 corner images
   page_number: 3
   shapes:
   - id: 434
@@ -1017,6 +1048,7 @@ slides:
     bbox: [0.0, 3.17, 10.0, 0.0]
 - number: 18
   layout: 3_Title slide
+  description: 3 cards with icons
   page_number: 2
   shapes:
   - id: 503
@@ -1098,6 +1130,7 @@ slides:
     text: '18'
 - number: 19
   layout: 3_Title slide
+  description: 3 numbered cards
   page_number: 4
   shapes:
   - id: 587
@@ -1185,6 +1218,7 @@ slides:
     text: '19'
 - number: 20
   layout: 3_Title slide
+  description: 3 numbered cards
   page_number: 4
   shapes:
   - id: 587
@@ -1272,6 +1306,7 @@ slides:
     text: '20'
 - number: 21
   layout: Background yellow with logo
+  description: 4 numbered steps + full-width band photo
   page_number: 49
   shapes:
   - id: 3
@@ -1404,6 +1439,7 @@ slides:
     bbox: [7.43, 1.07, 0.0, 4.56]
 - number: 22
   layout: Background yellow with logo
+  description: 4 numbered steps + full-width band photo
   page_number: 11
   shapes:
   - id: 12
@@ -1545,6 +1581,7 @@ slides:
     text: '22'
 - number: 23
   layout: 3_Title slide
+  description: 4 numbered columns
   page_number: 2
   shapes:
   - id: 678
@@ -1647,6 +1684,7 @@ slides:
     text: '23'
 - number: 24
   layout: 2_Title slide
+  description: 4 numbered columns
   page_number: 2
   shapes:
   - id: 678
@@ -1749,6 +1787,7 @@ slides:
     text: '24'
 - number: 25
   layout: 6_Title slide
+  description: Pull quote + attribution
   page_number: 10
   shapes:
   - id: 3
@@ -1785,6 +1824,7 @@ slides:
     text: '25'
 - number: 26
   layout: Background yellow with logo
+  description: One key result
   page_number: 5
   shapes:
   - id: 2
@@ -1814,6 +1854,7 @@ slides:
     text: '26'
 - number: 27
   layout: 1_Title slide
+  description: One key result
   page_number: 5
   shapes:
   - id: 2
@@ -1843,6 +1884,7 @@ slides:
     text: '27'
 - number: 28
   layout: 2_Title slide
+  description: One key result
   page_number: 5
   shapes:
   - id: 2
@@ -1872,6 +1914,7 @@ slides:
     text: '28'
 - number: 29
   layout: Background yellow with logo
+  description: 3 key figures `XX` + LABEL
   page_number: 4
   shapes:
   - id: 866
@@ -1959,6 +2002,7 @@ slides:
     text: '29'
 - number: 30
   layout: Background yellow with logo
+  description: 4 key figures `XX %`
   page_number: 4
   shapes:
   - id: 944
@@ -2070,6 +2114,7 @@ slides:
     text: '30'
 - number: 31
   layout: 3_Title slide
+  description: 6 metric tiles
   page_number: 2
   shapes:
   - id: 4
@@ -2229,6 +2274,7 @@ slides:
     text: '31'
 - number: 32
   layout: 3_Title slide
+  description: SWOT 2×2
   page_number: 2
   shapes:
   - id: 4
@@ -2304,6 +2350,7 @@ slides:
     text: '32'
 - number: 33
   layout: 3_Title slide
+  description: 5 icon cards + portrait image
   page_number: 2
   shapes:
   - id: 19
@@ -2462,6 +2509,7 @@ slides:
     text: '33'
 - number: 34
   layout: 3_Title slide
+  description: 5 icon cards + portrait image
   page_number: 30
   shapes:
   - id: 3
@@ -2620,6 +2668,7 @@ slides:
     text: '34'
 - number: 35
   layout: 3_Title slide
+  description: Keyword cloud
   page_number: 3
   shapes:
   - id: 1134
@@ -2744,6 +2793,7 @@ slides:
     text: '35'
 - number: 36
   layout: 3_Title slide
+  description: Feature comparison matrix
   page_number: 2
   shapes:
   - id: 46
@@ -2940,6 +2990,7 @@ slides:
     text: '36'
 - number: 37
   layout: 3_Title slide
+  description: Journey map, 5 stages × 3 rows
   page_number: 2
   shapes:
   - id: 4
@@ -3179,6 +3230,7 @@ slides:
     text: '37'
 - number: 38
   layout: 3_Title slide
+  description: 3 domains × 4 capabilities
   page_number: 2
   shapes:
   - id: 4
@@ -3347,6 +3399,7 @@ slides:
     text: '38'
 - number: 39
   layout: 3_Title slide
+  description: Value chain
   page_number: 2
   shapes:
   - id: 4
@@ -3494,6 +3547,7 @@ slides:
     text: '39'
 - number: 40
   layout: 3_Title slide
+  description: Before / After
   page_number: 2
   shapes:
   - id: 4
@@ -3552,6 +3606,7 @@ slides:
     text: '40'
 - number: 41
   layout: 3_Title slide
+  description: Org chart
   page_number: 79
   shapes:
   - id: 18
@@ -3707,6 +3762,7 @@ slides:
     text: '41'
 - number: 42
   layout: 3_Title slide
+  description: 3 options with PROS / CONS
   page_number: 2
   shapes:
   - id: 4
@@ -3900,6 +3956,7 @@ slides:
     text: '42'
 - number: 43
   layout: 3_Title slide
+  description: Pricing, 3 plans
   page_number: 79
   shapes:
   - id: 33
@@ -4140,6 +4197,7 @@ slides:
     text: '43'
 - number: 44
   layout: Empty background
+  description: Stacked bar chart mock
   page_number: 47
   shapes:
   - id: 4
@@ -4276,6 +4334,7 @@ slides:
     bbox: [0.2, 5.21, 1.15, 0.22]
 - number: 45
   layout: 3_Title slide
+  description: Gantt
   page_number: 4
   shapes:
   - id: 1174
@@ -4376,6 +4435,7 @@ slides:
     text: '45'
 - number: 46
   layout: 3_Title slide
+  description: Timeline with descriptions
   page_number: 5
   shapes:
   - id: 1204
@@ -4506,6 +4566,7 @@ slides:
     text: '46'
 - number: 47
   layout: 3_Title slide
+  description: Year-step timelines
   page_number: 6
   shapes:
   - id: 1238
@@ -4578,6 +4639,7 @@ slides:
     text: '47'
 - number: 48
   layout: 3_Title slide
+  description: Year-step timelines
   page_number: 5
   shapes:
   - id: 1261
@@ -4664,6 +4726,7 @@ slides:
     text: '48'
 - number: 49
   layout: 3_Title slide
+  description: Year-step timelines
   page_number: 6
   shapes:
   - id: 1287
@@ -4779,6 +4842,7 @@ slides:
     bbox: [-0.0, 2.0, 10.0, 0.0]
 - number: 50
   layout: 3_Title slide
+  description: Kanban, 3 columns
   page_number: 2
   shapes:
   - id: 5
@@ -4888,6 +4952,7 @@ slides:
     text: '50'
 - number: 51
   layout: 3_Title slide
+  description: OKR
   page_number: 2
   shapes:
   - id: 4
@@ -5022,6 +5087,7 @@ slides:
     text: '51'
 - number: 52
   layout: 3_Title slide
+  description: Action table, 4 rows
   page_number: 2
   shapes:
   - id: 4
@@ -5201,6 +5267,7 @@ slides:
     text: '52'
 - number: 53
   layout: 3_Title slide
+  description: Real table
   page_number: 2
   shapes:
   - id: 31
@@ -5226,6 +5293,7 @@ slides:
     table: [8, 6]
 - number: 54
   layout: 3_Title slide
+  description: 5 numbered rows
   page_number: 5
   shapes:
   - id: 756
@@ -5367,6 +5435,7 @@ slides:
     text: '54'
 - number: 55
   layout: 3_Title slide
+  description: Pricing rows
   page_number: 4
   shapes:
   - id: 1035
@@ -5505,6 +5574,7 @@ slides:
     text: '55'
 - number: 56
   layout: 4_Title slide
+  description: 8-image grid
   page_number: 4
   shapes:
   - id: 3
@@ -5612,6 +5682,8 @@ slides:
     bbox: [0.01, 4.93, 10.0, 0.0]
 - number: 57
   layout: Empty background
+  description: Closing
+  slots: {closing: 1710}
   page_number: null
   shapes:
   - id: 1701
@@ -5658,6 +5730,8 @@ slides:
     bbox: [0.2, 3.62, 9.65, 1.82]
 - number: 58
   layout: 3_Title slide
+  description: Appendix divider
+  slots: {title: 149}
   page_number: 2
   shapes:
   - id: 136
@@ -5693,6 +5767,7 @@ slides:
     text: '58'
 - number: 59
   layout: 3_Title slide
+  description: palette reference (`MAIN PALETTE` / `SECONDARY PALETTE` swatches)
   page_number: 8
   shapes:
   - id: 2
@@ -5727,6 +5802,7 @@ slides:
     text: '59'
 - number: 60
   layout: 3_Title slide
+  description: the icon set and its source (`https://phosphoricons.com`)
   page_number: null
   shapes:
   - id: 3
@@ -5961,6 +6037,7 @@ slides:
     text: All elements here are fully editable (lines, text, logo), so you can adapt co...
 - number: 63
   layout: Background yellow with logo
+  description: alternative background styles
   page_number: 2
   shapes:
   - id: 5
@@ -5982,6 +6059,7 @@ slides:
     text: '63'
 - number: 64
   layout: 1_Title slide
+  description: the s19 card layout on a Kaki `AAB0A6` wash — the one **clonable** slide
   page_number: 4
   shapes:
   - id: 587
@@ -6069,6 +6147,7 @@ slides:
     text: '64'
 - number: 65
   layout: Blank
+  description: full-bleed Noir end card with the logo, no page number
   page_number: null
   shapes:
   - id: 7

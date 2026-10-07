@@ -27,7 +27,7 @@ THEME_SLOTS = (
     "hlink",
     "folHlink",
 )
-REVIEWED_SLIDE_KEYS = ("description", "slots", "notes")
+REVIEWED_SLIDE_KEYS = ("description", "slots", "fit", "notes")
 
 
 def _in(v: int | Emu | None) -> float:
@@ -45,7 +45,9 @@ def theme(prs) -> dict[str, Any]:
         if el is None or not len(el):
             continue
         c = el[0]
-        colors[slot] = (c.get("val") or c.get("lastClr") or "").upper()
+        # sysClr carries a system name in val; the resolved colour is lastClr
+        value = c.get("lastClr") if c.tag.endswith("}sysClr") else c.get("val")
+        colors[slot] = (value or "").upper()
     fonts = {}
     for key, tag in (("major", "majorFont"), ("minor", "minorFont")):
         latin = root.find(f".//a:fontScheme/a:{tag}/a:latin", NS)

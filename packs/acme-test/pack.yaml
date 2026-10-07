@@ -1,0 +1,25 @@
+id: acme-test
+name: Acme Test
+version: 0.1.0
+default_language: en
+missing_value: { en: "[TO COMPLETE]", fr: "[À COMPLÉTER]" }
+roles:
+  cover: [1]
+  divider: [2]
+  content: [3]
+  closing: [4]
+never_clone: []
+grid:
+  margin_in: 0.6
+  columns:
+    "3": [0.6, 4.7, 8.8]
+    "4": [0.6, 3.68, 6.76, 9.84]
+  gutter_in: 0.3
+  title: { left_in: 0.6, top_in: 0.35, width_in: 12.1, height_in: 1.0, max_chars: 60 }
+  body_top_in: 1.6
+  footer_top_in: 6.85
+  page_number: { left_in: 12.3, top_in: 6.95 }
+fonts:
+  fallback: { display: Calibri, body: Calibri, label: Calibri }
+lint:
+  placeholders: [Presentation title, Subtitle and date, Section title, Section subtitle, Slide title, Name SURNAME]

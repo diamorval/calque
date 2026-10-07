@@ -13,7 +13,8 @@
     "engine:test": "cd engine && uv run pytest",
     "engine:lint": "cd engine && uv run ruff check . && uv run ruff format --check .",
     "pack:sync": "node scripts/pack-sync.ts",
-    "design:check": "node scripts/design-check.ts"
+    "design:check": "node scripts/design-check.ts",
+    "design:write": "node scripts/design-write.ts"
   },
   "devDependencies": {
     "@calque/design": "workspace:*",

@@ -40,7 +40,12 @@ class Pack:
         return self.dir / "template.pptx"
 
     def color(self, role: str) -> str:
-        return tk.hex6(self.tokens[f"role.color.{role}"])
+        return self.color_at(f"role.color.{role}")
+
+    def color_at(self, path: str) -> str:
+        if path not in self.tokens:
+            raise KeyError(f"pack {self.id!r} has no colour token {path!r}")
+        return tk.hex6(self.tokens[path])
 
     def font(self, role: str) -> str:
         return tk.family(self.tokens[f"role.font.{role}"])

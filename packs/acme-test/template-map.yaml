@@ -1,0 +1,70 @@
+canvas: {width_in: 13.33, height_in: 7.5}
+theme:
+  colors: {dk1: '000000', lt1: FFFFFF, dk2: 1F497D, lt2: EEECE1, accent1: 4F81BD, accent2: C0504D, accent3: 9BBB59,
+    accent4: 8064A2, accent5: 4BACC6, accent6: F79646, hlink: 0000FF, folHlink: '800080'}
+  fonts: {major: Calibri, minor: Calibri}
+slides:
+- number: 1
+  layout: Title Slide
+  description: Cover
+  slots: {title: 2, subtitle: 3}
+  page_number: null
+  shapes:
+  - id: 2
+    kind: text
+    bbox: [0.8, 2.3, 11.7, 1.6]
+    text: Presentation title
+  - id: 3
+    kind: text
+    bbox: [0.8, 4.1, 11.7, 1.0]
+    text: Subtitle and date
+- number: 2
+  layout: Section Header
+  description: Section divider
+  slots: {title: 2, subtitle: 3}
+  page_number: 4
+  shapes:
+  - id: 2
+    kind: text
+    bbox: [0.8, 2.9, 11.7, 1.4]
+    text: Section title
+  - id: 3
+    kind: text
+    bbox: [0.8, 4.4, 11.7, 0.8]
+    text: Section subtitle
+  - id: 4
+    kind: text
+    bbox: [12.3, 6.95, 0.6, 0.3]
+    text: '2'
+    size: 10.0
+    capacity: {chars_per_line: 8, lines: 2}
+- number: 3
+  layout: Title Only
+  description: 'Title only: canvas for drawn slides'
+  slots: {title: 2}
+  page_number: 3
+  shapes:
+  - id: 2
+    kind: text
+    bbox: [0.6, 0.35, 12.1, 1.0]
+    text: Slide title
+  - id: 3
+    kind: text
+    bbox: [12.3, 6.95, 0.6, 0.3]
+    text: '3'
+    size: 10.0
+    capacity: {chars_per_line: 8, lines: 2}
+- number: 4
+  layout: Title Slide
+  description: 'Closing: contact'
+  slots: {title: 2, contact: 3}
+  page_number: null
+  shapes:
+  - id: 2
+    kind: text
+    bbox: [0.8, 2.3, 11.7, 1.6]
+    text: Contact
+  - id: 3
+    kind: text
+    bbox: [0.8, 4.1, 11.7, 1.0]
+    text: Name SURNAME, email

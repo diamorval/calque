@@ -24,6 +24,8 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+# l / t / w / h are the geometry convention in drawing code
+ignore = ["E741"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "../packs"]
