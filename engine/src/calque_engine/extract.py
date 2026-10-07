@@ -131,12 +131,12 @@ def extract(template: str | Path, previous: dict[str, Any] | None = None) -> dic
     slides = []
     for i, slide in enumerate(prs.slides, start=1):
         entry: dict[str, Any] = {"number": i, "layout": slide.slide_layout.name}
+        for key in REVIEWED_SLIDE_KEYS:  # reviewed keys first: what a reviewer reads
+            if key in prev.get(i, {}):
+                entry[key] = prev[i][key]
         page = [sh.shape_id for sh in slide.shapes if is_page_number(sh, w_in, h_in)]
         entry["page_number"] = page[0] if page else None
         entry["shapes"] = [_shape(sh, w_in, h_in) for sh in slide.shapes]
-        for key in REVIEWED_SLIDE_KEYS:
-            if key in prev.get(i, {}):
-                entry[key] = prev[i][key]
         slides.append(entry)
     return {
         "canvas": {"width_in": w_in, "height_in": h_in},
