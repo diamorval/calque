@@ -1,0 +1,36 @@
+# Where pack:sync takes this pack's files from. Pinned refs: a sync is reproducible.
+sources:
+  marketplace:
+    repo: DiametralGroup/diametral-plugins-marketplace
+    ref: 6702177941eb20af9a90979ee7c9fb454f98ee7e
+  design-system:
+    repo: DiametralGroup/design-system
+    ref: v5.0.0-beta.2
+
+copy:
+  - { to: template.pptx, from: marketplace:shared/slides/assets/template.pptx }
+  - to: voice.md
+    from:
+      - marketplace:shared/branding/voice-core.md
+      - marketplace:shared/branding/tone-of-voice.md
+      - marketplace:shared/branding/writing-rules.md
+  - { to: exemplar.md, from: marketplace:shared/slides/references/business-presentation-exemplar.md }
+  - { to: exemplar/, from: "marketplace:shared/slides/references/exemplar-*.jpg" }
+  - to: storyline.md
+    from:
+      - marketplace:plugins/business/skills/storyline-design/references/archetypes.md
+      - marketplace:plugins/business/skills/storyline-design/references/routing.md
+  - { to: icons/, from: "marketplace:shared/slides/assets/icons/*.png" }
+  - { to: fonts/, from: "marketplace:shared/branding/fonts/*.ttf" }
+  - { to: fonts/, from: "marketplace:shared/branding/fonts/*.otf" }
+  - { to: reference/template-map.md, from: marketplace:shared/slides/references/template-map.md }
+  - { to: reference/brand.md, from: marketplace:shared/slides/brand.md }
+  - { to: reference/business-presentation.pptx, from: marketplace:shared/slides/examples/business-presentation.pptx }
+
+tokens:
+  # Named-alias token file from the design system; only these groups become color.*.
+  import: design-system:tokens/tokens.json
+  groups: [tier1_primitives.brand_primary, tier1_primitives.brand_secondary]
+  prefix: color
+  # Hand-maintained roles, theme slots and slide scale, merged on top.
+  overlay: tokens.overlay.json

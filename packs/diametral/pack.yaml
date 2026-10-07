@@ -1,0 +1,118 @@
+id: diametral
+name: Diametral
+version: 0.1.0
+# No default: the deck language is asked every time (mirror the audience / source).
+default_language: null
+missing_value: { fr: "[À COMPLÉTER]", en: "[TO COMPLETE]", es: "[POR COMPLETAR]", pt: "[A COMPLETAR]" }
+
+roles:
+  cover: [1]
+  summary: [2, 3]
+  divider: [4, 5, 6, 7, 8, 9]
+  subsection: [10]
+  content: [11, 12]
+  closing: [57]
+  appendix: [58]
+  # Names follow core/doctrine.md; variants are told apart by their template-map description.
+  archetypes:
+    text_well: [13, 16]
+    image_split: [14, 15]
+    statement: [17]
+    cards: [18, 19, 20, 64]
+    numbered_steps: [21, 22, 23, 24, 54]
+    quote: [25]
+    key_figure: [26, 27, 28]
+    key_figures: [29, 30]
+    metric_tiles: [31]
+    swot: [32]
+    icon_cards: [33, 34]
+    keyword_cloud: [35]
+    comparison_matrix: [36]
+    journey_map: [37]
+    domains_capabilities: [38]
+    value_chain: [39]
+    before_after: [40]
+    org_chart: [41]
+    pros_cons: [42]
+    pricing: [43, 55]
+    gantt: [45]
+    timeline: [46, 47, 48, 49]
+    kanban: [50]
+    okr: [51]
+    action_table: [52]
+    table: [53]
+    image_grid: [56]
+    end_card: [65]
+never_clone: [59, 60, 61, 62, 63]
+
+grid:
+  margin_in: 0.2
+  columns:
+    "3": [0.2, 3.41, 6.63]
+    "4": [0.2, 2.61, 5.0, 7.43]
+  gutter_in: 0.2
+  title: { left_in: 0.36, top_in: 0.18, width_in: 6.63, height_in: 0.85, max_chars: 48 }
+  body_top_in: 1.5
+  footer_top_in: 5.31
+  page_number: { left_in: 9.37, top_in: 5.31 }
+
+fonts:
+  files: [Geist-Regular.ttf, Geist-Light.ttf, Geist-Medium.ttf, Geist-SemiBold.ttf, Geist-Bold.ttf, Ufficio-300.otf]
+  fallback: { display: Georgia, body: Helvetica, label: Helvetica }
+
+lint:
+  # The template ships some runs named plainly "Ufficio": same face.
+  extra_fonts: [Ufficio]
+  single_use_colors: [role.color.highlight]
+  placeholders:
+    - lorem ipsum
+    - document title
+    - first chapter title
+    - title of the subsection
+    - title example
+    - text example
+    - MM/YEAR
+    - MAIN TOPIC
+    - KEYWORD
+    - SUBJECT
+    - OTHER
+    - LABEL
+    - XX
+    - Week 1
+    - Phase 1
+  # Charter typography and tone-of-voice. The middle-dot ban is left out: the eyebrow grammar
+  # "0X · SECTION / SUBJECT" uses it.
+  slop_rules:
+    - { severity: ERROR, lang: any, pattern: "—", note: "em-dash: split into two sentences, or use a colon" }
+    - severity: ERROR
+      lang: any
+      pattern: '(?<!\d)(?<!\d[kKM%+])(?<!\d€[kKM]) [–-] | [–-] (?!\d)(?![€$£]\d)'
+      note: "dash as separator: split into two sentences, or use a colon. A range between figures is fine"
+    - { severity: ERROR, lang: any, pattern: "!", note: "exclamation mark: state it in the simple present" }
+    - severity: WARN
+      lang: en
+      pattern: '(?-i:^(?:[A-Z][a-z]+ ){3,}[A-Z][a-z]+\.?$)'
+      note: "Title Case: sentence case, proper nouns only"
+    - severity: WARN
+      lang: any
+      pattern: '\b(ai[- ]powered|full[- ]ai|disruptif|disruptive|scalable|révolutionnaire|revolutionary|tout-en-un|all-in-one|futuriste|futuristic|sans limites?|limitless|magique|magic)\b'
+      note: "banned word (tone of voice: words to avoid)"
+    - severity: WARN
+      lang: any
+      pattern: "\\b(we'?re here to help|don'?t worry|we handle everything|it'?s as easy as that|nous sommes là pour vous aider|ne vous inquiétez pas|on s'occupe de tout|c'est aussi simple que ça)\\b"
+      note: "weak verbal tic (tone of voice: words to avoid)"
+
+
+docs:
+  voice: voice.md
+  exemplar: exemplar.md
+  storyline: storyline.md
+
+reconciliation:
+  - slot: folHlink
+    template: 0097A7
+    tokens: "767884"
+    reason: >-
+      Followed-hyperlink colour left over from the template export; absent from the design
+      system. Never drawn in a deck (links are not followed in slides). Kept in the template,
+      tokens map the slot to the muted grey.

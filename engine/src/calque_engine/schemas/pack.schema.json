@@ -1,0 +1,325 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://calque.dev/schemas/pack.schema.json",
+  "title": "Calque brand pack manifest (pack.yaml)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "name",
+    "version",
+    "default_language",
+    "missing_value",
+    "roles",
+    "never_clone",
+    "grid",
+    "fonts",
+    "lint"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?$"
+    },
+    "default_language": {
+      "description": "BCP 47 code, or null when the deck language must always be asked.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "missing_value": {
+      "description": "Placeholder written for unknown values, per language.",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "roles": {
+      "description": "Role -> 1-based template slide numbers that may be cloned for that role.",
+      "type": "object",
+      "required": [
+        "cover",
+        "closing",
+        "content"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "cover": {
+          "$ref": "#/$defs/slides"
+        },
+        "summary": {
+          "$ref": "#/$defs/slides"
+        },
+        "divider": {
+          "$ref": "#/$defs/slides"
+        },
+        "subsection": {
+          "$ref": "#/$defs/slides"
+        },
+        "closing": {
+          "$ref": "#/$defs/slides"
+        },
+        "appendix": {
+          "$ref": "#/$defs/slides"
+        },
+        "content": {
+          "description": "Blank content slide (title only) cloned as the canvas for bespoke compositions.",
+          "$ref": "#/$defs/slides"
+        },
+        "archetypes": {
+          "description": "Named content archetypes, e.g. cards_3 -> [18].",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/slides"
+          }
+        }
+      }
+    },
+    "never_clone": {
+      "$ref": "#/$defs/slides"
+    },
+    "grid": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "margin_in",
+        "columns",
+        "title",
+        "body_top_in",
+        "footer_top_in"
+      ],
+      "properties": {
+        "margin_in": {
+          "type": "number",
+          "minimum": 0
+        },
+        "columns": {
+          "description": "Column left edges (in) per column count, e.g. {\"3\": [0.2, 3.41, 6.63]}.",
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 1
+          }
+        },
+        "gutter_in": {
+          "type": "number",
+          "minimum": 0
+        },
+        "title": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "left_in",
+            "top_in",
+            "width_in",
+            "height_in"
+          ],
+          "properties": {
+            "left_in": {
+              "type": "number"
+            },
+            "top_in": {
+              "type": "number"
+            },
+            "width_in": {
+              "type": "number"
+            },
+            "height_in": {
+              "type": "number"
+            },
+            "max_chars": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "body_top_in": {
+          "type": "number"
+        },
+        "footer_top_in": {
+          "type": "number"
+        },
+        "page_number": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "left_in",
+            "top_in"
+          ],
+          "properties": {
+            "left_in": {
+              "type": "number"
+            },
+            "top_in": {
+              "type": "number"
+            }
+          }
+        }
+      }
+    },
+    "fonts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fallback"
+      ],
+      "properties": {
+        "files": {
+          "description": "Font files under fonts/, uploaded by the company under its own license.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "fallback": {
+          "description": "Font family used for rendering when a pack font file is absent, per role.",
+          "type": "object",
+          "required": [
+            "display",
+            "body"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "lint": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "extra_fonts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "extra_colors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/hex"
+          }
+        },
+        "single_use_colors": {
+          "description": "Token paths whose colour may appear on at most one element per slide.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "placeholders": {
+          "description": "Literal template placeholder strings that must not survive in a deck.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "slop_rules": {
+          "description": "Pack-specific anti-slop rules, same shape as the core ```anti-slop block.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "severity",
+              "lang",
+              "pattern",
+              "note"
+            ],
+            "properties": {
+              "severity": {
+                "enum": [
+                  "ERROR",
+                  "WARN"
+                ]
+              },
+              "lang": {
+                "type": "string"
+              },
+              "pattern": {
+                "type": "string"
+              },
+              "note": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "docs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "voice": {
+          "type": "string"
+        },
+        "exemplar": {
+          "type": "string"
+        },
+        "storyline": {
+          "type": "string"
+        }
+      }
+    },
+    "reconciliation": {
+      "description": "Arbitrated gaps between the template theme and tokens.json.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "slot",
+          "reason"
+        ],
+        "properties": {
+          "slot": {
+            "type": "string"
+          },
+          "template": {
+            "type": "string"
+          },
+          "tokens": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "slides": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "uniqueItems": true
+    },
+    "hex": {
+      "type": "string",
+      "pattern": "^[0-9A-Fa-f]{6}$"
+    }
+  }
+}

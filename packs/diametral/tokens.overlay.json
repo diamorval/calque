@@ -1,0 +1,96 @@
+{
+  "$description": "Hand-maintained part of tokens.json: slide roles, template theme slots and the slide type scale. Merged by pack:sync over the design-system primitives (color.*).",
+  "color": {
+    "$type": "color",
+    "neutral": {
+      "$description": "Ink ramp the template uses for text hierarchy (branding colors.json, neutral group).",
+      "ink_900": { "$value": "#2b2b29" },
+      "ink_800": { "$value": "#3a3a38" },
+      "ink_700": { "$value": "#3f4340" },
+      "ink_600": { "$value": "#5a5a56" },
+      "ink_500": { "$value": "#6a6a66" },
+      "ink_300": { "$value": "#b0b0ac" },
+      "fond_profond": { "$value": "#121214", "$description": "Full-bleed dark surface fill." }
+    }
+  },
+  "role": {
+    "color": {
+      "$type": "color",
+      "ink": { "$value": "{color.noir}", "$description": "Body text on light." },
+      "background": { "$value": "{color.blanc}", "$description": "Content slides stay white." },
+      "accent": { "$value": "{color.marron}", "$description": "Primary accent: eyebrows, numerals, rules, markers, primary series." },
+      "highlight": { "$value": "{color.rouge}", "$description": "The one active element per slide. Never a fill." },
+      "muted": { "$value": "{color.gris}", "$description": "Secondary text, arrows, links." },
+      "rule": { "$value": "{color.gris}", "$description": "Hairlines: box outlines, axes." },
+      "surface": { "$value": "{color.blanc}", "$description": "Boxes: white with a hairline rule." },
+      "wash": {
+        "cover": { "$value": "{color.kaki}", "$description": "Cover and closing." },
+        "summary": { "$value": "{color.jaune}", "$description": "Summary." },
+        "divider": { "$value": "{color.gris}", "$description": "Appendix divider, quote." },
+        "subsection": { "$value": "{color.beige}", "$description": "Subsection divider, tiles." },
+        "emphasis": { "$value": "{color.jaune}", "$description": "Emphasis or foundation tier in a diagram." },
+        "dark": { "$value": "{color.noir}", "$description": "Dark variant, end card." }
+      },
+      "series": {
+        "1": { "$value": "{color.gris}" },
+        "2": { "$value": "{color.kaki}" },
+        "3": { "$value": "{color.beige}" }
+      },
+      "gridline": { "$value": "{color.beige}", "$description": "Chart value gridlines." },
+      "status": {
+        "positive": { "$value": "{color.vert}", "$description": "Data/status only." },
+        "warning": { "$value": "{color.jaune_vif}", "$description": "Data/status only." },
+        "info": { "$value": "{color.bleu}", "$description": "Data/status only." }
+      }
+    },
+    "font": {
+      "$type": "fontFamily",
+      "display": { "$value": "Ufficio 300", "$description": "Titles and the largest numerals only." },
+      "body": { "$value": "Geist" },
+      "label": { "$value": "Geist Light", "$description": "Eyebrows, small labels, ordinals." }
+    },
+    "fontWeight": {
+      "$type": "fontWeight",
+      "display": { "$value": 300 },
+      "body": { "$value": 400 },
+      "label": { "$value": 300 }
+    },
+    "size": {
+      "$type": "dimension",
+      "cover_title": { "$value": "52pt" },
+      "divider_title": { "$value": "50pt" },
+      "title": { "$value": "23pt" },
+      "body": { "$value": "12pt" },
+      "label": { "$value": "12pt" },
+      "caption": { "$value": "9pt" },
+      "numeral": { "$value": "60pt" },
+      "numeral_xl": { "$value": "106pt" }
+    },
+    "stroke": {
+      "$type": "dimension",
+      "hairline": { "$value": "0.75pt" },
+      "link": { "$value": "1.25pt" },
+      "emphasis": { "$value": "1.5pt" }
+    }
+  },
+  "theme": {
+    "$type": "color",
+    "dk1": { "$value": "{color.noir}" },
+    "lt1": { "$value": "{color.blanc}" },
+    "dk2": { "$value": "{color.beige}" },
+    "lt2": { "$value": "{color.kaki}" },
+    "accent1": { "$value": "{color.jaune}" },
+    "accent2": { "$value": "{color.marron}" },
+    "accent3": { "$value": "{color.gris}" },
+    "accent4": { "$value": "{color.jaune_vif}" },
+    "accent5": { "$value": "{color.bleu}" },
+    "accent6": { "$value": "{color.vert}" },
+    "hlink": { "$value": "{color.rouge}" },
+    "folHlink": { "$value": "{color.gris}" },
+    "font": {
+      "$type": "fontFamily",
+      "major": { "$value": "Ufficio 300" },
+      "minor": { "$value": "Geist" }
+    }
+  }
+}

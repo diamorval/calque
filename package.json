@@ -4,16 +4,19 @@
   "type": "module",
   "packageManager": "pnpm@12.5.1",
   "engines": {
-    "node": ">=22"
+    "node": ">=24"
   },
   "scripts": {
     "build": "turbo run build",
-    "lint": "eslint . && turbo run typecheck",
+    "lint": "eslint . && tsc -p tsconfig.json && turbo run typecheck",
     "test": "vitest run --passWithNoTests",
     "engine:test": "cd engine && uv run pytest",
-    "engine:lint": "cd engine && uv run ruff check . && uv run ruff format --check ."
+    "engine:lint": "cd engine && uv run ruff check . && uv run ruff format --check .",
+    "pack:sync": "node scripts/pack-sync.ts",
+    "design:check": "node scripts/design-check.ts"
   },
   "devDependencies": {
+    "@calque/design": "workspace:*",
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.6.4",
     "eslint": "^10.12.0",
@@ -21,6 +24,7 @@
     "turbo": "^2.11.7",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.71.1",
-    "vitest": "^5.0.3"
+    "vitest": "^5.0.3",
+    "yaml": "^2.9.1"
   }
 }

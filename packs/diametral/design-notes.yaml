@@ -1,0 +1,34 @@
+# Prose for DESIGN.md. Values (colours, fonts, sizes, grid) come from tokens.json and pack.yaml.
+title: Diametral
+atmosphere: >
+  Minimal, enduring, elegant. Flat and sharp: 1px rules, no shadows, no rounded corners. Ink on
+  white content slides, punctuated by coloured signature washes. Deliberately away from the
+  colour codes of tech and consulting: refined and structured. The thin grid rules dividing the
+  canvas are part of the language.
+elements:
+  charts: >
+    Native and editable. Primary series in the accent, the one element the slide is about in the
+    highlight, further series on the quiet series ramp. Body font 9–10 pt in ink, hairline axes in
+    the rule colour, value gridlines only. No 3D, no shadow, no chart title (the verdict is the
+    slide title), doughnut over pie, direct labels, legend at the bottom only for 2+ series.
+  diagrams: >
+    Native shapes on the grid. Boxes are surface + hairline rule; washes mark an emphasis or
+    foundation tier. The highlight appears as a stroke, numeral, icon or arrow on the active
+    element only, never as a box fill.
+  icons: Phosphor set, tinted with one brand colour per surface, line marks of at most ~0.5 in.
+  grid: >
+    The visible grid may materialise a few axes (3 at most): it structures, it never decorates.
+  eyebrows: All-caps label grammar "0X · SECTION / SUBJECT", one form per deck.
+do:
+  - Clone the signature slides (cover, summary, dividers, closing) once per deck; draw content slides bespoke.
+  - Rotate washes so the deck reads as light content punctuated by coloured signatures.
+  - Use photography generously, full-bleed panels and image-backed cards, as the exemplar does.
+  - Write nominal, verdict-like titles; short labels take no final period.
+dont:
+  - Wash every slide, or use an accent as a background fill on a content slide.
+  - Use the status colours as body text or as a second decorative accent.
+  - Add a short accent bar above or under a text block (a generated-deck marker, not a motif).
+  - Translate the wordmark or the English closing line unless asked.
+agent:
+  - Read voice.md before writing copy and exemplar.md before composing.
+  - Select shapes by shape_id; the template's shape names are unreliable.
