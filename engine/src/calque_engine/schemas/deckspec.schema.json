@@ -435,22 +435,14 @@
                             }
                           },
                           "active": {
-                            "type": "array",
-                            "prefixItems": [
-                              {
-                                "type": "integer",
-                                "minimum": 0,
-                                "maximum": 9007199254740991
-                              },
-                              {
-                                "type": "integer",
-                                "minimum": 0,
-                                "maximum": 9007199254740991
-                              }
-                            ],
-                            "items": false,
                             "minItems": 2,
-                            "maxItems": 2
+                            "maxItems": 2,
+                            "type": "array",
+                            "items": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            }
                           }
                         },
                         "required": [
@@ -639,52 +631,28 @@
                         "type": "object",
                         "properties": {
                           "x_axis": {
-                            "type": "array",
-                            "prefixItems": [
-                              {
-                                "type": "string"
-                              },
-                              {
-                                "type": "string"
-                              }
-                            ],
-                            "items": false,
                             "minItems": 2,
-                            "maxItems": 2
+                            "maxItems": 2,
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
                           },
                           "y_axis": {
-                            "type": "array",
-                            "prefixItems": [
-                              {
-                                "type": "string"
-                              },
-                              {
-                                "type": "string"
-                              }
-                            ],
-                            "items": false,
                             "minItems": 2,
-                            "maxItems": 2
+                            "maxItems": 2,
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
                           },
                           "quadrants": {
-                            "type": "array",
-                            "prefixItems": [
-                              {
-                                "type": "string"
-                              },
-                              {
-                                "type": "string"
-                              },
-                              {
-                                "type": "string"
-                              },
-                              {
-                                "type": "string"
-                              }
-                            ],
-                            "items": false,
                             "minItems": 4,
-                            "maxItems": 4
+                            "maxItems": 4,
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
                           },
                           "items": {
                             "type": "array",
@@ -1211,52 +1179,28 @@
                         "type": "object",
                         "properties": {
                           "x_axis": {
-                            "type": "array",
-                            "prefixItems": [
-                              {
-                                "type": "string"
-                              },
-                              {
-                                "type": "string"
-                              }
-                            ],
-                            "items": false,
                             "minItems": 2,
-                            "maxItems": 2
+                            "maxItems": 2,
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
                           },
                           "y_axis": {
-                            "type": "array",
-                            "prefixItems": [
-                              {
-                                "type": "string"
-                              },
-                              {
-                                "type": "string"
-                              }
-                            ],
-                            "items": false,
                             "minItems": 2,
-                            "maxItems": 2
+                            "maxItems": 2,
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
                           },
                           "quadrants": {
-                            "type": "array",
-                            "prefixItems": [
-                              {
-                                "type": "string"
-                              },
-                              {
-                                "type": "string"
-                              },
-                              {
-                                "type": "string"
-                              },
-                              {
-                                "type": "string"
-                              }
-                            ],
-                            "items": false,
                             "minItems": 4,
-                            "maxItems": 4
+                            "maxItems": 4,
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
                           },
                           "items": {
                             "minItems": 1,

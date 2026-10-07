@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "calque": {
+      "command": "node",
+      "args": ["apps/server/src/stdio.ts"]
+    }
+  }
+}

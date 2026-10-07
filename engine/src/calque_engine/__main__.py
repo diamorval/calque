@@ -47,7 +47,7 @@ def cmd_call(a) -> int:
     from .api import call
 
     result = call(json.load(sys.stdin))
-    json.dump(result, sys.stdout, ensure_ascii=False)
+    json.dump(result, sys.stdout, ensure_ascii=False, default=str)  # Path -> str
     sys.stdout.write("\n")
     return 0 if result["ok"] else 1
 

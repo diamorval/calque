@@ -35,14 +35,14 @@ export const ChartSource = z.strictObject({
 });
 
 const Panel = z.strictObject({ title: text, lines: z.array(z.string()) });
-const Axis = z.tuple([z.string(), z.string()]);
+const Axis = z.array(z.string()).length(2);
 
 export const DiagramSource = z.discriminatedUnion("id", [
   z.strictObject({ kind: z.literal("diagram"), id: z.literal("flow"), params: z.strictObject({ steps: z.array(Item).min(2).max(7), active: index.optional(), numbered: z.boolean().optional() }) }),
-  z.strictObject({ kind: z.literal("diagram"), id: z.literal("swimlane"), params: z.strictObject({ lanes: z.array(z.strictObject({ label: text, steps: z.array(Item).min(1) })).min(2).max(5), active: z.tuple([index, index]).optional() }) }),
+  z.strictObject({ kind: z.literal("diagram"), id: z.literal("swimlane"), params: z.strictObject({ lanes: z.array(z.strictObject({ label: text, steps: z.array(Item).min(1) })).min(2).max(5), active: z.array(index).length(2).optional() }) }),
   z.strictObject({ kind: z.literal("diagram"), id: z.literal("layers"), params: z.strictObject({ layers: z.array(Item).min(2).max(6), active: index.optional() }) }),
   z.strictObject({ kind: z.literal("diagram"), id: z.literal("hub"), params: z.strictObject({ center: Item, spokes: z.array(Item).min(3).max(8), active: index.optional() }) }),
-  z.strictObject({ kind: z.literal("diagram"), id: z.literal("matrix2x2"), params: z.strictObject({ x_axis: Axis, y_axis: Axis, quadrants: z.tuple([z.string(), z.string(), z.string(), z.string()]), items: z.array(z.strictObject({ label: text, x: z.number().min(0).max(1), y: z.number().min(0).max(1) })).optional(), active: index.optional() }) }),
+  z.strictObject({ kind: z.literal("diagram"), id: z.literal("matrix2x2"), params: z.strictObject({ x_axis: Axis, y_axis: Axis, quadrants: z.array(z.string()).length(4), items: z.array(z.strictObject({ label: text, x: z.number().min(0).max(1), y: z.number().min(0).max(1) })).optional(), active: index.optional() }) }),
   z.strictObject({ kind: z.literal("diagram"), id: z.literal("funnel"), params: z.strictObject({ stages: z.array(Item).min(2).max(6), values: z.array(z.number()).optional(), active: index.optional() }) }),
   z.strictObject({ kind: z.literal("diagram"), id: z.literal("cycle"), params: z.strictObject({ steps: z.array(Item).min(3).max(6), active: index.optional() }) }),
   z.strictObject({ kind: z.literal("diagram"), id: z.literal("before_after"), params: z.strictObject({ before: Panel, after: Panel, arrow_label: z.string().optional() }) }),
@@ -53,7 +53,7 @@ const Block = z.strictObject({ label: z.string().optional(), lines: z.array(z.st
 export const CompositionSource = z.discriminatedUnion("id", [
   z.strictObject({ kind: z.literal("composition"), id: z.literal("chart_takeaway"), params: z.strictObject({ chart_type: ChartSource.shape.type, chart: ChartParams, takeaway: Block.optional(), split: z.enum(["2/1", "3/1", "full"]).optional() }) }),
   z.strictObject({ kind: z.literal("composition"), id: z.literal("flow_detail"), params: z.strictObject({ steps: z.array(Item).min(3).max(6), active: index, detail: Block, orientation: z.enum(["horizontal", "vertical"]).optional() }) }),
-  z.strictObject({ kind: z.literal("composition"), id: z.literal("matrix_2x2"), params: z.strictObject({ x_axis: Axis, y_axis: Axis, quadrants: z.tuple([z.string(), z.string(), z.string(), z.string()]), items: z.array(z.strictObject({ label: text, x: z.number().min(0).max(1), y: z.number().min(0).max(1) })).min(1), active: index.optional() }) }),
+  z.strictObject({ kind: z.literal("composition"), id: z.literal("matrix_2x2"), params: z.strictObject({ x_axis: Axis, y_axis: Axis, quadrants: z.array(z.string()).length(4), items: z.array(z.strictObject({ label: text, x: z.number().min(0).max(1), y: z.number().min(0).max(1) })).min(1), active: index.optional() }) }),
   z.strictObject({ kind: z.literal("composition"), id: z.literal("kpi_sparkband"), params: z.strictObject({ figures: z.array(z.strictObject({ value: text, label: text })).min(3).max(4), trend: z.strictObject({ categories: z.array(z.string()).min(2), values: z.array(z.number()).min(2) }) }) }),
   z.strictObject({ kind: z.literal("composition"), id: z.literal("layers_rail"), params: z.strictObject({ layers: z.array(Item).min(3).max(5), active: index.optional(), annotations: z.array(z.strictObject({ layer: index, icon: z.string().optional(), text })).max(2).optional() }) }),
   z.strictObject({ kind: z.literal("composition"), id: z.literal("comparison_table"), params: z.strictObject({ header: z.array(z.string()).min(2), rows: z.array(z.array(z.string())).min(1), col_weights: z.array(z.number().positive()).optional(), align: z.array(z.enum(["left", "center", "right"])).optional(), recommend: z.strictObject({ row: index.optional(), col: index.optional() }).optional() }) }),
@@ -123,3 +123,17 @@ export type DeckSpec = z.infer<typeof DeckSpec>;
 export type Slide = z.infer<typeof Slide>;
 export type Source = z.infer<typeof Source>;
 export type ShapeValue = z.infer<typeof ShapeValue>;
+
+/** One patch_deck operation (engine/src/calque_engine/patch.py), applied in order. */
+export const PatchOp = z.discriminatedUnion("op", [
+  z.strictObject({ op: z.literal("set"), slide: z.string(), shape_id: z.number().int(), value: ShapeValue })
+    .describe("Write into a cloned shape."),
+  z.strictObject({ op: z.literal("set_field"), slide: z.string(), field: z.enum(["title", "eyebrow", "notes", "message"]), value: z.string() }),
+  z.strictObject({ op: z.literal("set_params"), slide: z.string(), params: z.record(z.string(), z.unknown()) })
+    .describe("Merge into a chart, diagram or composition source's params."),
+  z.strictObject({ op: z.literal("replace_slide"), slide: z.string(), with: Slide }),
+  z.strictObject({ op: z.literal("insert_slide"), at: z.number().int().min(0).describe("0-based position."), slide: Slide }),
+  z.strictObject({ op: z.literal("delete_slide"), slide: z.string() }),
+  z.strictObject({ op: z.literal("move_slide"), slide: z.string(), to: z.number().int().min(0) }),
+]);
+export type PatchOp = z.infer<typeof PatchOp>;

@@ -1,0 +1,30 @@
+:root {
+  --cq-bg: #fff; --cq-fg: #1a1a1a; --cq-muted: #6b6b6b; --cq-line: #ddd; --cq-pick: #2f6fed; --cq-note: #e8a400;
+  font: 14px/1.4 system-ui, sans-serif; color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --cq-bg: #161616; --cq-fg: #eee; --cq-muted: #9a9a9a; --cq-line: #333; }
+}
+body { margin: 0; background: var(--cq-bg); color: var(--cq-fg); }
+.cq-deck { display: grid; grid-template-columns: 140px 1fr; grid-template-rows: auto 1fr; gap: 12px; padding: 12px; }
+.cq-deck header { grid-column: 1 / -1; display: flex; gap: 12px; align-items: baseline; }
+.cq-deck header span { color: var(--cq-muted); }
+.cq-deck header button { margin-left: auto; }
+.cq-thumbs { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; max-height: 80vh; }
+.cq-thumbs button { position: relative; padding: 0; border: 2px solid transparent; background: none; cursor: pointer; }
+.cq-thumbs button[aria-current="true"] { border-color: var(--cq-pick); }
+.cq-thumbs img { display: block; width: 100%; }
+.cq-thumbs span { position: absolute; left: 4px; bottom: 2px; font-size: 11px; color: var(--cq-muted); }
+.cq-thumbs .cq-badge { left: auto; right: 4px; top: 2px; bottom: auto; background: var(--cq-note); color: #000; border-radius: 8px; padding: 0 5px; }
+.cq-canvas { position: relative; width: 100%; border: 1px solid var(--cq-line); }
+.cq-canvas img { display: block; width: 100%; height: 100%; }
+.cq-shape { position: absolute; padding: 0; background: none; border: 1px solid transparent; cursor: pointer; }
+.cq-shape:hover { border-color: var(--cq-pick); }
+.cq-shape[aria-pressed="true"] { border: 2px solid var(--cq-pick); background: color-mix(in srgb, var(--cq-pick) 10%, transparent); }
+.cq-shape[data-commented] { outline: 2px dashed var(--cq-note); }
+.cq-comment { display: grid; gap: 6px; margin-top: 12px; }
+.cq-comment textarea { font: inherit; padding: 6px; background: var(--cq-bg); color: var(--cq-fg); border: 1px solid var(--cq-line); }
+.cq-comment button { justify-self: start; }
+.cq-comments { list-style: none; padding: 0; }
+.cq-comments button { background: none; border: 0; color: inherit; text-align: left; cursor: pointer; padding: 2px 0; }
+@media (max-width: 600px) { .cq-deck { grid-template-columns: 1fr; } .cq-thumbs { flex-direction: row; max-height: none; } .cq-thumbs button { width: 90px; flex: none; } }

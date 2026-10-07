@@ -62,15 +62,28 @@ def op_extract(template: str) -> dict[str, Any]:
 
 
 def op_lint(
-    pack: str, pptx: str, language: str | None = None, sources: dict[str, int] | None = None
+    pack: str,
+    pptx: str,
+    language: str | None = None,
+    sources: dict[str, int] | None = None,
+    template: bool = False,
 ) -> dict[str, Any]:
-    """`sources`: output position -> template slide number, as returned by build."""
+    """`sources`: output position -> template slide number, as returned by build.
+    `template`: lint the pack's own template (placeholders and slop are its job)."""
+    from .fix import SAFE
     from .lint import lint
 
     p = load_pack(pack)
     tmap = {int(k): v for k, v in sources.items()} if sources else None
-    findings = lint(pptx, p, language=language, template_map=tmap)
-    return {"findings": [asdict(f) for f in findings]}
+    findings = lint(pptx, p, language=language, template_map=tmap, template=template)
+    return {"findings": [asdict(f) for f in findings], "safe_checks": list(SAFE)}
+
+
+def op_fix(pack: str, pptx: str, out: str) -> dict[str, Any]:
+    """Apply the safe lint fixes (`fix.SAFE`) to `pptx`, written to `out`."""
+    from .fix import SAFE, fix
+
+    return {"path": out, "applied": fix(pptx, load_pack(pack), out), "safe": list(SAFE)}
 
 
 def op_render(
@@ -103,6 +116,7 @@ OPS = {
     "import": op_import,
     "extract": op_extract,
     "lint": op_lint,
+    "fix": op_fix,
     "render": op_render,
 }
 
