@@ -1,12 +1,13 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { PROVIDERS, testModel, type ModelConfig, type ProviderId } from "@calque/llm";
 import type { Db } from "./db.ts";
-import { NotFound, type User } from "./packs.ts";
+import { Forbidden, NotFound, type User } from "./packs.ts";
+
+export { Forbidden };
 
 /** The web app's AI models (PipesHub pattern): several providers, keys encrypted at rest, one default.
 Workspace-wide; only admins change them. Keys never leave the server. */
 
-export class Forbidden extends Error {}
 export class InvalidModel extends Error {}
 
 interface Row {
@@ -28,7 +29,7 @@ export interface ModelInput {
 }
 
 const ADMIN_TEAM = process.env.CALQUE_ADMIN_TEAM ?? "calque-admins";
-const isAdmin = (u: User) => u.local === true || u.teams.includes(ADMIN_TEAM);
+export const isAdmin = (u: User) => u.local === true || u.teams.includes(ADMIN_TEAM);
 
 export class Models {
   private readonly db: Db;

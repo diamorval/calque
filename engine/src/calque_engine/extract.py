@@ -232,3 +232,105 @@ def draft_tokens(tmap: dict[str, Any]) -> dict[str, Any]:
             },
         },
     }
+
+
+def _role_numbers(slides: list[dict[str, Any]]) -> dict[str, list[int]]:
+    """Guess roles from slide order and layout names; the reviewer corrects them."""
+    nums = [s["number"] for s in slides]
+    cover, closing = nums[0], nums[-1]
+    rest = [s for s in slides if s["number"] not in (cover, closing)]
+    divider = [s["number"] for s in rest if "section" in s["layout"].lower()]
+    content = [
+        s["number"]
+        for s in rest
+        if s["number"] not in divider and re.search(r"title only|blank", s["layout"], re.I)
+    ]
+    content = content or [s["number"] for s in rest if s["number"] not in divider][:1] or [cover]
+    roles = {"cover": [cover], "content": content, "closing": [closing]}
+    if divider:
+        roles["divider"] = divider
+    return roles
+
+
+def _texts(slide: dict[str, Any]) -> list[dict[str, Any]]:
+    return [sh for sh in slide["shapes"] if sh["kind"] == "text" and sh.get("text")]
+
+
+def draft_manifest(tmap: dict[str, Any], pack_id: str, name: str) -> dict[str, Any]:
+    """A first pack.yaml for an imported template, and title/subtitle slots on its role slides
+    (written into `tmap`). Meant for review: roles, grid and placeholders are guesses."""
+    w_in, h_in = tmap["canvas"]["width_in"], tmap["canvas"]["height_in"]
+    by_num = {s["number"]: s for s in tmap["slides"]}
+    roles = _role_numbers(tmap["slides"])
+    role_slides = sorted({n for ns in roles.values() for n in ns})
+    for n in role_slides:
+        s = by_num[n]
+        if "slots" in s:
+            continue
+        texts = sorted(_texts(s), key=lambda sh: (-(sh.get("size") or 0), sh["bbox"][1]))
+        page = s.get("page_number")
+        texts = [sh for sh in texts if sh["id"] != page]
+        if texts:
+            s["slots"] = {"title": texts[0]["id"]}
+            if len(texts) > 1:
+                s["slots"]["subtitle"] = texts[1]["id"]
+
+    content = by_num[roles["content"][0]]
+    tops = sorted(_texts(content) or content["shapes"], key=lambda sh: sh["bbox"][1])
+    left, top, width, height = tops[0]["bbox"] if tops else [0.5, 0.3, w_in - 1.0, 1.0]
+    margin, gutter = round(left, 2), 0.3
+
+    def columns(n: int) -> list[float]:
+        col = (w_in - 2 * margin - (n - 1) * gutter) / n
+        return [round(margin + i * (col + gutter), 2) for i in range(n)]
+
+    grid: dict[str, Any] = {
+        "margin_in": margin,
+        "columns": {"3": columns(3), "4": columns(4)},
+        "gutter_in": gutter,
+        "title": {"left_in": left, "top_in": top, "width_in": width, "height_in": height},
+        "body_top_in": round(top + height + 0.25, 2),
+        "footer_top_in": round(h_in - 0.6, 2),
+    }
+    page = next(
+        (
+            sh
+            for s in tmap["slides"]
+            for sh in s["shapes"]
+            if s.get("page_number") and sh["id"] == s["page_number"]
+        ),
+        None,
+    )
+    if page:
+        grid["page_number"] = {"left_in": page["bbox"][0], "top_in": page["bbox"][1]}
+
+    # sample copy ("Presentation title") must not survive in a deck; single words and the closing
+    # slide's text ("Contact", "Thank you") are often kept as they are
+    placeholders = sorted(
+        {
+            sh["text"]
+            for n in role_slides
+            if n not in roles["closing"]
+            for sh in _texts(by_num[n])
+            if len(sh["text"].split()) >= 2 and not sh["text"].endswith("...")
+        }
+    )
+    fonts = tmap["theme"]["fonts"]
+    return {
+        "id": pack_id,
+        "name": name,
+        "version": "0.1.0",
+        "default_language": "en",
+        "missing_value": {"en": "[TO COMPLETE]", "fr": "[À COMPLÉTER]"},
+        "roles": roles,
+        "never_clone": [],
+        "grid": grid,
+        "fonts": {
+            "fallback": {
+                "display": fonts.get("major", "sans-serif"),
+                "body": fonts.get("minor", "sans-serif"),
+                "label": fonts.get("minor", "sans-serif"),
+            }
+        },
+        "lint": {"placeholders": placeholders},
+    }

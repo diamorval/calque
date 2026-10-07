@@ -15,6 +15,8 @@ export interface ChatInput {
   messages: Message[];
   workflow?: Workflow | undefined;
   pack_id?: string | undefined;
+  /** The deck the user has open: the chat edits it rather than building a new one. */
+  deck_id?: string | undefined;
   onStep?: ((step: { text: string; toolCalls: { toolName: string; input: unknown }[] }) => void) | undefined;
 }
 
@@ -35,7 +37,7 @@ const text = (r: { contents: unknown[] }) =>
   r.contents.map((c) => (c as { text?: string }).text ?? "").join("\n");
 
 /** The system prompt: role, the workflow (MCP prompt) and the always-needed knowledge, inlined. */
-export async function instructions(client: Client, workflow: Workflow, pack_id?: string): Promise<string> {
+export async function instructions(client: Client, workflow: Workflow, pack_id?: string, deck_id?: string): Promise<string> {
   const prompt = await client.getPrompt({ name: workflow, arguments: pack_id ? { pack_id } : {} });
   const steps = prompt.messages.map((m) => (m.content as { text?: string }).text ?? "").join("\n\n");
   const uris = ["core://doctrine", "core://forms", "core://compositions", "core://anti-slop"];
@@ -43,7 +45,10 @@ export async function instructions(client: Client, workflow: Workflow, pack_id?:
   const knowledge = await Promise.all(
     uris.map(async (uri) => `<resource uri="${uri}">\n${text(await client.readResource({ uri }))}\n</resource>`),
   );
-  return [ROLE, "# Workflow", steps, "# Knowledge", ...knowledge].join("\n\n");
+  const deck = deck_id
+    ? `# Open deck\n\nThe user has deck \`${deck_id}\` open next to this chat: open_deck it before changing it, change it with patch_deck or add_slides (never a new deck), and pass the comment ids a patch answers in \`resolves\`.`
+    : "";
+  return [ROLE, "# Workflow", steps, deck, "# Knowledge", ...knowledge].filter(Boolean).join("\n\n");
 }
 
 /** The server's tools the model may call (not the UI-only ones), plus read_resource. */
@@ -76,7 +81,7 @@ async function tools(client: Client): Promise<ToolDef[]> {
 export async function chat(i: ChatInput): Promise<{ text: string; messages: Message[] }> {
   return runTools({
     model: i.model,
-    instructions: await instructions(i.client, i.workflow ?? "build-presentation", i.pack_id),
+    instructions: await instructions(i.client, i.workflow ?? (i.deck_id ? "edit-slides" : "build-presentation"), i.pack_id, i.deck_id),
     messages: i.messages,
     tools: await tools(i.client),
     ...(i.onStep ? { onStep: i.onStep } : {}),

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { DeckSpec, PatchOp } from "@calque/deckspec";
 import type { Db } from "./db.ts";
 import { engine } from "./engine.ts";
-import { getPack, NotFound, type User } from "./packs.ts";
+import { getPack, listPacks, NotFound, type User } from "./packs.ts";
 
 export interface Issue {
   slide: string | null;
@@ -92,6 +92,18 @@ export class Decks {
     if (!row) throw new NotFound(`no deck ${JSON.stringify(id)}`);
     const pack = await getPack(this.db, user, row.pack_id); // a deck on a hidden pack is hidden too
     return { ...row, packDir: pack.dir };
+  }
+
+  /** The user's decks, newest change first (decks on packs they no longer see are left out). */
+  async list(user: User) {
+    const { rows } = await this.db.query<DeckRow & { updated_at: string }>(
+      `select d.*, v.created_at as updated_at from decks d
+       join deck_versions v on v.deck_id = d.id and v.version = d.head
+       where d.owner = $1 order by v.created_at desc`,
+      [user.id],
+    );
+    const seen = new Set((await listPacks(this.db, user)).map((p) => p.id));
+    return rows.filter((r) => seen.has(r.pack_id)).map(({ id, pack_id, title, head, updated_at }) => ({ id, pack_id, title, head, updated_at }));
   }
 
   async spec(id: string, version: number): Promise<DeckSpec> {

@@ -1,24 +1,29 @@
 import { createReadStream, existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { join, normalize } from "node:path";
 import { Readable } from "node:stream";
 import { Hono, type Context } from "hono";
+import { stream } from "hono/streaming";
 import { Client } from "@modelcontextprotocol/client";
-import { createMcpHandler, InMemoryTransport, oauthMetadataResponse, type AuthInfo } from "@modelcontextprotocol/server";
+import { createMcpHandler, InMemoryTransport, oauthMetadataResponse } from "@modelcontextprotocol/server";
 import { applyComments, chat, type Message } from "@calque/agent";
 import { PROVIDERS, type ModelConfig, type ProviderId } from "@calque/llm";
 import { z } from "zod";
 import { discovery, gate, userOf, type AuthConfig } from "./auth.ts";
 import { Conflict } from "./decks.ts";
-import { EngineError } from "./engine.ts";
+import { EngineError, REPO } from "./engine.ts";
 import { buildServer, UI_HTML } from "./mcp.ts";
-import { Forbidden, InvalidModel } from "./models.ts";
-import { NotFound, type User } from "./packs.ts";
+import { InvalidModel, isAdmin } from "./models.ts";
+import { addFont, draftDir, draftPack, Forbidden, NotFound, publishDraft, setVisibility, type User } from "./packs.ts";
+import type { Sessions } from "./session.ts";
 import { TOOLS, toolNamed, type App } from "./tools.ts";
 
 /** The preview link is a capability URL: knowing a deck's id (random UUID) opens its preview,
-reads it and comments on it, nothing else. */
-// ponytail: capability URL; a signed-in session (Keycloak, Phase 5) when the web app lands.
+reads it and comments on it, nothing else. The MCP App inside Claude loads its PNGs from here,
+where no web session exists. */
 const PREVIEW: User = { id: "preview", teams: [], local: true };
+const LOCAL: User = { id: "local", name: "Local", teams: [], local: true };
+export const WEB_DIST = join(REPO, "apps/web/dist");
 
 function status(e: unknown): 400 | 403 | 404 | 409 | 422 {
   if (e instanceof Forbidden) return 403;
@@ -28,10 +33,11 @@ function status(e: unknown): 400 | 403 | 404 | 409 | 422 {
   return 400;
 }
 
-function fail(c: Context, e: unknown) {
+const failure = (e: unknown) => {
   const err = e as Error & { kind?: string; issues?: unknown };
-  return c.json({ error: err.kind ?? err.name, message: err.message, issues: err.issues }, status(e));
-}
+  return { error: err.kind ?? err.name, message: err.message, issues: err.issues };
+};
+const fail = (c: Context, e: unknown) => c.json(failure(e), status(e));
 
 /** The web agent's door into the tools: an MCP client on this server, in process, as `user`. */
 export async function connect(app: App, user: User): Promise<Client> {
@@ -53,23 +59,28 @@ const ChatBody = z.object({
   messages: z.array(z.record(z.string(), z.unknown())).min(1).describe("The conversation so far (the client keeps it)."),
   workflow: z.enum(["build-presentation", "storyline", "draft-slides", "edit-slides", "review-deck"]).optional(),
   pack_id: z.string().optional(),
+  deck_id: z.string().optional(),
   model: z.string().optional().describe("A configured model id; default: the workspace default."),
 });
+const Visibility = z.object({ visibility: z.enum(["workspace", "team"]), teams: z.array(z.string()).optional() });
 
-export function createHttp(app: App, auth?: AuthConfig): Hono {
+export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Hono {
   const http = new Hono();
   const metadata = auth && discovery(auth);
   const check = auth && metadata && gate(auth, metadata);
 
-  /** AuthInfo for this request, or the 401 challenge to return. No auth configured = local dev. */
-  async function authenticate(req: Request): Promise<AuthInfo | Response | undefined> {
-    return check ? check(req) : undefined;
+  /** The caller: a web session, else a bearer token; the 401 to return otherwise. No auth = local dev. */
+  async function who(c: Context): Promise<User | Response> {
+    if (!check) return LOCAL;
+    const s = await sessions?.user(c);
+    if (s) return s;
+    const a = await check(c.req.raw);
+    return a instanceof Response ? a : userOf(a);
   }
 
   const mcp = createMcpHandler(({ authInfo }) => buildServer(app, userOf(authInfo)));
-
   http.all("/mcp", async (c) => {
-    const a = await authenticate(c.req.raw);
+    const a = check ? await check(c.req.raw) : undefined;
     if (a instanceof Response) return a;
     return mcp.fetch(c.req.raw, a ? { authInfo: a } : {});
   });
@@ -81,66 +92,150 @@ export function createHttp(app: App, auth?: AuthConfig): Hono {
     });
   }
 
-  // REST: the same tools as MCP, one endpoint each.
-  http.get("/api/tools", (c) =>
-    c.json(Object.entries(TOOLS).map(([name, t]) => ({ name, title: t.title, description: t.description, input: z.toJSONSchema(t.input) }))),
-  );
-  http.post("/api/tools/:name", async (c) => {
-    const t = toolNamed(c.req.param("name"));
-    if (!t) return c.json({ error: "NotFound", message: `no tool ${c.req.param("name")}` }, 404);
-    const a = await authenticate(c.req.raw);
-    if (a instanceof Response) return a;
-    try {
-      const args = t.input.parse(await c.req.json().catch(() => ({})));
-      return c.json(await t.run(app, userOf(a), args));
-    } catch (e) {
-      return fail(c, e);
-    }
-  });
+  if (sessions) {
+    http.get("/auth/login", (c) => sessions.login(c));
+    http.get("/auth/callback", async (c) => {
+      try {
+        return await sessions.callback(c);
+      } catch (e) {
+        return c.text(`sign-in failed: ${(e as Error).message}`, 400);
+      }
+    });
+    http.get("/auth/logout", (c) => sessions.logout(c));
+  }
 
   /** REST handler: authenticate, run, map errors to statuses. */
   const route = (fn: (c: Context, user: User) => Promise<unknown>) => async (c: Context) => {
-    const a = await authenticate(c.req.raw);
-    if (a instanceof Response) return a;
+    const user = await who(c);
+    if (user instanceof Response) return user;
     try {
-      return c.json((await fn(c, userOf(a))) ?? { ok: true });
+      return c.json((await fn(c, user)) ?? { ok: true });
     } catch (e) {
       return fail(c, e);
     }
   };
   const body = async (c: Context) => c.req.json().catch(() => ({}));
+  const param = (c: Context, name: string) => c.req.param(name) as string;
+  /** A multipart form and its file `field`. */
+  const upload = async (c: Context, field: string) => {
+    const form = await c.req.parseBody();
+    const f = form[field];
+    if (!(f instanceof File)) throw new Error(`missing file field ${JSON.stringify(field)}`);
+    return { form, name: f.name, bytes: Buffer.from(await f.arrayBuffer()) };
+  };
+
+  http.get("/api/me", route(async (_, user) => ({ ...user, admin: isAdmin(user), auth: !!check })));
+
+  // REST: the same tools as MCP, one endpoint each.
+  http.get("/api/tools", (c) =>
+    c.json(Object.entries(TOOLS).map(([name, t]) => ({ name, title: t.title, description: t.description, input: z.toJSONSchema(t.input) }))),
+  );
+  http.post(
+    "/api/tools/:name",
+    route(async (c, user) => {
+      const t = toolNamed(param(c, "name"));
+      if (!t) throw new NotFound(`no tool ${param(c, "name")}`);
+      return t.run(app, user, t.input.parse(await body(c)));
+    }),
+  );
+
+  http.get("/api/decks", route(async (_, user) => ({ decks: await app.decks.list(user) })));
+
+  // Settings > Brand packs: draft from a template, review, publish; visibility per pack.
+  http.post(
+    "/api/packs/drafts",
+    route(async (c, user) => {
+      const { form, bytes } = await upload(c, "template");
+      return draftPack(user, app.data, bytes, String(form.id ?? ""), String(form.name ?? form.id ?? ""));
+    }),
+  );
+  http.get("/api/packs/drafts/:id/slides/:png", async (c) => {
+    const user = await who(c);
+    if (user instanceof Response) return user;
+    try {
+      const dir = await draftDir(user, app.data, param(c, "id"));
+      const n = Number(param(c, "png").replace(/\.png$/, ""));
+      const path = join(dir, "render", `slide-${n}.png`);
+      if (!Number.isInteger(n) || !existsSync(path)) return c.notFound();
+      return new Response(Readable.toWeb(createReadStream(path)) as ReadableStream, { headers: { "content-type": "image/png" } });
+    } catch (e) {
+      return fail(c, e);
+    }
+  });
+  http.post(
+    "/api/packs/drafts/:id/fonts",
+    route(async (c, user) => {
+      const f = await upload(c, "font");
+      return addFont(user, app.data, param(c, "id"), f.name, f.bytes);
+    }),
+  );
+  http.post(
+    "/api/packs/drafts/:id/publish",
+    route(async (c, user) => {
+      const b = Visibility.extend({ manifest: z.record(z.string(), z.unknown()), voice: z.string().optional() }).parse(await body(c));
+      return publishDraft(app.db, user, app.data, param(c, "id"), b);
+    }),
+  );
+  http.post(
+    "/api/packs/:id/visibility",
+    route(async (c, user) => {
+      const b = Visibility.parse(await body(c));
+      return setVisibility(app.db, user, param(c, "id"), b.visibility, b.teams ?? user.teams);
+    }),
+  );
 
   // Settings > AI Models (PipesHub pattern). Keys go in, never out.
   http.get("/api/models", route(async () => ({ providers: app.models.catalog(), models: await app.models.list() })));
   http.post("/api/models", route(async (c, user) => app.models.configure(user, ModelBody.parse(await body(c)))));
-  http.post("/api/models/:id/default", route((c, user) => app.models.setDefault(user, c.req.param("id") as string)));
-  http.delete("/api/models/:id", route((c, user) => app.models.remove(user, c.req.param("id") as string)));
+  http.post("/api/models/:id/default", route((c, user) => app.models.setDefault(user, param(c, "id"))));
+  http.delete("/api/models/:id", route((c, user) => app.models.remove(user, param(c, "id"))));
 
-  // The web agent: one user turn, or apply a deck's open comments. Same tools as MCP, as this user.
-  const agent = async (user: User, modelId: string | undefined, run: (client: Client, model: ModelConfig) => Promise<object>) => {
-    const model = await app.models.resolve(modelId);
-    const client = await connect(app, user);
-    try {
-      return { model: model.id, ...(await run(client, model)) };
-    } finally {
-      await client.close();
-    }
-  };
+  /** Run the web agent as `user`. With `Accept: application/x-ndjson`, streams one line per step
+  ({"step": {tools}}), then {"done": result} or {"error": …}; else answers JSON when done. */
+  const agent =
+    (parse: (b: unknown) => { model?: string | undefined }, run: (client: Client, model: ModelConfig, b: never, onStep: OnStep) => Promise<object>) =>
+    async (c: Context) => {
+      const user = await who(c);
+      if (user instanceof Response) return user;
+      const go = async (onStep: OnStep) => {
+        const b = parse(await body(c));
+        const model = await app.models.resolve(b.model);
+        const client = await connect(app, user);
+        try {
+          return { model: model.id, ...(await run(client, model, b as never, onStep)) };
+        } finally {
+          await client.close();
+        }
+      };
+      if (!c.req.header("accept")?.includes("application/x-ndjson")) {
+        try {
+          return c.json(await go(() => {}));
+        } catch (e) {
+          return fail(c, e);
+        }
+      }
+      c.header("content-type", "application/x-ndjson");
+      return stream(c, async (s) => {
+        const line = (o: object) => s.write(`${JSON.stringify(o)}\n`);
+        try {
+          await line({ done: await go((st) => void line({ step: { text: st.text, tools: st.toolCalls.map((t) => t.toolName) } })) });
+        } catch (e) {
+          await line({ error: failure(e) });
+        }
+      });
+    };
+  type OnStep = (s: { text: string; toolCalls: { toolName: string }[] }) => void;
+
   http.post(
     "/api/agent/chat",
-    route(async (c, user) => {
-      const b = ChatBody.parse(await body(c));
-      return agent(user, b.model, (client, model) =>
-        chat({ client, model, messages: b.messages as Message[], workflow: b.workflow, pack_id: b.pack_id }),
-      );
-    }),
+    agent(ChatBody.parse, (client, model, b: z.infer<typeof ChatBody>, onStep) =>
+      chat({ client, model, onStep, messages: b.messages as Message[], workflow: b.workflow, pack_id: b.pack_id, deck_id: b.deck_id }),
+    ),
   );
+  const ApplyBody = z.object({ deck_id: z.string(), model: z.string().optional() });
   http.post(
     "/api/agent/apply-comments",
-    route(async (c, user) => {
-      const b = z.object({ deck_id: z.string(), model: z.string().optional() }).parse(await body(c));
-      return agent(user, b.model, (client, model) => applyComments({ client, model, deck_id: b.deck_id }));
-    }),
+    agent(ApplyBody.parse, (client, model, b: z.infer<typeof ApplyBody>, onStep) => applyComments({ client, model, onStep, deck_id: b.deck_id })),
   );
 
   // Web preview: the same slide UI as the MCP App, talking REST instead of the host bridge.
@@ -150,23 +245,23 @@ export function createHttp(app: App, auth?: AuthConfig): Hono {
   });
   http.get("/decks/:id/data", async (c) => {
     try {
-      return c.json(await TOOLS.open_deck.run(app, PREVIEW, { deck_id: c.req.param("id"), render: true }));
+      return c.json(await TOOLS.open_deck.run(app, PREVIEW, { deck_id: param(c, "id"), render: true }));
     } catch (e) {
       return fail(c, e);
     }
   });
   http.post("/decks/:id/comments", async (c) => {
     try {
-      const body = TOOLS.add_comment.input.parse({ ...(await c.req.json()), deck_id: c.req.param("id") });
-      return c.json(await TOOLS.add_comment.run(app, PREVIEW, body));
+      const b = TOOLS.add_comment.input.parse({ ...(await c.req.json()), deck_id: param(c, "id") });
+      return c.json(await TOOLS.add_comment.run(app, PREVIEW, b));
     } catch (e) {
       return fail(c, e);
     }
   });
   http.get("/decks/:id/slides/:png", async (c) => {
-    const n = Number(c.req.param("png").replace(/\.png$/, ""));
+    const n = Number(param(c, "png").replace(/\.png$/, ""));
     try {
-      const { slides } = await app.decks.render(PREVIEW, c.req.param("id"));
+      const { slides } = await app.decks.render(PREVIEW, param(c, "id"));
       const s = slides.find((x) => x.number === n);
       if (!s) return c.notFound();
       return new Response(Readable.toWeb(createReadStream(s.png)) as ReadableStream, {
@@ -179,8 +274,8 @@ export function createHttp(app: App, auth?: AuthConfig): Hono {
   http.get("/decks/:id/deck.pptx", async (c) => {
     try {
       const v = c.req.query("v");
-      const { path, version } = await app.decks.exportPath(PREVIEW, c.req.param("id"), v ? Number(v) : undefined);
-      const deck = await app.decks.deck(PREVIEW, c.req.param("id"));
+      const { path, version } = await app.decks.exportPath(PREVIEW, param(c, "id"), v ? Number(v) : undefined);
+      const deck = await app.decks.deck(PREVIEW, param(c, "id"));
       const name = `${deck.title.replace(/[^\p{L}\p{N} _-]+/gu, "").trim() || "deck"} v${version}.pptx`;
       return new Response(Readable.toWeb(createReadStream(path)) as ReadableStream, {
         headers: {
@@ -191,6 +286,21 @@ export function createHttp(app: App, auth?: AuthConfig): Hono {
     } catch (e) {
       return fail(c, e);
     }
+  });
+
+  // The web app (apps/web): its built files, and index.html for its client-side routes.
+  const TYPES: Record<string, string> = { js: "text/javascript", css: "text/css", svg: "image/svg+xml", woff2: "font/woff2", png: "image/png", ico: "image/x-icon" };
+  http.get("*", async (c) => {
+    const path = normalize(join(WEB_DIST, new URL(c.req.url).pathname));
+    const ext = path.split(".").pop() ?? "";
+    if (path.startsWith(WEB_DIST) && TYPES[ext] && existsSync(path)) {
+      return new Response(Readable.toWeb(createReadStream(path)) as ReadableStream, {
+        headers: { "content-type": TYPES[ext], "cache-control": path.includes("/assets/") ? "max-age=31536000, immutable" : "no-cache" },
+      });
+    }
+    const index = join(WEB_DIST, "index.html");
+    if (c.req.path.startsWith("/api/") || !existsSync(index)) return c.notFound();
+    return c.html(await readFile(index, "utf8"));
   });
 
   return http;

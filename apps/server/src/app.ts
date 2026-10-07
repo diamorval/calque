@@ -16,9 +16,10 @@ export async function createApp(opts: { data?: string; db?: string; publicUrl?: 
   await seedPacks(db);
   const port = process.env.PORT ?? "8787";
   const publicUrl = (opts.publicUrl ?? process.env.CALQUE_PUBLIC_URL ?? `http://localhost:${port}`).replace(/\/$/, "");
-  const models = new Models(db, process.env.CALQUE_SECRET ?? localSecret(data));
+  const secret = process.env.CALQUE_SECRET ?? localSecret(data);
+  const models = new Models(db, secret);
   await models.seedFromEnv();
-  return { db, decks: new Decks(db, data), models, data, publicUrl };
+  return { db, decks: new Decks(db, data), models, data, publicUrl, secret };
 }
 
 /** Dev only: the key sealing model API keys, kept in the data dir. Set CALQUE_SECRET in production. */

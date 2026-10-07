@@ -12,3 +12,5 @@ out/
 .cache/
 packs/*/fonts/
 .data/
+apps/web/test-results/
+apps/web/playwright-report/

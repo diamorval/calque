@@ -66,6 +66,8 @@ echo '{"op": "build", ...}' | uv run python -m calque_engine call   # the server
 node apps/server/src/main.ts          # MCP (/mcp) + REST (/api) + preview (/decks/:id), see apps/server/README.md
 node apps/server/src/stdio.ts         # MCP over stdio (.mcp.json)
 pnpm --filter @calque/slide-ui build  # deck UI bundle, served as ui:// and /decks/:id
+pnpm --filter @calque/web dev         # web app on Vite, proxied to the server on :8787
+pnpm e2e                              # Playwright: fake IdP + fake model + the real server and engine
 node apps/server/eval/agent.ts anthropic:<model> openai:<model>  # web agent on real models (needs keys)
 ```
 

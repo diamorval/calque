@@ -1,9 +1,11 @@
 :root {
-  --cq-bg: #fff; --cq-fg: #1a1a1a; --cq-muted: #6b6b6b; --cq-line: #ddd; --cq-pick: #2f6fed; --cq-note: #e8a400;
-  font: 14px/1.4 system-ui, sans-serif; color-scheme: light dark;
+  /* inside the web app the design system's tokens apply; standalone (MCP App, preview) the fallbacks */
+  --cq-bg: var(--ds-bg, #fff); --cq-fg: var(--ds-ink, #1a1a1a); --cq-muted: var(--ds-ink-soft, #6b6b6b);
+  --cq-line: var(--ds-rule, #ddd); --cq-pick: var(--ds-info, #2f6fed); --cq-note: var(--ds-warning, #e8a400);
+  font: 14px/1.4 var(--ds-font-sans, system-ui, sans-serif); color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
-  :root { --cq-bg: #161616; --cq-fg: #eee; --cq-muted: #9a9a9a; --cq-line: #333; }
+  :root { --cq-bg: var(--ds-bg, #161616); --cq-fg: var(--ds-ink, #eee); --cq-muted: var(--ds-ink-soft, #9a9a9a); --cq-line: var(--ds-rule, #333); }
 }
 body { margin: 0; background: var(--cq-bg); color: var(--cq-fg); }
 .cq-deck { display: grid; grid-template-columns: 140px 1fr; grid-template-rows: auto 1fr; gap: 12px; padding: 12px; }
@@ -28,3 +30,5 @@ body { margin: 0; background: var(--cq-bg); color: var(--cq-fg); }
 .cq-comments { list-style: none; padding: 0; }
 .cq-comments button { background: none; border: 0; color: inherit; text-align: left; cursor: pointer; padding: 2px 0; }
 @media (max-width: 600px) { .cq-deck { grid-template-columns: 1fr; } .cq-thumbs { flex-direction: row; max-height: none; } .cq-thumbs button { width: 90px; flex: none; } }
+.cq-comment button, .cq-deck header button { font: inherit; padding: 4px 12px; border: 1px solid var(--cq-fg); background: var(--cq-fg); color: var(--cq-bg); cursor: pointer; }
+.cq-comment button:disabled { opacity: 0.4; cursor: default; }

@@ -14,6 +14,8 @@ export interface App {
   decks: Decks;
   models: Models;
   data: string;
+  /** seals model keys and web sessions */
+  secret: string;
   publicUrl: string;
 }
 
@@ -259,12 +261,13 @@ export const TOOLS = {
   import_pack: tool({
     title: "Import brand pack",
     description:
-      "Install a company's brand pack from its template.pptx. First call without `manifest`: returns the extracted template map and draft tokens. Assign roles (core://pack-contract) in a pack.yaml manifest and call again: the pack is validated (template lints clean, a test deck builds clean) and published, restricted to your teams unless visibility is 'workspace'.",
+      "Install a company's brand pack from its template.pptx. First call without `manifest`: returns the extracted template map, draft tokens and a draft manifest (guessed roles, grid, placeholders). Review the roles (core://pack-contract) in a pack.yaml manifest and call again: the pack is validated (template lints clean, a test deck builds clean) and published, restricted to your teams unless visibility is 'workspace'.",
     input: z.object({
       template: File,
       manifest: z.record(z.string(), z.unknown()).optional().describe("pack.yaml content."),
       tokens: z.record(z.string(), z.unknown()).optional().describe("tokens.json (DTCG); default: the draft."),
       template_map: z.record(z.string(), z.unknown()).optional().describe("Reviewed template-map; default: the draft."),
+      voice: z.string().optional().describe("voice.md: tone, register, banned words."),
       visibility: z.enum(["workspace", "team"]).default("team"),
       teams: z.array(z.string()).optional(),
     }),

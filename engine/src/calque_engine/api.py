@@ -54,11 +54,13 @@ def op_import(pack: str, pptx: str, dest: str, language: str) -> dict[str, Any]:
     return {"deck": deck, "template_map": tmap}
 
 
-def op_extract(template: str) -> dict[str, Any]:
-    from .extract import draft_tokens, extract
+def op_extract(template: str, pack_id: str = "draft", name: str = "Draft") -> dict[str, Any]:
+    """Drafts for a new pack: template map (with title slots on role slides), tokens, manifest."""
+    from .extract import draft_manifest, draft_tokens, extract
 
     tmap = extract(template)
-    return {"template_map": tmap, "tokens": draft_tokens(tmap)}
+    manifest = draft_manifest(tmap, pack_id, name)
+    return {"template_map": tmap, "tokens": draft_tokens(tmap), "manifest": manifest}
 
 
 def op_lint(
