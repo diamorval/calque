@@ -1,3 +1,4 @@
+import { Avatar, AvatarFallback } from "diametral-ds/avatar";
 import { Cpu, LayoutGrid, LogOut, Moon, Palette, Plus, Sun, type LucideIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, ApiError, type Me } from "./api.ts";
@@ -44,6 +45,7 @@ function useTheme(): [Theme, () => void] {
   });
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
+    document.documentElement.classList.toggle("dark", theme === "dark"); // the design system's dark theme
   }, [theme]);
   const toggle = () =>
     setTheme((t) => {
@@ -92,9 +94,9 @@ export function App() {
         <button type="button" className="cq-nav" aria-label={theme === "dark" ? "Light theme" : "Dark theme"} title="Switch theme" onClick={toggleTheme}>
           {theme === "dark" ? <Sun /> : <Moon />}
         </button>
-        <span className="cq-avatar" aria-label={`Signed in as ${name}`} title={name}>
-          {name.slice(0, 2).toUpperCase()}
-        </span>
+        <Avatar className="cq-avatar" aria-label={`Signed in as ${name}`} title={name}>
+          <AvatarFallback>{name.slice(0, 2).toUpperCase()}</AvatarFallback>
+        </Avatar>
         {me.auth && (
           <button type="button" className="cq-nav" aria-label="Sign out" title="Sign out" onClick={() => location.assign("/auth/logout")}>
             <LogOut />

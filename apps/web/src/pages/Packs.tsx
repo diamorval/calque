@@ -1,7 +1,16 @@
+import { Alert, AlertDescription, AlertTitle } from "diametral-ds/alert";
+import { Button } from "diametral-ds/button";
+import { Card } from "diametral-ds/card";
+import { FieldLegend, FieldSet } from "diametral-ds/field";
+import { Input } from "diametral-ds/input";
+import { Stepper, StepperIndicator, StepperItem, StepperSeparator, StepperTitle } from "diametral-ds/stepper";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "diametral-ds/table";
+import { Tag } from "diametral-ds/tag";
+import { Textarea } from "diametral-ds/textarea";
 import { FileUp, Globe, Lock, Upload, X } from "lucide-react";
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { Fragment, useCallback, useEffect, useState, type FormEvent } from "react";
 import { api, tool, upload, type Me, type Pack } from "../api.ts";
-import { Alert, Badge, Button, Field, FileDrop, PageHead, Spinner } from "../ui.tsx";
+import { Field, FileDrop, PageHead, Spinner } from "../ui.tsx";
 
 /** Settings > Brand packs: the packs this user sees, their visibility, and importing a new one. */
 export function Packs({ me }: { me: Me }) {
@@ -36,49 +45,53 @@ export function Packs({ me }: { me: Me }) {
   return (
     <div className="cq-page">
       <PageHead title="Brand packs" description="Each company's template, charter and voice. A new pack is visible to your teams only until you share it.">
-        <Button variant="primary" onClick={() => setImporting(true)}>
+        <Button onClick={() => setImporting(true)}>
           <Upload /> Import a template
         </Button>
       </PageHead>
-      {error && <Alert tone="danger">{error}</Alert>}
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
       {!packs ? (
         <Spinner label="Loading packs" />
       ) : (
-        <div className="cq-card cq-table-wrap">
-          <table className="cq-table">
-            <thead>
-              <tr>
-                <th>Pack</th>
-                <th>Languages</th>
-                <th>Visible to</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
+        <Card className="cq-table-card">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Pack</TableHead>
+                <TableHead>Languages</TableHead>
+                <TableHead>Visible to</TableHead>
+                <TableHead />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {packs.map((p) => (
-                <tr key={p.id} data-pack={p.id}>
-                  <td>
+                <TableRow key={p.id} data-pack={p.id}>
+                  <TableCell>
                     <strong>{p.name}</strong>{" "}
                     <span className="cq-mono cq-muted">
                       {p.id} · v{p.version}
                     </span>
-                  </td>
-                  <td>{p.languages.join(", ")}</td>
-                  <td>
+                  </TableCell>
+                  <TableCell>{p.languages.join(", ")}</TableCell>
+                  <TableCell>
                     {p.visibility === "workspace" ? (
-                      <Badge tone="accent">
+                      <Tag tone="info">
                         <Globe /> Workspace
-                      </Badge>
+                      </Tag>
                     ) : (
-                      <Badge>
+                      <Tag tone="neutral">
                         <Lock /> {p.teams.join(", ") || "Owner only"}
-                      </Badge>
+                      </Tag>
                     )}
-                  </td>
-                  <td>
+                  </TableCell>
+                  <TableCell>
                     {p.editable &&
                       (p.visibility === "team" ? (
-                        <Button size="sm" onClick={() => share(p, "workspace")}>
+                        <Button size="sm" variant="outline" onClick={() => share(p, "workspace")}>
                           Share with the workspace
                         </Button>
                       ) : (
@@ -86,12 +99,12 @@ export function Packs({ me }: { me: Me }) {
                           Restrict to my teams
                         </Button>
                       ))}
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </TableBody>
+          </Table>
+        </Card>
       )}
     </div>
   );
@@ -197,29 +210,36 @@ function Import({ me, onDone }: { me: Me; onDone: () => Promise<void> }) {
           <X /> Cancel
         </Button>
       </PageHead>
-      <ol className="cq-steps">
+      <Stepper>
         {["Upload the template", "Review slide roles", "Validate and publish"].map((label, i) => (
-          <li key={label} data-state={i < stage ? "done" : i === stage ? "now" : undefined}>
-            <span>{i + 1}</span> {label}
-          </li>
+          <Fragment key={label}>
+            {i > 0 && <StepperSeparator />}
+            <StepperItem state={i < stage ? "completed" : i === stage ? "active" : "inactive"}>
+              <StepperIndicator>{i + 1}</StepperIndicator>
+              <StepperTitle>{label}</StepperTitle>
+            </StepperItem>
+          </Fragment>
         ))}
-      </ol>
+      </Stepper>
       {busy && <Spinner label={busy} />}
       {problems.length > 0 && (
-        <Alert tone="danger" title="The pack is not valid yet">
-          {problems.map((p) => (
-            <div key={p}>{p}</div>
-          ))}
+        <Alert variant="destructive">
+          <AlertTitle>The pack is not valid yet</AlertTitle>
+          <AlertDescription>
+            {problems.map((p) => (
+              <div key={p}>{p}</div>
+            ))}
+          </AlertDescription>
         </Alert>
       )}
 
       {!draft ? (
         <form onSubmit={extract} className="cq-card cq-form">
           <Field label="Pack id" htmlFor="p-id" hint="Lowercase letters, digits and dashes.">
-            <input className="cq-input" id="p-id" required pattern="[a-z0-9][a-z0-9-]*" value={id} onChange={(e) => setId(e.target.value)} placeholder="acme" />
+            <Input id="p-id" required pattern="[a-z0-9][a-z0-9-]*" value={id} onChange={(e) => setId(e.target.value)} placeholder="acme" />
           </Field>
           <Field label="Name" htmlFor="p-name">
-            <input className="cq-input" id="p-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Acme" />
+            <Input id="p-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Acme" />
           </Field>
           <FileDrop
             label="Template file"
@@ -228,7 +248,7 @@ function Import({ me, onDone }: { me: Me; onDone: () => Promise<void> }) {
             hint="or click to choose it"
             onFiles={(f) => setTemplate(f[0] ?? null)}
           />
-          <Button type="submit" variant="primary" disabled={!template || !id || !!busy}>
+          <Button type="submit" disabled={!template || !id || !!busy}>
             <FileUp /> Read the template
           </Button>
         </form>
@@ -257,13 +277,13 @@ function Import({ me, onDone }: { me: Me; onDone: () => Promise<void> }) {
           <div className="cq-columns">
             <div className="cq-card cq-form">
               <Field label="Default language" htmlFor="p-lang" hint="Empty: ask for the language of every deck.">
-                <input className="cq-input" id="p-lang" value={language} onChange={(e) => setLanguage(e.target.value)} placeholder="en" />
+                <Input id="p-lang" value={language} onChange={(e) => setLanguage(e.target.value)} placeholder="en" />
               </Field>
               <Field label="Template placeholders" htmlFor="p-ph" hint="Sample copy that must never survive in a deck, one per line.">
-                <textarea className="cq-textarea" id="p-ph" rows={5} value={placeholders} onChange={(e) => setPlaceholders(e.target.value)} />
+                <Textarea id="p-ph" rows={5} value={placeholders} onChange={(e) => setPlaceholders(e.target.value)} />
               </Field>
-              <fieldset className="cq-field cq-fieldset">
-                <legend className="cq-label">Visible to</legend>
+              <FieldSet>
+                <FieldLegend variant="label">Visible to</FieldLegend>
                 <label className="cq-check">
                   <input type="radio" name="visibility" value="team" checked={visibility === "team"} onChange={() => setVisibility("team")} />
                   My teams ({me.teams.join(", ") || "only me"})
@@ -272,11 +292,11 @@ function Import({ me, onDone }: { me: Me; onDone: () => Promise<void> }) {
                   <input type="radio" name="visibility" value="workspace" checked={visibility === "workspace"} onChange={() => setVisibility("workspace")} />
                   The whole workspace
                 </label>
-              </fieldset>
+              </FieldSet>
             </div>
             <div className="cq-card cq-form">
               <Field label="Voice" htmlFor="p-voice">
-                <textarea className="cq-textarea" id="p-voice" rows={6} value={voice} onChange={(e) => setVoice(e.target.value)} placeholder="Tone, register, words to avoid…" />
+                <Textarea id="p-voice" rows={6} value={voice} onChange={(e) => setVoice(e.target.value)} placeholder="Tone, register, words to avoid…" />
               </Field>
               <FileDrop
                 label="Font files"
@@ -297,7 +317,7 @@ function Import({ me, onDone }: { me: Me; onDone: () => Promise<void> }) {
             </div>
           </div>
           <div>
-            <Button variant="primary" size="lg" disabled={!!busy} onClick={() => void publish()}>
+            <Button size="lg" disabled={!!busy} onClick={() => void publish()}>
               Validate and publish
             </Button>
           </div>

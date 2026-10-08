@@ -1,9 +1,12 @@
 import type { DeckView } from "@calque/slide-ui";
+import { Button } from "diametral-ds/button";
+import { Kbd } from "diametral-ds/kbd";
+import { Tag } from "diametral-ds/tag";
 import { Clock, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { tool } from "../api.ts";
 import { navigate } from "../nav.ts";
-import { Button, Spinner } from "../ui.tsx";
+import { Spinner } from "../ui.tsx";
 
 type Deck = DeckView & { spec: { slides: { id: string; notes?: string }[] } };
 
@@ -54,16 +57,16 @@ export function Presenter({ id }: { id: string }) {
 
   if (!presenter) return <main className="cq-present">{current}</main>;
   return (
-    <main className="cq-presenter" aria-label="Presenter view">
+    <main className="cq-presenter dark" aria-label="Presenter view">
       <header>
         <strong className="cq-mono">
           {i + 1} / {deck.slides.length}
         </strong>
-        <span className="cq-badge">
+        <Tag tone="neutral" className="cq-mono">
           <Clock /> <span aria-label="Elapsed">{clock(Math.floor((now - started) / 1000))}</span>
-        </span>
+        </Tag>
         <span className="cq-hint">
-          <kbd className="cq-kbd">←</kbd> <kbd className="cq-kbd">→</kbd> navigate · <kbd className="cq-kbd">P</kbd> audience view · <kbd className="cq-kbd">F</kbd> full
+          <Kbd>←</Kbd> <Kbd>→</Kbd> navigate · <Kbd>P</Kbd> audience view · <Kbd>F</Kbd> full
           screen
         </span>
         <Button variant="ghost" size="sm" onClick={() => navigate(`/d/${id}`)}>
