@@ -104,8 +104,20 @@ function Root({ backend }: { backend: Backend }) {
     backend.watch(reload);
     reload();
   }, [backend]);
-  if (error) return <p role="alert">{error}</p>;
-  if (!deck) return <p>Loading deck…</p>;
+  if (error)
+    return (
+      <div className="cq-empty">
+        <p role="alert" className="cq-alert" data-tone="danger">
+          {error}
+        </p>
+      </div>
+    );
+  if (!deck)
+    return (
+      <div className="cq-empty">
+        <span className="cq-spinner">Loading deck…</span>
+      </div>
+    );
   return (
     <DeckViewer
       deck={deck}

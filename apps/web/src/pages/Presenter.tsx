@@ -1,8 +1,9 @@
-import { Button, Kbd, Spinner } from "@diametral/design-system/react";
 import type { DeckView } from "@calque/slide-ui";
+import { Clock, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { tool } from "../api.ts";
 import { navigate } from "../nav.ts";
+import { Button, Spinner } from "../ui.tsx";
 
 type Deck = DeckView & { spec: { slides: { id: string; notes?: string }[] } };
 
@@ -39,7 +40,12 @@ export function Presenter({ id }: { id: string }) {
     return () => removeEventListener("keydown", on);
   }, [deck, id]);
 
-  if (!deck) return <Spinner label="Loading deck" />;
+  if (!deck)
+    return (
+      <div className="cq-center">
+        <Spinner label="Loading deck" />
+      </div>
+    );
   const slide = deck.slides[i];
   const next = deck.slides[i + 1];
   if (!slide) return null;
@@ -49,21 +55,27 @@ export function Presenter({ id }: { id: string }) {
   if (!presenter) return <main className="cq-present">{current}</main>;
   return (
     <main className="cq-presenter" aria-label="Presenter view">
-      <div>{current}</div>
+      <header>
+        <strong className="cq-mono">
+          {i + 1} / {deck.slides.length}
+        </strong>
+        <span className="cq-badge">
+          <Clock /> <span aria-label="Elapsed">{clock(Math.floor((now - started) / 1000))}</span>
+        </span>
+        <span className="cq-hint">
+          <kbd className="cq-kbd">←</kbd> <kbd className="cq-kbd">→</kbd> navigate · <kbd className="cq-kbd">P</kbd> audience view · <kbd className="cq-kbd">F</kbd> full
+          screen
+        </span>
+        <Button variant="ghost" size="sm" onClick={() => navigate(`/d/${id}`)}>
+          <X /> Exit
+        </Button>
+      </header>
+      <div className="cq-presenter-now">{current}</div>
       <aside>
-        <p>
-          <strong>
-            {i + 1} / {deck.slides.length}
-          </strong>{" "}
-          · <span aria-label="Elapsed">{clock(Math.floor((now - started) / 1000))}</span>
-        </p>
-        {next ? <img src={next.image_url} alt={`Next: slide ${next.number}`} /> : <p>End of deck</p>}
+        <h2>Next</h2>
+        {next ? <img src={next.image_url} alt={`Next: slide ${next.number}`} /> : <p className="cq-hint">End of deck</p>}
         <h2>Notes</h2>
         <p data-testid="notes">{notes || "No speaker notes."}</p>
-        <p>
-          <Kbd>←</Kbd> <Kbd>→</Kbd> navigate · <Kbd>P</Kbd> audience view · <Kbd>F</Kbd> full screen
-        </p>
-        <Button onClick={() => navigate(`/d/${id}`)}>Exit</Button>
       </aside>
     </main>
   );

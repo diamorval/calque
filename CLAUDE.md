@@ -26,9 +26,9 @@ Cowork, Claude, using the user's Claude subscription) and **API** (our web app, 
 ```text
 apps/server        TS: MCP server (tools, resources, prompts, MCP Apps UI), REST API, DeckSpec versions, preview /decks/:id
 apps/agent         TS: web-app agent, tool-calling loop
-apps/web           TS: React UI (design-system vite-react starter), AI Models and Brand packs pages
+apps/web           TS: React UI (Calque UI: tokens + cq-* classes from slide-ui, lucide icons), AI Models and Brand packs pages
 engine/            Python: DeckSpec -> PPTX, import, patch by shape_id, lint, PNG render + shape map, template extractor
-packages/slide-ui  rendered preview, thumbnails, inspector, comments
+packages/slide-ui  rendered preview, thumbnails, inspector, comments; the Calque UI tokens and styles
 packages/llm       provider registry, the only access to models
 packages/deckspec  Zod schemas + JSON Schema shared with the engine
 packages/design    DTCG tokens -> PPTX theme and DESIGN.md, per pack

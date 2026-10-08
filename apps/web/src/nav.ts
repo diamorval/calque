@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type MouseEvent } from "react";
 
 // Five routes: history.pushState is enough, no router.
 export function navigate(path: string) {
@@ -14,4 +14,11 @@ export function usePath(): string {
     return () => removeEventListener("popstate", on);
   }, []);
   return path;
+}
+
+/** An in-app link's click: pushState for a plain click, the browser's way for a new tab. */
+export function go(e: MouseEvent, href: string) {
+  if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+  e.preventDefault();
+  navigate(href);
 }

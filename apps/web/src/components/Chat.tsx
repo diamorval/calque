@@ -1,5 +1,5 @@
-import { Button, Message, MessageContent, MessageGroup, MessageHeader, Spinner, Textarea } from "@diametral/design-system/react";
-import { useEffect, useState, type FormEvent } from "react";
+import { ArrowUp, Check, Sparkles } from "lucide-react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { agent } from "../api.ts";
 
 /** An AI SDK model message, as the server returns them; the client keeps the conversation. */
@@ -36,6 +36,24 @@ function lines(m: ChatMessage): { text: string; tools: string[] } {
   };
 }
 
+/** The tools the agent called, one row each; the last one live while it runs. */
+function Trace({ tools, live }: { tools: string[]; live?: boolean }) {
+  return (
+    <ul className="cq-trace">
+      {tools.map((t, i) => (
+        <li key={i}>
+          <Check /> <span className="cq-mono">{t}</span>
+        </li>
+      ))}
+      {live && (
+        <li data-live>
+          <span className="cq-spinner" /> <span className="cq-shimmer">{tools.length ? "Working" : "Thinking"}</span>
+        </li>
+      )}
+    </ul>
+  );
+}
+
 /** The co-editing chat. `storageKey` keeps the conversation across reloads of this tab. */
 export function Chat(props: {
   storageKey: string;
@@ -43,6 +61,12 @@ export function Chat(props: {
   deck_id?: string | undefined;
   placeholder: string;
   disabled?: boolean;
+  /** Shown while the conversation is empty. */
+  empty?: ReactNode;
+  /** One-click briefs, while the conversation is empty. */
+  suggestions?: string[];
+  /** Left of the send button (the new deck's brand pack). */
+  footer?: ReactNode;
   /** `conversation`: every message so far, the agent's included */
   onDone?: (r: AgentResult, conversation: ChatMessage[]) => void;
 }) {
@@ -51,11 +75,16 @@ export function Chat(props: {
   const [steps, setSteps] = useState<string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [model, setModel] = useState<string | null>(null);
+  const log = useRef<HTMLDivElement>(null);
+  const input = useRef<HTMLTextAreaElement>(null);
   useEffect(() => saveChat(props.storageKey, messages), [props.storageKey, messages]);
+  useEffect(() => {
+    log.current?.scrollTo({ top: log.current.scrollHeight, behavior: "smooth" });
+  }, [messages, steps, error]);
 
-  async function send(e: FormEvent) {
-    e.preventDefault();
-    if (!text.trim()) return;
+  async function send(e?: FormEvent) {
+    e?.preventDefault();
+    if (!text.trim() || steps || props.disabled) return;
     const asked = [...messages, { role: "user" as const, content: text.trim() }];
     setMessages(asked);
     setText("");
@@ -78,44 +107,96 @@ export function Chat(props: {
     }
   }
 
-  const shown = messages.filter((m) => m.role === "user" || m.role === "assistant").map((m) => ({ role: m.role, ...lines(m) }));
+  // one turn per run of assistant messages: the agent's steps, then its answer
+  const shown: { role: ChatMessage["role"]; text: string; tools: string[] }[] = [];
+  for (const m of messages) {
+    if (m.role !== "user" && m.role !== "assistant") continue;
+    const { text, tools } = lines(m);
+    if (!text && !tools.length) continue;
+    const prev = shown.at(-1);
+    if (m.role === "assistant" && prev?.role === "assistant") {
+      prev.tools.push(...tools);
+      prev.text = [prev.text, text].filter(Boolean).join("\n\n");
+    } else shown.push({ role: m.role, text, tools: [...tools] });
+  }
   return (
     <section className="cq-chat" aria-label="Chat with the agent">
-      <MessageGroup>
+      <div className="cq-chat-log" ref={log}>
+        {shown.length === 0 && !steps && props.empty}
         {shown.map((m, i) =>
-          m.text || m.tools.length ? (
-            <Message key={i} align={m.role === "user" ? "end" : "start"}>
-              <MessageContent>
-                {m.tools.length > 0 && <MessageHeader>{m.tools.join(" · ")}</MessageHeader>}
-                {m.text}
-              </MessageContent>
-            </Message>
-          ) : null,
+          m.role === "user" ? (
+            <div key={i} className="cq-msg" data-role="user">
+              {m.text}
+            </div>
+          ) : (
+            <div key={i} className="cq-msg" data-role="assistant">
+              <span className="cq-msg-avatar" aria-hidden>
+                <Sparkles />
+              </span>
+              <div>
+                {m.tools.length > 0 && <Trace tools={m.tools} />}
+                {m.text && <p>{m.text}</p>}
+              </div>
+            </div>
+          ),
         )}
         {steps && (
-          <Message align="start">
-            <MessageContent>
-              <Spinner label="The agent is working" /> {steps.join(" · ")}
-            </MessageContent>
-          </Message>
+          <div className="cq-msg" data-role="assistant" role="status" aria-label="The agent is working">
+            <span className="cq-msg-avatar" aria-hidden>
+              <Sparkles />
+            </span>
+            <Trace tools={steps} live />
+          </div>
         )}
-      </MessageGroup>
-      {error && <p role="alert">{error}</p>}
-      {model && <small>Model: {model}</small>}
-      <form onSubmit={send}>
-        <Textarea
+        {error && (
+          <p className="cq-alert" data-tone="danger" role="alert">
+            {error}
+          </p>
+        )}
+      </div>
+      {shown.length === 0 && !steps && !!props.suggestions?.length && (
+        <div className="cq-chips">
+          {props.suggestions.map((s) => (
+            <button
+              key={s}
+              type="button"
+              className="cq-chip"
+              onClick={() => {
+                setText(s);
+                input.current?.focus();
+              }}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+      )}
+      <form className="cq-composer" onSubmit={send}>
+        <textarea
+          ref={input}
           aria-label="Message"
           value={text}
-          rows={3}
+          rows={2}
           placeholder={props.placeholder}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void send(e);
+            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              void send();
+            }
           }}
         />
-        <Button type="submit" variant="primary" disabled={!!steps || props.disabled || !text.trim()}>
-          Send
-        </Button>
+        <div className="cq-composer-foot">
+          {props.footer}
+          {model && <span className="cq-hint">Model: {model}</span>}
+          <span className="cq-spacer" />
+          <span className="cq-hint cq-keys">
+            <kbd className="cq-kbd">↵</kbd> send · <kbd className="cq-kbd">⇧↵</kbd> new line
+          </span>
+          <button type="submit" className="cq-btn" data-variant="accent" data-icon aria-label="Send" disabled={!!steps || props.disabled || !text.trim()}>
+            <ArrowUp />
+          </button>
+        </div>
       </form>
     </section>
   );

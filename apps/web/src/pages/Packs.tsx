@@ -1,45 +1,7 @@
-import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
-  Badge,
-  Button,
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardMedia,
-  CardTitle,
-  Field,
-  FieldDescription,
-  FieldLabel,
-  FileUpload,
-  FileUploadDescription,
-  FileUploadTitle,
-  Input,
-  PageHeader,
-  PageHeaderActions,
-  PageHeaderDescription,
-  PageHeaderHeading,
-  PageHeaderTitle,
-  RadioGroup,
-  RadioGroupItem,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-  Spinner,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-  Textarea,
-} from "@diametral/design-system/react";
+import { FileUp, Globe, Lock, Upload, X } from "lucide-react";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { api, tool, upload, type Me, type Pack } from "../api.ts";
+import { Alert, Badge, Button, Field, FileDrop, PageHead, Spinner } from "../ui.tsx";
 
 /** Settings > Brand packs: the packs this user sees, their visibility, and importing a new one. */
 export function Packs({ me }: { me: Me }) {
@@ -72,61 +34,66 @@ export function Packs({ me }: { me: Me }) {
       />
     );
   return (
-    <>
-      <PageHeader>
-        <PageHeaderHeading>
-          <PageHeaderTitle>Brand packs</PageHeaderTitle>
-          <PageHeaderDescription>Each company's template, charter and voice. A new pack is visible to your teams only until you share it.</PageHeaderDescription>
-        </PageHeaderHeading>
-        <PageHeaderActions>
-          <Button variant="primary" onClick={() => setImporting(true)}>
-            Import a template
-          </Button>
-        </PageHeaderActions>
-      </PageHeader>
-      {error && (
-        <Alert tone="danger" role="alert">
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
+    <div className="cq-page">
+      <PageHead title="Brand packs" description="Each company's template, charter and voice. A new pack is visible to your teams only until you share it.">
+        <Button variant="primary" onClick={() => setImporting(true)}>
+          <Upload /> Import a template
+        </Button>
+      </PageHead>
+      {error && <Alert tone="danger">{error}</Alert>}
       {!packs ? (
         <Spinner label="Loading packs" />
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Pack</TableHead>
-              <TableHead>Languages</TableHead>
-              <TableHead>Visible to</TableHead>
-              <TableHead />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {packs.map((p) => (
-              <TableRow key={p.id} data-pack={p.id}>
-                <TableCell>
-                  {p.name} <small>{p.id} · v{p.version}</small>
-                </TableCell>
-                <TableCell>{p.languages.join(", ")}</TableCell>
-                <TableCell>{p.visibility === "workspace" ? <Badge>Workspace</Badge> : <Badge variant="outline">{p.teams.join(", ") || "Owner only"}</Badge>}</TableCell>
-                <TableCell>
-                  {p.editable &&
-                    (p.visibility === "team" ? (
-                      <Button size="sm" onClick={() => share(p, "workspace")}>
-                        Share with the workspace
-                      </Button>
+        <div className="cq-card cq-table-wrap">
+          <table className="cq-table">
+            <thead>
+              <tr>
+                <th>Pack</th>
+                <th>Languages</th>
+                <th>Visible to</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {packs.map((p) => (
+                <tr key={p.id} data-pack={p.id}>
+                  <td>
+                    <strong>{p.name}</strong>{" "}
+                    <span className="cq-mono cq-muted">
+                      {p.id} · v{p.version}
+                    </span>
+                  </td>
+                  <td>{p.languages.join(", ")}</td>
+                  <td>
+                    {p.visibility === "workspace" ? (
+                      <Badge tone="accent">
+                        <Globe /> Workspace
+                      </Badge>
                     ) : (
-                      <Button size="sm" onClick={() => share(p, "team")}>
-                        Restrict to my teams
-                      </Button>
-                    ))}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+                      <Badge>
+                        <Lock /> {p.teams.join(", ") || "Owner only"}
+                      </Badge>
+                    )}
+                  </td>
+                  <td>
+                    {p.editable &&
+                      (p.visibility === "team" ? (
+                        <Button size="sm" onClick={() => share(p, "workspace")}>
+                          Share with the workspace
+                        </Button>
+                      ) : (
+                        <Button size="sm" variant="ghost" onClick={() => share(p, "team")}>
+                          Restrict to my teams
+                        </Button>
+                      ))}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
-    </>
+    </div>
   );
 }
 
@@ -217,114 +184,106 @@ function Import({ me, onDone }: { me: Me; onDone: () => Promise<void> }) {
     });
   }
 
+  const stage = !draft ? 0 : 1;
   return (
-    <>
-      <PageHeader>
-        <PageHeaderHeading>
-          <PageHeaderTitle>Import a template</PageHeaderTitle>
-          <PageHeaderDescription>
-            {draft ? "Check the role of each slide, then validate: the template must lint clean and a test deck must build clean." : "The company's official template.pptx."}
-          </PageHeaderDescription>
-        </PageHeaderHeading>
-        <PageHeaderActions>
-          <Button onClick={() => void onDone()}>Cancel</Button>
-        </PageHeaderActions>
-      </PageHeader>
+    <div className="cq-page">
+      <PageHead
+        title="Import a template"
+        description={
+          draft ? "Check the role of each slide, then validate: the template must lint clean and a test deck must build clean." : "The company's official template.pptx."
+        }
+      >
+        <Button variant="ghost" onClick={() => void onDone()}>
+          <X /> Cancel
+        </Button>
+      </PageHead>
+      <ol className="cq-steps">
+        {["Upload the template", "Review slide roles", "Validate and publish"].map((label, i) => (
+          <li key={label} data-state={i < stage ? "done" : i === stage ? "now" : undefined}>
+            <span>{i + 1}</span> {label}
+          </li>
+        ))}
+      </ol>
       {busy && <Spinner label={busy} />}
       {problems.length > 0 && (
-        <Alert tone="danger" role="alert">
-          <AlertTitle>The pack is not valid yet</AlertTitle>
-          <AlertDescription>
-            {problems.map((p) => (
-              <div key={p}>{p}</div>
-            ))}
-          </AlertDescription>
+        <Alert tone="danger" title="The pack is not valid yet">
+          {problems.map((p) => (
+            <div key={p}>{p}</div>
+          ))}
         </Alert>
       )}
 
       {!draft ? (
-        <form onSubmit={extract} className="cq-stack cq-narrow">
-          <Field>
-            <FieldLabel htmlFor="p-id">Pack id</FieldLabel>
-            <Input id="p-id" required pattern="[a-z0-9][a-z0-9-]*" value={id} onChange={(e) => setId(e.target.value)} placeholder="acme" />
-            <FieldDescription>Lowercase letters, digits and dashes.</FieldDescription>
+        <form onSubmit={extract} className="cq-card cq-form">
+          <Field label="Pack id" htmlFor="p-id" hint="Lowercase letters, digits and dashes.">
+            <input className="cq-input" id="p-id" required pattern="[a-z0-9][a-z0-9-]*" value={id} onChange={(e) => setId(e.target.value)} placeholder="acme" />
           </Field>
-          <Field>
-            <FieldLabel htmlFor="p-name">Name</FieldLabel>
-            <Input id="p-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Acme" />
+          <Field label="Name" htmlFor="p-name">
+            <input className="cq-input" id="p-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Acme" />
           </Field>
-          <FileUpload accept=".pptx" aria-label="Template file" onFiles={(f) => setTemplate(f[0] ?? null)}>
-            <FileUploadTitle>{template ? template.name : "Drop the template.pptx here"}</FileUploadTitle>
-            <FileUploadDescription>or click to choose it</FileUploadDescription>
-          </FileUpload>
+          <FileDrop
+            label="Template file"
+            accept=".pptx"
+            title={template ? template.name : "Drop the template.pptx here"}
+            hint="or click to choose it"
+            onFiles={(f) => setTemplate(f[0] ?? null)}
+          />
           <Button type="submit" variant="primary" disabled={!template || !id || !!busy}>
-            Read the template
+            <FileUp /> Read the template
           </Button>
         </form>
       ) : (
-        <div className="cq-stack">
-          <div className="cq-cards">
+        <>
+          <ul className="cq-template-grid">
             {draft.slides.map((s) => (
-              <Card key={s.number} size="sm" data-slide={s.number}>
-                <CardMedia src={s.image_url} alt={`Template slide ${s.number}`} />
-                <CardHeader>
-                  <CardTitle>Slide {s.number}</CardTitle>
-                  <CardDescription>{s.layout}</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <Select value={roles[s.number] ?? NONE} onValueChange={(v) => setRoles({ ...roles, [s.number]: String(v) })}>
-                    <SelectTrigger aria-label={`Role of slide ${s.number}`}>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={NONE}>No role</SelectItem>
-                      {ROLES.map((r) => (
-                        <SelectItem key={r} value={r}>
-                          {r}
-                        </SelectItem>
-                      ))}
-                      <SelectItem value={NEVER}>Never clone</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </CardContent>
-              </Card>
+              <li key={s.number} className="cq-card cq-template" data-slide={s.number}>
+                <img src={s.image_url} alt={`Template slide ${s.number}`} />
+                <div>
+                  <strong>Slide {s.number}</strong>
+                  <span className="cq-hint">{s.layout}</span>
+                </div>
+                <select className="cq-select" aria-label={`Role of slide ${s.number}`} value={roles[s.number] ?? NONE} onChange={(e) => setRoles({ ...roles, [s.number]: e.target.value })}>
+                  <option value={NONE}>No role</option>
+                  {ROLES.map((r) => (
+                    <option key={r} value={r}>
+                      {r}
+                    </option>
+                  ))}
+                  <option value={NEVER}>Never clone</option>
+                </select>
+              </li>
             ))}
-          </div>
+          </ul>
           <div className="cq-columns">
-            <div className="cq-stack">
-              <Field>
-                <FieldLabel htmlFor="p-lang">Default language</FieldLabel>
-                <Input id="p-lang" value={language} onChange={(e) => setLanguage(e.target.value)} placeholder="en" />
-                <FieldDescription>Empty: ask for the language of every deck.</FieldDescription>
+            <div className="cq-card cq-form">
+              <Field label="Default language" htmlFor="p-lang" hint="Empty: ask for the language of every deck.">
+                <input className="cq-input" id="p-lang" value={language} onChange={(e) => setLanguage(e.target.value)} placeholder="en" />
               </Field>
-              <Field>
-                <FieldLabel htmlFor="p-ph">Template placeholders</FieldLabel>
-                <Textarea id="p-ph" rows={5} value={placeholders} onChange={(e) => setPlaceholders(e.target.value)} />
-                <FieldDescription>Sample copy that must never survive in a deck, one per line.</FieldDescription>
+              <Field label="Template placeholders" htmlFor="p-ph" hint="Sample copy that must never survive in a deck, one per line.">
+                <textarea className="cq-textarea" id="p-ph" rows={5} value={placeholders} onChange={(e) => setPlaceholders(e.target.value)} />
               </Field>
-              <Field>
-                <FieldLabel>Visible to</FieldLabel>
-                <RadioGroup value={visibility} onValueChange={(v) => setVisibility(v as "team" | "workspace")}>
-                  <Field orientation="horizontal">
-                    <RadioGroupItem id="v-team" value="team" />
-                    <FieldLabel htmlFor="v-team">My teams ({me.teams.join(", ") || "only me"})</FieldLabel>
-                  </Field>
-                  <Field orientation="horizontal">
-                    <RadioGroupItem id="v-ws" value="workspace" />
-                    <FieldLabel htmlFor="v-ws">The whole workspace</FieldLabel>
-                  </Field>
-                </RadioGroup>
-              </Field>
+              <fieldset className="cq-field cq-fieldset">
+                <legend className="cq-label">Visible to</legend>
+                <label className="cq-check">
+                  <input type="radio" name="visibility" value="team" checked={visibility === "team"} onChange={() => setVisibility("team")} />
+                  My teams ({me.teams.join(", ") || "only me"})
+                </label>
+                <label className="cq-check">
+                  <input type="radio" name="visibility" value="workspace" checked={visibility === "workspace"} onChange={() => setVisibility("workspace")} />
+                  The whole workspace
+                </label>
+              </fieldset>
             </div>
-            <div className="cq-stack">
-              <Field>
-                <FieldLabel htmlFor="p-voice">Voice</FieldLabel>
-                <Textarea id="p-voice" rows={6} value={voice} onChange={(e) => setVoice(e.target.value)} placeholder="Tone, register, words to avoid…" />
+            <div className="cq-card cq-form">
+              <Field label="Voice" htmlFor="p-voice">
+                <textarea className="cq-textarea" id="p-voice" rows={6} value={voice} onChange={(e) => setVoice(e.target.value)} placeholder="Tone, register, words to avoid…" />
               </Field>
-              <FileUpload
+              <FileDrop
+                label="Font files"
                 accept=".ttf,.otf"
                 multiple
-                aria-label="Font files"
+                title={fonts.length ? fonts.join(", ") : "Brand fonts (.ttf, .otf)"}
+                hint="Uploaded under your company's font license. Without them, slides render with the fallback fonts."
                 onFiles={(files) =>
                   void step("Uploading fonts", async () => {
                     for (const f of files) {
@@ -334,17 +293,16 @@ function Import({ me, onDone }: { me: Me; onDone: () => Promise<void> }) {
                     }
                   })
                 }
-              >
-                <FileUploadTitle>{fonts.length ? fonts.join(", ") : "Brand fonts (.ttf, .otf)"}</FileUploadTitle>
-                <FileUploadDescription>Uploaded under your company's font license. Without them, slides render with the fallback fonts.</FileUploadDescription>
-              </FileUpload>
+              />
             </div>
           </div>
-          <Button variant="primary" disabled={!!busy} onClick={() => void publish()}>
-            Validate and publish
-          </Button>
-        </div>
+          <div>
+            <Button variant="primary" size="lg" disabled={!!busy} onClick={() => void publish()}>
+              Validate and publish
+            </Button>
+          </div>
+        </>
       )}
-    </>
+    </div>
   );
 }

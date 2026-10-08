@@ -53,12 +53,28 @@ describe("DeckViewer", () => {
     expect(onComment).toHaveBeenCalledWith({ slide_id: "cover", text: "Too dense" });
   });
 
+  it("jumps to a comment's slide and shape from the comments panel", () => {
+    render(<DeckViewer deck={deck} onComment={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Sort bars/ }));
+    expect(screen.getByRole("button", { name: "Shape 5 (drawn)" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByLabelText(/Comment on slide 2, shape 5/)).toBeTruthy();
+  });
+
+  it("shows the host's agent in its own tab, comments one click away", () => {
+    render(<DeckViewer deck={deck} onComment={vi.fn()} agent={<p>chat here</p>} />);
+    expect(screen.getByText("chat here")).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: /Comments/ }));
+    expect(screen.getByRole("tabpanel", { name: "Comments" })).toBeTruthy();
+    expect(screen.queryByRole("tabpanel", { name: "Agent" })).toBeNull();
+  });
+
   it("switches slides from the thumbnails and shows that slide's comments", () => {
     render(<DeckViewer deck={deck} onComment={vi.fn()} onApply={vi.fn()} />);
-    expect(screen.getByLabelText("1 comments")).toBeTruthy();
+    expect(screen.getByLabelText("1 comment")).toBeTruthy();
     fireEvent.click(screen.getAllByRole("button", { name: /Slide 2/ })[0] as HTMLElement);
-    expect(screen.getByText("#5 Sort bars")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Shape 5 (drawn)" }).dataset.commented).toBe("true");
+    expect(screen.getByText("2 / 2")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Shape 5 (drawn)" }).dataset.commented).toBe("1"); // one pin
+    expect(screen.getByText("Sort bars")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Apply 1 comment" })).toBeTruthy();
   });
 });

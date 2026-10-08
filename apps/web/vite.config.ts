@@ -6,6 +6,5 @@ const server = process.env.CALQUE_SERVER ?? "http://localhost:8787";
 
 export default defineConfig({
   plugins: [react()],
-  build: { chunkSizeWarningLimit: 1000 }, // one internal app, the design system included
   server: { proxy: Object.fromEntries(["/api", "/auth", "/decks"].map((p) => [p, server])) },
 });

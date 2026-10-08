@@ -17,8 +17,8 @@ test("imports an unknown template, assigns roles, builds a clean deck; another t
 
   // review: one card per template slide, its rendered image and a drafted role
   await expect(page.getByRole("img", { name: "Template slide 4" })).toBeVisible({ timeout: 60_000 });
-  await expect(page.getByRole("combobox", { name: "Role of slide 1" })).toContainText("cover");
-  await expect(page.getByRole("combobox", { name: "Role of slide 4" })).toContainText("closing");
+  await expect(page.getByRole("combobox", { name: "Role of slide 1" })).toHaveValue("cover");
+  await expect(page.getByRole("combobox", { name: "Role of slide 4" })).toHaveValue("closing");
   // assign roles: without a content slide the pack does not validate
   await choose(page, "Role of slide 3", "No role");
   await page.getByRole("button", { name: "Validate and publish" }).click();
@@ -45,7 +45,7 @@ test("imports an unknown template, assigns roles, builds a clean deck; another t
   await expect(page.getByRole("row", { name: /Acme Test/ })).toBeVisible();
   await expect(page.getByRole("row", { name: /NewCo/ })).toHaveCount(0);
   await page.goto("/new");
-  await page.getByRole("combobox", { name: "Brand pack" }).click();
-  await expect(page.getByRole("option", { name: "Acme Test" })).toBeVisible();
-  await expect(page.getByRole("option", { name: "NewCo" })).toHaveCount(0);
+  const packs = page.getByRole("combobox", { name: "Brand pack" });
+  await expect(packs.getByRole("option", { name: "Acme Test" })).toHaveCount(1);
+  await expect(packs.getByRole("option", { name: "NewCo" })).toHaveCount(0);
 });
