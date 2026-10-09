@@ -10,9 +10,7 @@ test("imports an unknown template, assigns roles, builds a clean deck; another t
   await page.getByRole("button", { name: "Import a template" }).click();
   await page.getByLabel("Pack id").fill("newco");
   await page.getByLabel("Name").fill("NewCo");
-  const chooser = page.waitForEvent("filechooser");
-  await page.getByLabel("Template file").click();
-  await (await chooser).setFiles(TEMPLATE);
+  await page.getByLabel("Template file").setInputFiles(TEMPLATE);
   await page.getByRole("button", { name: "Read the template" }).click();
 
   // review: one card per template slide, its rendered image and a drafted role

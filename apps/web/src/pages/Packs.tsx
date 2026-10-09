@@ -1,12 +1,23 @@
-import { FileUp, Globe, Lock, Upload, X } from "lucide-react";
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { Alert, AlertDescription, AlertTitle } from "diametral-ds/alert";
+import { Button } from "diametral-ds/button";
+import { Card } from "diametral-ds/card";
+import { FieldLegend, FieldSet } from "diametral-ds/field";
+import { Input } from "diametral-ds/input";
+import { Stepper, StepperIndicator, StepperItem, StepperSeparator, StepperTitle } from "diametral-ds/stepper";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "diametral-ds/table";
+import { Tag } from "diametral-ds/tag";
+import { Textarea } from "diametral-ds/textarea";
+import { FileUp, Globe, Lock, Pencil, Upload, X } from "lucide-react";
+import { Fragment, useCallback, useEffect, useState, type FormEvent } from "react";
 import { api, tool, upload, type Me, type Pack } from "../api.ts";
-import { Alert, Badge, Button, Field, FileDrop, PageHead, Spinner } from "../ui.tsx";
+import { Field, FileDrop, PageHead, Spinner } from "../ui.tsx";
 
 /** Settings > Brand packs: the packs this user sees, their visibility, and importing a new one. */
 export function Packs({ me }: { me: Me }) {
   const [packs, setPacks] = useState<Pack[] | null>(null);
   const [importing, setImporting] = useState(false);
+  const [editing, setEditing] = useState<Draft | null>(null);
+  const [opening, setOpening] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const reload = useCallback(() => tool<{ packs: Pack[] }>("list_packs").then((r) => setPacks(r.packs)), []);
   useEffect(() => {
@@ -23,12 +34,26 @@ export function Packs({ me }: { me: Me }) {
     }
   };
 
-  if (importing)
+  const edit = async (p: Pack) => {
+    setError(null);
+    setOpening(p.id);
+    try {
+      setEditing(await api<Draft>(`/api/packs/${p.id}/edit`, {}));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setOpening(null);
+    }
+  };
+
+  if (importing || editing)
     return (
       <Import
         me={me}
+        editing={editing}
         onDone={async () => {
           setImporting(false);
+          setEditing(null);
           await reload();
         }}
       />
@@ -36,49 +61,59 @@ export function Packs({ me }: { me: Me }) {
   return (
     <div className="cq-page">
       <PageHead title="Brand packs" description="Each company's template, charter and voice. A new pack is visible to your teams only until you share it.">
-        <Button variant="primary" onClick={() => setImporting(true)}>
+        <Button onClick={() => setImporting(true)}>
           <Upload /> Import a template
         </Button>
       </PageHead>
-      {error && <Alert tone="danger">{error}</Alert>}
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+      {opening && <Spinner label={`Opening ${opening}: rendering its template`} />}
       {!packs ? (
         <Spinner label="Loading packs" />
       ) : (
-        <div className="cq-card cq-table-wrap">
-          <table className="cq-table">
-            <thead>
-              <tr>
-                <th>Pack</th>
-                <th>Languages</th>
-                <th>Visible to</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
+        <Card className="cq-table-card">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Pack</TableHead>
+                <TableHead>Languages</TableHead>
+                <TableHead>Visible to</TableHead>
+                <TableHead />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {packs.map((p) => (
-                <tr key={p.id} data-pack={p.id}>
-                  <td>
+                <TableRow key={p.id} data-pack={p.id}>
+                  <TableCell>
                     <strong>{p.name}</strong>{" "}
                     <span className="cq-mono cq-muted">
                       {p.id} · v{p.version}
                     </span>
-                  </td>
-                  <td>{p.languages.join(", ")}</td>
-                  <td>
+                  </TableCell>
+                  <TableCell>{p.languages.join(", ")}</TableCell>
+                  <TableCell>
                     {p.visibility === "workspace" ? (
-                      <Badge tone="accent">
+                      <Tag tone="info">
                         <Globe /> Workspace
-                      </Badge>
+                      </Tag>
                     ) : (
-                      <Badge>
+                      <Tag tone="neutral">
                         <Lock /> {p.teams.join(", ") || "Owner only"}
-                      </Badge>
+                      </Tag>
                     )}
-                  </td>
-                  <td>
+                  </TableCell>
+                  <TableCell className="cq-row-actions">
+                    {p.editable && (
+                      <Button size="sm" variant="outline" disabled={!!opening} onClick={() => void edit(p)}>
+                        <Pencil /> Edit
+                      </Button>
+                    )}
                     {p.editable &&
                       (p.visibility === "team" ? (
-                        <Button size="sm" onClick={() => share(p, "workspace")}>
+                        <Button size="sm" variant="outline" onClick={() => share(p, "workspace")}>
                           Share with the workspace
                         </Button>
                       ) : (
@@ -86,12 +121,12 @@ export function Packs({ me }: { me: Me }) {
                           Restrict to my teams
                         </Button>
                       ))}
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </TableBody>
+          </Table>
+        </Card>
       )}
     </div>
   );
@@ -101,6 +136,9 @@ interface Draft {
   draft_id: string;
   manifest: Record<string, unknown> & { roles: Record<string, number[]>; never_clone: number[]; default_language: string | null; lint: { placeholders?: string[] } };
   slides: { number: number; layout: string; texts: string[]; image_url: string }[];
+  /** Set when the draft edits a published pack. */
+  voice?: string;
+  fonts?: string[];
 }
 
 const ROLES = ["cover", "summary", "divider", "subsection", "content", "closing", "appendix"] as const;
@@ -115,16 +153,17 @@ function rolesOf(d: Draft): Record<number, string> {
   return out;
 }
 
-function Import({ me, onDone }: { me: Me; onDone: () => Promise<void> }) {
+/** Import a template, or (`editing`) review and republish an existing pack: same review screen. */
+function Import({ me, editing, onDone }: { me: Me; editing?: Draft | null; onDone: () => Promise<void> }) {
   const [id, setId] = useState("");
-  const [name, setName] = useState("");
+  const [name, setName] = useState(editing ? String(editing.manifest.name ?? "") : "");
   const [template, setTemplate] = useState<File | null>(null);
-  const [draft, setDraft] = useState<Draft | null>(null);
-  const [roles, setRoles] = useState<Record<number, string>>({});
-  const [language, setLanguage] = useState("en");
-  const [placeholders, setPlaceholders] = useState("");
-  const [voice, setVoice] = useState("");
-  const [fonts, setFonts] = useState<string[]>([]);
+  const [draft, setDraft] = useState<Draft | null>(editing ?? null);
+  const [roles, setRoles] = useState<Record<number, string>>(editing ? rolesOf(editing) : {});
+  const [language, setLanguage] = useState(editing ? (editing.manifest.default_language ?? "") : "en");
+  const [placeholders, setPlaceholders] = useState((editing?.manifest.lint.placeholders ?? []).join("\n"));
+  const [voice, setVoice] = useState(editing?.voice ?? "");
+  const [fonts, setFonts] = useState<string[]>(editing?.fonts ?? []);
   const [visibility, setVisibility] = useState<"team" | "workspace">("team");
   const [busy, setBusy] = useState<string | null>(null);
   const [problems, setProblems] = useState<string[]>([]);
@@ -163,6 +202,7 @@ function Import({ me, onDone }: { me: Me; onDone: () => Promise<void> }) {
       const assigned = Object.entries(roles);
       const manifest = {
         ...draft.manifest,
+        ...(editing ? { name: name || draft.manifest.name } : {}),
         default_language: language || null,
         roles: {
           ...Object.fromEntries(
@@ -177,7 +217,7 @@ function Import({ me, onDone }: { me: Me; onDone: () => Promise<void> }) {
         manifest,
         visibility,
         teams: me.teams,
-        ...(voice.trim() ? { voice } : {}),
+        ...(voice.trim() || editing ? { voice } : {}),
       });
       if (r.status === "published") await onDone();
       else setProblems(r.problems ?? ["the pack did not validate"]);
@@ -188,38 +228,49 @@ function Import({ me, onDone }: { me: Me; onDone: () => Promise<void> }) {
   return (
     <div className="cq-page">
       <PageHead
-        title="Import a template"
+        title={editing ? `Edit ${String(editing.manifest.name ?? editing.manifest.id)}` : "Import a template"}
         description={
-          draft ? "Check the role of each slide, then validate: the template must lint clean and a test deck must build clean." : "The company's official template.pptx."
+          editing
+            ? "Change the slide roles, language, placeholders, voice or fonts. The pack must still lint clean and build a clean test deck before it replaces the current one."
+            : draft ? "Check the role of each slide, then validate: the template must lint clean and a test deck must build clean." : "The company's official template.pptx."
         }
       >
         <Button variant="ghost" onClick={() => void onDone()}>
           <X /> Cancel
         </Button>
       </PageHead>
-      <ol className="cq-steps">
-        {["Upload the template", "Review slide roles", "Validate and publish"].map((label, i) => (
-          <li key={label} data-state={i < stage ? "done" : i === stage ? "now" : undefined}>
-            <span>{i + 1}</span> {label}
-          </li>
-        ))}
-      </ol>
+      {!editing && (
+        <Stepper>
+          {["Upload the template", "Review slide roles", "Validate and publish"].map((label, i) => (
+            <Fragment key={label}>
+              {i > 0 && <StepperSeparator />}
+              <StepperItem state={i < stage ? "completed" : i === stage ? "active" : "inactive"}>
+                <StepperIndicator>{i + 1}</StepperIndicator>
+                <StepperTitle>{label}</StepperTitle>
+              </StepperItem>
+            </Fragment>
+          ))}
+        </Stepper>
+      )}
       {busy && <Spinner label={busy} />}
       {problems.length > 0 && (
-        <Alert tone="danger" title="The pack is not valid yet">
-          {problems.map((p) => (
-            <div key={p}>{p}</div>
-          ))}
+        <Alert variant="destructive">
+          <AlertTitle>The pack is not valid yet</AlertTitle>
+          <AlertDescription>
+            {problems.map((p) => (
+              <div key={p}>{p}</div>
+            ))}
+          </AlertDescription>
         </Alert>
       )}
 
       {!draft ? (
         <form onSubmit={extract} className="cq-card cq-form">
           <Field label="Pack id" htmlFor="p-id" hint="Lowercase letters, digits and dashes.">
-            <input className="cq-input" id="p-id" required pattern="[a-z0-9][a-z0-9-]*" value={id} onChange={(e) => setId(e.target.value)} placeholder="acme" />
+            <Input id="p-id" required pattern="[a-z0-9][a-z0-9-]*" value={id} onChange={(e) => setId(e.target.value)} placeholder="acme" />
           </Field>
           <Field label="Name" htmlFor="p-name">
-            <input className="cq-input" id="p-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Acme" />
+            <Input id="p-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Acme" />
           </Field>
           <FileDrop
             label="Template file"
@@ -228,7 +279,7 @@ function Import({ me, onDone }: { me: Me; onDone: () => Promise<void> }) {
             hint="or click to choose it"
             onFiles={(f) => setTemplate(f[0] ?? null)}
           />
-          <Button type="submit" variant="primary" disabled={!template || !id || !!busy}>
+          <Button type="submit" disabled={!template || !id || !!busy}>
             <FileUp /> Read the template
           </Button>
         </form>
@@ -256,27 +307,34 @@ function Import({ me, onDone }: { me: Me; onDone: () => Promise<void> }) {
           </ul>
           <div className="cq-columns">
             <div className="cq-card cq-form">
+              {editing && (
+                <Field label="Name" htmlFor="p-edit-name">
+                  <Input id="p-edit-name" value={name} onChange={(e) => setName(e.target.value)} />
+                </Field>
+              )}
               <Field label="Default language" htmlFor="p-lang" hint="Empty: ask for the language of every deck.">
-                <input className="cq-input" id="p-lang" value={language} onChange={(e) => setLanguage(e.target.value)} placeholder="en" />
+                <Input id="p-lang" value={language} onChange={(e) => setLanguage(e.target.value)} placeholder="en" />
               </Field>
               <Field label="Template placeholders" htmlFor="p-ph" hint="Sample copy that must never survive in a deck, one per line.">
-                <textarea className="cq-textarea" id="p-ph" rows={5} value={placeholders} onChange={(e) => setPlaceholders(e.target.value)} />
+                <Textarea id="p-ph" rows={5} value={placeholders} onChange={(e) => setPlaceholders(e.target.value)} />
               </Field>
-              <fieldset className="cq-field cq-fieldset">
-                <legend className="cq-label">Visible to</legend>
-                <label className="cq-check">
-                  <input type="radio" name="visibility" value="team" checked={visibility === "team"} onChange={() => setVisibility("team")} />
-                  My teams ({me.teams.join(", ") || "only me"})
-                </label>
-                <label className="cq-check">
-                  <input type="radio" name="visibility" value="workspace" checked={visibility === "workspace"} onChange={() => setVisibility("workspace")} />
-                  The whole workspace
-                </label>
-              </fieldset>
+              {!editing && (
+                <FieldSet>
+                  <FieldLegend variant="label">Visible to</FieldLegend>
+                  <label className="cq-check">
+                    <input type="radio" name="visibility" value="team" checked={visibility === "team"} onChange={() => setVisibility("team")} />
+                    My teams ({me.teams.join(", ") || "only me"})
+                  </label>
+                  <label className="cq-check">
+                    <input type="radio" name="visibility" value="workspace" checked={visibility === "workspace"} onChange={() => setVisibility("workspace")} />
+                    The whole workspace
+                  </label>
+                </FieldSet>
+              )}
             </div>
             <div className="cq-card cq-form">
               <Field label="Voice" htmlFor="p-voice">
-                <textarea className="cq-textarea" id="p-voice" rows={6} value={voice} onChange={(e) => setVoice(e.target.value)} placeholder="Tone, register, words to avoid…" />
+                <Textarea id="p-voice" rows={6} value={voice} onChange={(e) => setVoice(e.target.value)} placeholder="Tone, register, words to avoid…" />
               </Field>
               <FileDrop
                 label="Font files"
@@ -297,8 +355,8 @@ function Import({ me, onDone }: { me: Me; onDone: () => Promise<void> }) {
             </div>
           </div>
           <div>
-            <Button variant="primary" size="lg" disabled={!!busy} onClick={() => void publish()}>
-              Validate and publish
+            <Button size="lg" disabled={!!busy} onClick={() => void publish()}>
+              {editing ? "Validate and save" : "Validate and publish"}
             </Button>
           </div>
         </>

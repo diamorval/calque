@@ -1,138 +1,65 @@
-// The web app's primitives: thin wrappers over the cq-* classes of @calque/slide-ui/styles.css,
-// so the app and the deck UI share one visual language.
-import { CircleAlert, Info, Upload, X } from "lucide-react";
-import { useEffect, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
+// The web app's compositions over the Diametral design system (diametral-ds): the parts
+// every page repeats. Pages use the design system's components directly for the rest.
+import { Dialog as DsDialog, DialogContent, DialogHeader, DialogTitle } from "diametral-ds/dialog";
+import { Field as DsField, FieldDescription, FieldLabel } from "diametral-ds/field";
+import { FileUpload, FileUploadDescription, FileUploadIcon, FileUploadTitle } from "diametral-ds/file-upload";
+import { PageHeader, PageHeaderActions, PageHeaderDescription, PageHeaderHeading, PageHeaderTitle } from "diametral-ds/page-header";
+import { Spinner as DsSpinner } from "diametral-ds/spinner";
+import type { ReactNode } from "react";
 
-type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: "default" | "primary" | "accent" | "ghost" | "danger";
-  size?: "sm" | "md" | "lg";
-  icon?: boolean;
-};
-
-export function Button({ variant, size, icon, type = "button", ...rest }: ButtonProps) {
-  return (
-    <button
-      type={type}
-      className="cq-btn"
-      data-variant={variant === "default" ? undefined : variant}
-      data-size={size === "md" ? undefined : size}
-      data-icon={icon || undefined}
-      {...rest}
-    />
-  );
-}
-
-export function Badge(props: { tone?: "ok" | "danger" | "note" | "accent" | "solid"; children: ReactNode }) {
-  return (
-    <span className="cq-badge" data-tone={props.tone}>
-      {props.children}
-    </span>
-  );
-}
-
-export function Alert(props: { tone?: "danger" | "info"; title?: string; children: ReactNode }) {
-  return (
-    <div className="cq-alert" data-tone={props.tone} role={props.tone === "danger" ? "alert" : undefined}>
-      {props.tone === "danger" ? <CircleAlert /> : <Info />}
-      <div>
-        {props.title && <strong>{props.title}. </strong>}
-        {props.children}
-      </div>
-    </div>
-  );
-}
-
-export const Spinner = ({ label }: { label: string }) => <span className="cq-spinner">{label}</span>;
+/** A spinner that says what is happening. */
+export const Spinner = ({ label }: { label: string }) => (
+  <span className="cq-loading">
+    <DsSpinner label={label} /> {label}
+  </span>
+);
 
 export function Field(props: { label: string; htmlFor?: string; hint?: ReactNode; children: ReactNode }) {
   return (
-    <div className="cq-field">
-      <label htmlFor={props.htmlFor}>{props.label}</label>
+    <DsField>
+      <FieldLabel htmlFor={props.htmlFor}>{props.label}</FieldLabel>
       {props.children}
-      {props.hint && <span className="cq-hint">{props.hint}</span>}
-    </div>
+      {props.hint && <FieldDescription>{props.hint}</FieldDescription>}
+    </DsField>
   );
 }
 
 export function PageHead(props: { title: string; description?: ReactNode; children?: ReactNode }) {
   return (
-    <header className="cq-page-head">
-      <div>
-        <h1>{props.title}</h1>
-        {props.description && <p>{props.description}</p>}
-      </div>
-      {props.children && <div className="cq-page-actions">{props.children}</div>}
-    </header>
-  );
-}
-
-export function Tabs<T extends string>(props: { value: T; onChange: (v: T) => void; items: { id: T; label: string }[] }) {
-  return (
-    <div className="cq-tabs" role="tablist">
-      {props.items.map((t) => (
-        <button key={t.id} type="button" role="tab" aria-selected={props.value === t.id} onClick={() => props.onChange(t.id)}>
-          {t.label}
-        </button>
-      ))}
-    </div>
+    <PageHeader>
+      <PageHeaderHeading>
+        <div>
+          <PageHeaderTitle>{props.title}</PageHeaderTitle>
+          {props.description && <PageHeaderDescription>{props.description}</PageHeaderDescription>}
+        </div>
+        {props.children && <PageHeaderActions>{props.children}</PageHeaderActions>}
+      </PageHeaderHeading>
+    </PageHeader>
   );
 }
 
 /** A modal dialog, open while mounted. Esc, the close button and a click outside close it. */
 export function Dialog(props: { title: string; onClose: () => void; wide?: boolean; children: ReactNode }) {
-  const ref = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    ref.current?.showModal();
-  }, []);
   return (
-    <dialog
-      ref={ref}
-      className="cq-dialog"
-      aria-label={props.title}
-      data-wide={props.wide || undefined}
-      onClose={props.onClose}
-      onClick={(e) => e.target === ref.current && props.onClose()}
-    >
-      <div className="cq-dialog-head">
-        <h2>{props.title}</h2>
-        <Button variant="ghost" size="sm" icon aria-label="Close" onClick={props.onClose}>
-          <X />
-        </Button>
-      </div>
-      {props.children}
-    </dialog>
+    <DsDialog open onOpenChange={(open) => !open && props.onClose()}>
+      <DialogContent className="cq-modal" data-wide={props.wide || undefined}>
+        <DialogHeader>
+          <DialogTitle>{props.title}</DialogTitle>
+        </DialogHeader>
+        {props.children}
+      </DialogContent>
+    </DsDialog>
   );
 }
 
 /** A drop zone that also opens the file chooser on click. */
 export function FileDrop(props: { label: string; accept: string; multiple?: boolean; title: string; hint: string; onFiles: (files: File[]) => void }) {
-  const input = useRef<HTMLInputElement>(null);
-  const [over, setOver] = useState(false);
   return (
-    <>
-      <button
-        type="button"
-        className="cq-drop"
-        data-over={over || undefined}
-        aria-label={props.label}
-        onClick={() => input.current?.click()}
-        onDragOver={(e) => {
-          e.preventDefault();
-          setOver(true);
-        }}
-        onDragLeave={() => setOver(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setOver(false);
-          props.onFiles([...e.dataTransfer.files]);
-        }}
-      >
-        <Upload />
-        <strong>{props.title}</strong>
-        <span>{props.hint}</span>
-      </button>
-      <input ref={input} type="file" hidden accept={props.accept} multiple={props.multiple} onChange={(e) => props.onFiles([...(e.target.files ?? [])])} />
-    </>
+    <FileUpload aria-label={props.label} accept={props.accept} multiple={props.multiple ?? false} onFiles={props.onFiles}>
+      <FileUploadIcon />
+      <FileUploadTitle>{props.title}</FileUploadTitle>
+      <FileUploadDescription>{props.hint}</FileUploadDescription>
+    </FileUpload>
   );
 }
 
@@ -140,8 +67,8 @@ export function FileDrop(props: { label: string; accept: string; multiple?: bool
 export function Mark({ size = 28 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden>
-      <rect x="3" y="7" width="20" height="20" rx="5" fill="currentColor" opacity="0.28" />
-      <rect x="9" y="3" width="20" height="20" rx="5" fill="currentColor" />
+      <rect x="3" y="7" width="20" height="20" fill="currentColor" opacity="0.28" />
+      <rect x="9" y="3" width="20" height="20" fill="currentColor" />
     </svg>
   );
 }

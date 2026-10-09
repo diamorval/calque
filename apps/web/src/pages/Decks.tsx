@@ -1,8 +1,10 @@
+import { Button } from "diametral-ds/button";
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "diametral-ds/empty";
 import { LayoutGrid, Plus } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../api.ts";
 import { go, navigate } from "../nav.ts";
-import { ago, Button, PageHead, Spinner } from "../ui.tsx";
+import { ago, PageHead, Spinner } from "../ui.tsx";
 
 interface DeckRow {
   id: string;
@@ -21,20 +23,26 @@ export function Decks() {
   return (
     <div className="cq-page">
       <PageHead title="Decks" description="Every deck you co-edit with the agent, newest first.">
-        <Button variant="primary" onClick={() => navigate("/new")}>
+        <Button onClick={() => navigate("/new")}>
           <Plus /> New deck
         </Button>
       </PageHead>
       {!decks && <Spinner label="Loading decks" />}
       {decks?.length === 0 && (
-        <div className="cq-empty cq-card cq-hero-empty">
-          <LayoutGrid />
-          <strong>No deck yet</strong>
-          <span>Describe the deck you need; the agent builds it on your company's brand pack.</span>
-          <Button variant="primary" onClick={() => navigate("/new")}>
-            <Plus /> New deck
-          </Button>
-        </div>
+        <Empty className="border">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <LayoutGrid />
+            </EmptyMedia>
+            <EmptyTitle>No deck yet</EmptyTitle>
+            <EmptyDescription>Describe the deck you need; the agent builds it on your company's brand pack.</EmptyDescription>
+          </EmptyHeader>
+          <EmptyContent>
+            <Button onClick={() => navigate("/new")}>
+              <Plus /> New deck
+            </Button>
+          </EmptyContent>
+        </Empty>
       )}
       {!!decks?.length && (
         <ul className="cq-deck-grid">

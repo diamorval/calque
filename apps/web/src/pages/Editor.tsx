@@ -1,10 +1,14 @@
 import { DeckViewer, type DeckView } from "@calque/slide-ui";
+import { Alert, AlertDescription } from "diametral-ds/alert";
+import { Button } from "diametral-ds/button";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "diametral-ds/table";
+import { Tag } from "diametral-ds/tag";
 import { CircleCheck, Download, History, Play, Sparkles, TriangleAlert, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { agent, tool } from "../api.ts";
 import { Chat } from "../components/Chat.tsx";
 import { navigate } from "../nav.ts";
-import { ago, Badge, Button, Dialog, Spinner } from "../ui.tsx";
+import { ago, Dialog, Spinner } from "../ui.tsx";
 
 type Deck = DeckView & { versions: { version: number; note: string; author: string; created_at: string }[] };
 
@@ -47,9 +51,9 @@ export function Editor({ id }: { id: string }) {
     return (
       <div className="cq-center">
         {error ? (
-          <p className="cq-alert" data-tone="danger" role="alert">
-            {error}
-          </p>
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
         ) : (
           <Spinner label="Loading deck" />
         )}
@@ -64,22 +68,21 @@ export function Editor({ id }: { id: string }) {
           <>
             {errors !== null &&
               (errors ? (
-                <Badge tone="danger">
+                <Tag tone="danger">
                   <TriangleAlert /> {errors} lint error{errors > 1 ? "s" : ""}
-                </Badge>
+                </Tag>
               ) : (
-                <Badge tone="ok">
+                <Tag tone="success">
                   <CircleCheck /> Lint clean
-                </Badge>
+                </Tag>
               ))}
             <Button variant="ghost" onClick={() => setHistory(true)}>
               <History /> History
             </Button>
-            <Button onClick={() => navigate(`/present/${id}`)}>
+            <Button variant="outline" onClick={() => navigate(`/present/${id}`)}>
               <Play /> Present
             </Button>
             <Button
-              variant="primary"
               onClick={async () => location.assign((await tool<{ download_url: string }>("export_pptx", { deck_id: id })).download_url)}
             >
               <Download /> Export PPTX
@@ -112,7 +115,7 @@ export function Editor({ id }: { id: string }) {
       {error && (
         <div className="cq-toast" role="alert">
           <TriangleAlert /> <span>{error}</span>
-          <Button variant="ghost" size="sm" icon aria-label="Dismiss" onClick={() => setError(null)}>
+          <Button variant="ghost" size="icon-sm" aria-label="Dismiss" onClick={() => setError(null)}>
             <X />
           </Button>
         </div>
@@ -120,32 +123,33 @@ export function Editor({ id }: { id: string }) {
       {history && (
         <Dialog title="Version history" wide onClose={() => setHistory(false)}>
           <div className="cq-dialog-body">
-            <table className="cq-table">
-              <thead>
-                <tr>
-                  <th>Version</th>
-                  <th>Change</th>
-                  <th>By</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Version</TableHead>
+                  <TableHead>Change</TableHead>
+                  <TableHead>By</TableHead>
+                  <TableHead />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {[...deck.versions].reverse().map((v) => (
-                  <tr key={v.version}>
-                    <td>
+                  <TableRow key={v.version}>
+                    <TableCell>
                       <span className="cq-mono">v{v.version}</span>
-                    </td>
-                    <td>
+                    </TableCell>
+                    <TableCell>
                       {v.note}
                       <div className="cq-hint">{ago(v.created_at)}</div>
-                    </td>
-                    <td>{v.author}</td>
-                    <td>
+                    </TableCell>
+                    <TableCell>{v.author}</TableCell>
+                    <TableCell>
                       {v.version === deck.head ? (
-                        <Badge tone="accent">Current</Badge>
+                        <Tag>Current</Tag>
                       ) : (
                         <Button
                           size="sm"
+                          variant="outline"
                           aria-label={`Restore v${v.version}`}
                           onClick={() => {
                             setHistory(false);
@@ -155,11 +159,11 @@ export function Editor({ id }: { id: string }) {
                           Restore
                         </Button>
                       )}
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         </Dialog>
       )}
