@@ -14,7 +14,7 @@ import { Conflict } from "./decks.ts";
 import { EngineError, REPO } from "./engine.ts";
 import { buildServer, UI_HTML } from "./mcp.ts";
 import { InvalidModel, isAdmin } from "./models.ts";
-import { addFont, draftDir, draftPack, Forbidden, NotFound, publishDraft, setVisibility, type User } from "./packs.ts";
+import { addFont, draftDir, draftPack, editPack, Forbidden, NotFound, publishDraft, setVisibility, type User } from "./packs.ts";
 import type { Sessions } from "./session.ts";
 import { TOOLS, toolNamed, type App } from "./tools.ts";
 
@@ -176,6 +176,7 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
       return publishDraft(app.db, user, app.data, param(c, "id"), b);
     }),
   );
+  http.post("/api/packs/:id/edit", route((c, user) => editPack(app.db, user, app.data, param(c, "id"))));
   http.post(
     "/api/packs/:id/visibility",
     route(async (c, user) => {

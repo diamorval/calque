@@ -204,6 +204,53 @@ export async function addFont(user: User, data: string, draftId: string, name: s
   return { fonts: (await readdir(join(dir, "fonts"))).sort() };
 }
 
+/** Edit a published pack, step 1: copy it whole (exemplars, icons, notes included) into a draft
+with one PNG per template slide, for the same review as an import. Owner only. */
+export async function editPack(db: Db, user: User, data: string, id: string) {
+  const pack = await getPack(db, user, id);
+  if (!user.local && pack.owner !== user.id) throw new Forbidden(`only the owner of ${id} edits it`);
+  const draftId = randomUUID();
+  const dir = join(data, "pack-drafts", draftId);
+  await cp(pack.dir, dir, { recursive: true });
+  await mkdir(join(dir, "fonts"), { recursive: true });
+  await writeFile(join(dir, "owner"), user.id);
+  await writeFile(join(dir, "edits"), id);
+  await engine("render", { pack: dir, pptx: join(dir, "template.pptx"), out_dir: join(dir, "render") });
+  const tmap = parse(await readFile(join(dir, "template-map.yaml"), "utf8")) as Draft["template_map"];
+  return {
+    draft_id: draftId,
+    manifest: parse(await readFile(join(dir, "pack.yaml"), "utf8")) as Record<string, unknown>,
+    voice: existsSync(join(dir, "voice.md")) ? await readFile(join(dir, "voice.md"), "utf8") : "",
+    fonts: (await readdir(join(dir, "fonts"))).sort(),
+    slides: tmap.slides.map((s) => ({
+      number: s.number,
+      layout: s.layout,
+      texts: s.shapes.filter((sh) => sh.kind === "text" && sh.text).map((sh) => sh.text as string),
+      image_url: `/api/packs/drafts/${draftId}/slides/${s.number}.png`,
+    })),
+  };
+}
+
+/** Edit, step 2: the reviewed manifest and voice over the copy; validated like an import, then
+replaces the pack (same id, same visibility). */
+async function publishEdit(db: Db, data: string, dir: string, id: string, input: { manifest: Record<string, unknown>; voice?: string | undefined }) {
+  const fonts = (await readdir(join(dir, "fonts"))).sort();
+  const manifest = { ...input.manifest, id, ...(fonts.length ? { fonts: { ...(input.manifest.fonts as object), files: fonts } } : {}) };
+  await writeFile(join(dir, "pack.yaml"), stringify(manifest));
+  if (input.voice !== undefined) await writeFile(join(dir, "voice.md"), input.voice);
+  await engine("validate_pack", { pack: dir });
+  const problems = await validateStaged(dir, manifest);
+  if (problems.length) return { status: "invalid" as const, problems };
+
+  const out = join(data, "packs", id);
+  const skip = new Set(["owner", "edits", "render"].map((f) => join(dir, f)));
+  await rm(out, { recursive: true, force: true });
+  await cp(dir, out, { recursive: true, filter: (src) => !skip.has(src) });
+  await db.query("update packs set dir = $2 where id = $1", [id, out]);
+  await rm(dir, { recursive: true, force: true });
+  return { status: "published" as const, id };
+}
+
 /** Web import, step 2: the reviewed manifest and voice; validated, then published (importPack). */
 export async function publishDraft(
   db: Db,
@@ -213,6 +260,7 @@ export async function publishDraft(
   input: { manifest: Record<string, unknown>; voice?: string | undefined; visibility: "workspace" | "team"; teams?: string[] | undefined },
 ) {
   const dir = await draftDir(user, data, draftId);
+  if (existsSync(join(dir, "edits"))) return publishEdit(db, data, dir, await readFile(join(dir, "edits"), "utf8"), input);
   const r = await importPack(db, user, data, {
     ...input,
     template: join(dir, "template.pptx"),

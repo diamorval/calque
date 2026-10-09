@@ -1,3 +1,6 @@
+import { Alert, AlertDescription } from "diametral-ds/alert";
+import { Button } from "diametral-ds/button";
+import { Kbd } from "diametral-ds/kbd";
 import { ArrowUp, Check, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { agent } from "../api.ts";
@@ -149,17 +152,18 @@ export function Chat(props: {
           </div>
         )}
         {error && (
-          <p className="cq-alert" data-tone="danger" role="alert">
-            {error}
-          </p>
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
         )}
       </div>
       {shown.length === 0 && !steps && !!props.suggestions?.length && (
         <div className="cq-chips">
           {props.suggestions.map((s) => (
-            <button
+            <Button
               key={s}
-              type="button"
+              variant="outline"
+              size="sm"
               className="cq-chip"
               onClick={() => {
                 setText(s);
@@ -167,7 +171,7 @@ export function Chat(props: {
               }}
             >
               {s}
-            </button>
+            </Button>
           ))}
         </div>
       )}
@@ -191,11 +195,11 @@ export function Chat(props: {
           {model && <span className="cq-hint">Model: {model}</span>}
           <span className="cq-spacer" />
           <span className="cq-hint cq-keys">
-            <kbd className="cq-kbd">↵</kbd> send · <kbd className="cq-kbd">⇧↵</kbd> new line
+            <Kbd>↵</Kbd> send · <Kbd>⇧↵</Kbd> new line
           </span>
-          <button type="submit" className="cq-btn" data-variant="accent" data-icon aria-label="Send" disabled={!!steps || props.disabled || !text.trim()}>
+          <Button type="submit" size="icon" aria-label="Send" disabled={!!steps || props.disabled || !text.trim()}>
             <ArrowUp />
-          </button>
+          </Button>
         </div>
       </form>
     </section>

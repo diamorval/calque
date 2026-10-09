@@ -3,14 +3,14 @@ import tseslint from "typescript-eslint";
 import globals from "globals";
 import reactHooks from "eslint-plugin-react-hooks";
 
-const UI = "the app's primitives (apps/web/src/ui.tsx) and the cq-* classes of @calque/slide-ui/styles.css";
+const UI = "the Diametral design system (diametral-ds), the app's compositions (apps/web/src/ui.tsx) and the cq-* classes of @calque/slide-ui/styles.css";
 
 export default tseslint.config(
   { ignores: ["**/dist/**", "**/node_modules/**", "engine/**", "**/.turbo/**", ".cache/**", "packs/**", "**/test-results/**", "**/playwright-report/**"] },
   js.configs.recommended,
   ...tseslint.configs.strict,
   { languageOptions: { globals: { ...globals.node } } },
-  // apps/web is built only from Calque UI: its primitives, cq-* classes and --cq-* tokens.
+  // apps/web is built only from the Diametral design system and Calque UI: cq-* classes, --ds-* and --cq-* tokens.
   {
     files: ["apps/web/src/**/*.{ts,tsx}"],
     languageOptions: { globals: { ...globals.browser } },
