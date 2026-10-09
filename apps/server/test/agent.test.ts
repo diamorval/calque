@@ -58,6 +58,20 @@ describe("web agent", { timeout: ENGINE_TIMEOUT }, () => {
     await expect(app.models.setDefault({ id: "bob", teams: ["sales"] }, "env")).rejects.toThrow(Forbidden);
   });
 
+  it("removing the default model promotes the most recently configured one", async () => {
+    const add = (model: string) => api("/api/models", { provider: "openai-compatible", model, base_url: fake.url, api_key: "good-key" });
+    await add("older");
+    await add("newer");
+    expect((await api("/api/models/openai-compatible:older/default", {})).status).toBe(200);
+    expect((await api("/api/models/openai-compatible:older", undefined, "DELETE")).status).toBe(200);
+    const models = (await api("/api/models")).json.models as Json[];
+    expect(models.filter((m) => m.is_default).map((m) => m.id)).toEqual(["openai-compatible:newer"]);
+    expect((await api("/api/agent/chat", { messages: [{ role: "user", content: "hi" }] })).json.model).toBe("openai-compatible:newer");
+
+    await api("/api/models/openai-compatible:other", undefined, "DELETE"); // not the default: the default stays
+    expect((await app.models.resolve()).id).toBe("openai-compatible:newer");
+  });
+
   it("builds a deck from a brief through the MCP tools, to 0 lint error", async () => {
     script = (b) => {
       const steps = toolsCalled(b);
@@ -82,6 +96,25 @@ describe("web agent", { timeout: ENGINE_TIMEOUT }, () => {
     expect(tools).not.toContain("add_comment"); // UI-only
     expect(JSON.stringify(fake.requests.at(-3))).toContain("slots"); // the template map came back
     expect(r.json.messages.filter((m: Json) => m.role === "tool")).toHaveLength(3);
+  });
+
+  it("streams a failed tool call with its error, and the model gets the error back", async () => {
+    script = (b) => (toolsCalled(b) === 0 ? { tool: { name: "create_deck", args: { deck: { title: "x" } } } } : { content: "The deck was invalid." });
+    const res = await http.request("/api/agent/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/x-ndjson" },
+      body: JSON.stringify({ pack_id: "acme-test", messages: [{ role: "user", content: "build" }] }),
+    });
+    const lines = (await res.text()).trim().split("\n").map((l) => JSON.parse(l));
+    const step = lines[0].step.tools[0];
+    expect(step.name).toBe("create_deck");
+    expect(step.error).toMatch(/\S/);
+    const toolMessage = (fake.requests.at(-1) as Json).messages.findLast((m: Json) => m.role === "tool").content;
+    expect(toolMessage).toContain(JSON.parse(step.error).message); // the model sees the full error to correct itself
+    const done = lines.at(-1).done;
+    expect(done.text).toBe("The deck was invalid.");
+    const result = done.messages.find((m: Json) => m.role === "tool").content[0];
+    expect(result.output.type).toBe("error-text"); // the conversation keeps the failure for the chat's history
   });
 
   it("applies 5 typical comments (colour, rewording, move, chart, deletion) to 0 lint error", async () => {

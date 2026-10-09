@@ -3,7 +3,7 @@ import { Button } from "diametral-ds/button";
 import { Kbd } from "diametral-ds/kbd";
 import { ArrowUp, Check, Paperclip, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { agent, upload } from "../api.ts";
+import { agent, upload, type ToolStep } from "../api.ts";
 
 /** A file attached to the conversation, uploaded to /api/files. */
 interface Attached {
@@ -15,7 +15,7 @@ const ACCEPT = "image/*,.pptx,.pdf,.docx,.xlsx,.csv,.txt,.md";
 /** An AI SDK model message, as the server returns them; the client keeps the conversation. */
 export interface ChatMessage {
   role: "user" | "assistant" | "tool" | "system";
-  content: string | { type: string; text?: string; toolName?: string }[];
+  content: string | { type: string; text?: string; toolName?: string; toolCallId?: string; output?: { type: string; value?: unknown } }[];
 }
 /** A message sent from outside the composer (a toolbar action), with the workflow it runs. */
 export interface Ask {
@@ -43,23 +43,58 @@ export const saveChat = (key: string, messages: unknown[]) => {
   }
 };
 
-function lines(m: ChatMessage): { text: string; tools: string[] } {
+/** A failed tool's error, short: the server's `message` when the error is its JSON. */
+function shortError(error: string, max = 160): string {
+  let msg = error;
+  try {
+    const e = JSON.parse(error);
+    if (typeof e?.message === "string") msg = e.message;
+    else if (Array.isArray(e)) msg = e.map((c) => c?.text ?? "").join(" ");
+  } catch {
+    // not JSON: the message as is
+  }
+  return msg.length > max ? `${msg.slice(0, max - 1)}…` : msg;
+}
+
+/** The errors of a conversation's failed tool calls, by call id. */
+function failures(messages: ChatMessage[]): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const m of messages)
+    if (m.role === "tool" && typeof m.content !== "string")
+      for (const p of m.content)
+        if (p.type === "tool-result" && p.toolCallId && p.output?.type.startsWith("error"))
+          out.set(p.toolCallId, typeof p.output.value === "string" ? p.output.value : JSON.stringify(p.output.value));
+  return out;
+}
+
+function lines(m: ChatMessage, failed: Map<string, string>): { text: string; tools: ToolStep[] } {
   if (typeof m.content === "string") return { text: m.content, tools: [] };
   return {
     text: m.content.filter((p) => p.type === "text").map((p) => p.text).join("\n"),
-    tools: m.content.filter((p) => p.type === "tool-call").map((p) => p.toolName ?? ""),
+    tools: m.content
+      .filter((p) => p.type === "tool-call")
+      .map((p) => {
+        const error = p.toolCallId ? failed.get(p.toolCallId) : undefined;
+        return { name: p.toolName ?? "", ...(error !== undefined ? { error } : {}) };
+      }),
   };
 }
 
-/** The tools the agent called, one row each; the last one live while it runs. */
-function Trace({ tools, live }: { tools: string[]; live?: boolean }) {
+/** The tools the agent called, one row each (a check, or a cross and why); the last one live while it runs. */
+function Trace({ tools, live }: { tools: ToolStep[]; live?: boolean }) {
   return (
     <ul className="cq-trace">
-      {tools.map((t, i) => (
-        <li key={i}>
-          <Check /> <span className="cq-mono">{t}</span>
-        </li>
-      ))}
+      {tools.map((t, i) =>
+        t.error === undefined ? (
+          <li key={i}>
+            <Check aria-label="done" /> <span className="cq-mono">{t.name}</span>
+          </li>
+        ) : (
+          <li key={i} data-failed>
+            <X aria-label="failed" /> <span className="cq-mono">{t.name}</span> <span>{shortError(t.error)}</span>
+          </li>
+        ),
+      )}
       {live && (
         <li data-live>
           <span className="cq-spinner" /> <span className="cq-shimmer">{tools.length ? "Working" : "Thinking"}</span>
@@ -89,7 +124,7 @@ export function Chat(props: {
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>(() => load(props.storageKey));
   const [text, setText] = useState("");
-  const [steps, setSteps] = useState<string[] | null>(null);
+  const [steps, setSteps] = useState<ToolStep[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [model, setModel] = useState<string | null>(null);
   const [workflow, setWorkflow] = useState<Ask["workflow"]>();
@@ -162,10 +197,11 @@ export function Chat(props: {
   }, [props.ask]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // one turn per run of assistant messages: the agent's steps, then its answer
-  const shown: { role: ChatMessage["role"]; text: string; tools: string[] }[] = [];
+  const shown: { role: ChatMessage["role"]; text: string; tools: ToolStep[] }[] = [];
+  const failed = failures(messages);
   for (const m of messages) {
     if (m.role !== "user" && m.role !== "assistant") continue;
-    const { text, tools } = lines(m);
+    const { text, tools } = lines(m, failed);
     if (!text && !tools.length) continue;
     const prev = shown.at(-1);
     if (m.role === "assistant" && prev?.role === "assistant") {

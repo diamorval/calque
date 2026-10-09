@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -66,9 +67,11 @@ def build(
     out: str | Path,
     base: str | Path | None = None,
     image_roots: list[str | Path] | None = None,
+    author: str | None = None,
 ) -> BuildReport:
     """Build a deck. `base` is the imported PPTX a DeckSpec with `base` edits. Image values are
-    paths relative to `image_roots` (default: the pack, and the base's folder)."""
+    paths relative to `image_roots` (default: the pack, and the base's folder). `author` goes in
+    the document properties (else they name no one)."""
     _load_renderers()
     raw = data.model_dump(exclude_none=True) if isinstance(data, DeckSpec) else data
     deck, warnings = validate(raw, pack)
@@ -128,8 +131,32 @@ def build(
         pn = tmap_by_n[n].get("page_number")
         if pn is not None:
             _renumber(new, pn, pos)
+    _own_properties(prs, deck.title, author)
     prs.save(str(out))
     return report
+
+
+# presentation parts holding the template's edit history (who changed what, when)
+HISTORY_RELS = ("/changesInfo", "/revisionInfo")
+
+
+def _own_properties(prs, title: str, author: str | None) -> None:
+    """The deck's document properties, not the template's: no template authors, no python-pptx
+    defaults, no revision history parts (dropped with their relationship, so with their content
+    type on save)."""
+    core = prs.core_properties
+    for child in list(core._element):
+        core._element.remove(child)
+    now = datetime.now(UTC).replace(tzinfo=None, microsecond=0)
+    core.title = title
+    core.author = author or ""
+    core.last_modified_by = author or ""
+    core.revision = 1
+    core.created = now
+    core.modified = now
+    rels = prs.part.rels
+    for rid in [r for r, rel in rels.items() if rel.reltype.endswith(HISTORY_RELS)]:
+        rels.pop(rid)
 
 
 def _apply_clone(

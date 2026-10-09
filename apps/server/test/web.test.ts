@@ -83,6 +83,18 @@ describe("web app routes", { timeout: ENGINE_TIMEOUT }, () => {
     expect((await req("/api/me", { cookie: `${alice}x` })).status).toBe(401);
   });
 
+  it("sends the user back only to a path on this site after sign-in", async () => {
+    const signIn = async (back: string) => {
+      const login = await req(`/auth/login?return=${encodeURIComponent(back)}`);
+      const page = await (await fetch(new URL(login.headers.get("location") ?? ""))).text();
+      const link = new URL((page.match(/href="([^"]+)">Sign in as alice/)?.[1] ?? "").replace(/&amp;/g, "&"));
+      return (await req(link.pathname + link.search, { cookie: cookieOf(login, "calque_login") })).headers.get("location");
+    };
+    expect(await signIn("/decks/1?v=2")).toBe("/decks/1?v=2");
+    for (const evil of ["//evil.example/x", "/\\evil.example/x", "/\t/evil.example/x", "https://evil.example/x", "evil.example"])
+      expect(await signIn(evil)).toBe("/");
+  });
+
   it("imports a template as a draft, publishes it to the importer's teams, hides it from others", async () => {
     const form = new FormData();
     form.set("id", "newco");
@@ -216,7 +228,7 @@ describe("web app routes", { timeout: ENGINE_TIMEOUT }, () => {
       body: JSON.stringify({ messages: [{ role: "user", content: "which packs?" }] }),
     });
     const lines = (await res.text()).trim().split("\n").map((l) => JSON.parse(l));
-    expect(lines[0]).toMatchObject({ step: { tools: ["list_packs"] } });
+    expect(lines[0]).toMatchObject({ step: { tools: [{ name: "list_packs" }] } });
     expect(lines.at(-1)).toMatchObject({ done: { model: "env", text: "3 packs" } });
   });
 });

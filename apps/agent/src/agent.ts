@@ -2,7 +2,7 @@
 // It holds no business logic (rule 1) and no provider SDK (rule 2): knowledge comes from the server's
 // core:// and pack:// resources and prompts, every action is an MCP tool call.
 import type { Client } from "@modelcontextprotocol/client";
-import { runTools, type Message, type ModelConfig, type ToolDef } from "@calque/llm";
+import { runTools, type Message, type ModelConfig, type Step, type ToolDef } from "@calque/llm";
 
 export type { Message } from "@calque/llm";
 
@@ -19,7 +19,8 @@ export interface ChatInput {
   deck_id?: string | undefined;
   /** Files the user attached, as the server prepared them: an image's `ref`, a document's `text`. */
   files?: Attachment[] | undefined;
-  onStep?: ((step: { text: string; toolCalls: { toolName: string; input: unknown }[] }) => void) | undefined;
+  /** after each step: the tools called, a failed one with its `error` */
+  onStep?: ((step: Step) => void) | undefined;
 }
 
 const ROLE = `You are Calque's slide co-editor, inside its web app. You work with the user on a deck that
@@ -85,9 +86,10 @@ async function tools(client: Client): Promise<ToolDef[]> {
       name: t.name,
       description: t.description,
       inputSchema: t.inputSchema as Record<string, unknown>,
-      // a failed call goes back to the model as a result, so it can correct itself
+      // a failed call goes back to the model as an error result (the full JSON), so it can correct itself
       execute: async (args: Record<string, unknown>) => {
         const r = await client.callTool({ name: t.name, arguments: args });
+        if (r.isError) throw new Error(JSON.stringify(r.structuredContent ?? r.content));
         return r.structuredContent ?? r.content;
       },
     })),

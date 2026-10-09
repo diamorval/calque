@@ -35,8 +35,14 @@ export async function fileArg(f: File): Promise<{ base64: string; name: string }
 export const upload = <T = Record<string, unknown>>(path: string, form: FormData) =>
   fetch(path, { method: "POST", body: form }).then((r) => parse<T>(r));
 
+/** A tool the agent called; `error` when it failed. */
+export interface ToolStep {
+  name: string;
+  error?: string;
+}
+
 /** An agent run, streamed: one callback per step, the result at the end. */
-export async function agent<T>(path: string, body: unknown, onStep: (tools: string[]) => void): Promise<T> {
+export async function agent<T>(path: string, body: unknown, onStep: (tools: ToolStep[]) => void): Promise<T> {
   const res = await fetch(path, {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/x-ndjson" },
