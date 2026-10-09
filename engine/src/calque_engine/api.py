@@ -28,10 +28,12 @@ def op_validate(pack: str, deck: dict[str, Any]) -> dict[str, Any]:
     return {"warnings": _issues(warnings)}
 
 
-def op_build(pack: str, deck: dict[str, Any], out: str, base: str | None = None) -> dict[str, Any]:
+def op_build(
+    pack: str, deck: dict[str, Any], out: str, base: str | None = None, author: str | None = None
+) -> dict[str, Any]:
     from .build import build
 
-    r = build(deck, load_pack(pack), out, base=base)
+    r = build(deck, load_pack(pack), out, base=base, author=author)
     return {
         "path": str(r.path),
         "warnings": _issues(r.warnings),
