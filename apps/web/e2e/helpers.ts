@@ -7,11 +7,10 @@ export async function signIn(page: Page, user: "alice" | "bob", path = "/") {
   await page.goto(path);
   await page.getByRole("button", { name: "Sign in with SSO" }).click();
   await page.getByRole("link", { name: `Sign in as ${user}` }).click();
-  await expect(page.getByRole("button", { name: "Sign out" })).toHaveText(user === "alice" ? "AL" : "BO");
+  await expect(page.getByLabel(/^Signed in as/)).toHaveText(user === "alice" ? "AL" : "BO");
 }
 
-/** Pick an option in a design-system Select (base-ui: a combobox and a listbox). */
+/** Pick an option, by its label, in a native select. */
 export async function choose(page: Page, label: string | RegExp, option: string) {
-  await page.getByRole("combobox", { name: label }).click();
-  await page.getByRole("option", { name: option, exact: true }).click();
+  await page.getByRole("combobox", { name: label }).selectOption({ label: option });
 }

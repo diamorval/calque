@@ -48,6 +48,6 @@ test("a deck end to end: brief, build, comment, apply, history, export, present"
   await expect(page.getByRole("heading", { name: "Quarterly review" })).toBeVisible();
 
   // the deck list
-  await page.getByRole("button", { name: "Decks" }).click();
-  await expect(page.getByRole("row", { name: /Quarterly review/ })).toContainText("v3");
+  await page.getByRole("link", { name: "Decks" }).click();
+  await expect(page.getByRole("link", { name: /Quarterly review/ })).toContainText("v3");
 });

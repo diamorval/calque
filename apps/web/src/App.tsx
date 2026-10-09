@@ -1,7 +1,7 @@
-import { ConsoleLayout, Spinner, type ConsoleNavGroup } from "@diametral/design-system/react";
+import { Cpu, LayoutGrid, LogOut, Moon, Palette, Plus, Sun, type LucideIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, ApiError, type Me } from "./api.ts";
-import { navigate, usePath } from "./nav.ts";
+import { go, usePath } from "./nav.ts";
 import { Decks } from "./pages/Decks.tsx";
 import { Editor } from "./pages/Editor.tsx";
 import { Login } from "./pages/Login.tsx";
@@ -9,12 +9,7 @@ import { Models } from "./pages/Models.tsx";
 import { NewDeck } from "./pages/NewDeck.tsx";
 import { Packs } from "./pages/Packs.tsx";
 import { Presenter } from "./pages/Presenter.tsx";
-
-const ROUTES: Record<string, string> = { decks: "/", models: "/settings/models", packs: "/settings/packs" };
-const NAV: ConsoleNavGroup[] = [
-  { items: [{ id: "decks", label: "Decks" }] },
-  { group: "Settings", items: [{ id: "models", label: "AI models" }, { id: "packs", label: "Brand packs" }] },
-];
+import { Mark, Spinner } from "./ui.tsx";
 
 function page(path: string, me: Me) {
   const deck = path.match(/^\/d\/([^/]+)/)?.[1];
@@ -25,34 +20,90 @@ function page(path: string, me: Me) {
   return <Decks />;
 }
 
+function NavItem(props: { href: string; label: string; short: string; icon: LucideIcon; active: boolean }) {
+  const Icon = props.icon;
+  return (
+    <a className="cq-nav" href={props.href} aria-label={props.label} title={props.label} aria-current={props.active ? "page" : undefined} onClick={(e) => go(e, props.href)}>
+      <Icon />
+      <span aria-hidden>{props.short}</span>
+    </a>
+  );
+}
+
+type Theme = "light" | "dark";
+const THEME_KEY = "cq-theme";
+function useTheme(): [Theme, () => void] {
+  const [theme, setTheme] = useState<Theme>(() => {
+    try {
+      const saved = localStorage.getItem(THEME_KEY);
+      if (saved === "light" || saved === "dark") return saved;
+    } catch {
+      // storage blocked: follow the system
+    }
+    return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  });
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
+  const toggle = () =>
+    setTheme((t) => {
+      const next = t === "dark" ? "light" : "dark";
+      try {
+        localStorage.setItem(THEME_KEY, next);
+      } catch {
+        // the choice lasts for this page only
+      }
+      return next;
+    });
+  return [theme, toggle];
+}
+
 export function App() {
   const path = usePath();
+  const [theme, toggleTheme] = useTheme();
   const [me, setMe] = useState<Me | null | "signed-out">(null);
   useEffect(() => {
     api<Me>("/api/me").then(setMe, (e) => setMe(e instanceof ApiError && e.status === 401 ? "signed-out" : null));
   }, []);
 
   if (me === "signed-out") return <Login />;
-  if (!me) return <Spinner label="Loading" />;
+  if (!me)
+    return (
+      <div className="cq-center">
+        <Spinner label="Loading" />
+      </div>
+    );
   const present = path.match(/^\/present\/([^/]+)/)?.[1];
   if (present) return <Presenter id={present} />;
 
-  const active = Object.entries(ROUTES).find(([, p]) => p !== "/" && path.startsWith(p))?.[0] ?? "decks";
+  const name = me.name ?? me.id;
   return (
-    <ConsoleLayout
-      brand={{ name: "Calque", sub: "Slides" }}
-      nav={NAV}
-      active={active}
-      onNavigate={(id) => navigate(ROUTES[id] ?? "/")}
-      search={false}
-      themes
-      user={{
-        initials: (me.name ?? me.id).slice(0, 2).toUpperCase(),
-        name: me.name ?? me.id,
-        ...(me.auth ? { onSignOut: () => location.assign("/auth/logout") } : {}),
-      }}
-    >
-      {page(path, me)}
-    </ConsoleLayout>
+    <div className="cq-app">
+      <nav className="cq-side" aria-label="Main">
+        <a className="cq-logo" href="/" aria-label="Calque home" onClick={(e) => go(e, "/")}>
+          <Mark />
+        </a>
+        <NavItem href="/" label="Decks" short="Decks" icon={LayoutGrid} active={path === "/" || path.startsWith("/d/")} />
+        <NavItem href="/new" label="New deck" short="New" icon={Plus} active={path === "/new"} />
+        <span className="cq-side-gap" />
+        <NavItem href="/settings/models" label="AI models" short="Models" icon={Cpu} active={path === "/settings/models"} />
+        <NavItem href="/settings/packs" label="Brand packs" short="Packs" icon={Palette} active={path === "/settings/packs"} />
+        <span className="cq-side-rule" />
+        <button type="button" className="cq-nav" aria-label={theme === "dark" ? "Light theme" : "Dark theme"} title="Switch theme" onClick={toggleTheme}>
+          {theme === "dark" ? <Sun /> : <Moon />}
+        </button>
+        <span className="cq-avatar" aria-label={`Signed in as ${name}`} title={name}>
+          {name.slice(0, 2).toUpperCase()}
+        </span>
+        {me.auth && (
+          <button type="button" className="cq-nav" aria-label="Sign out" title="Sign out" onClick={() => location.assign("/auth/logout")}>
+            <LogOut />
+          </button>
+        )}
+      </nav>
+      <main className="cq-main" data-full={path.startsWith("/d/") || undefined}>
+        {page(path, me)}
+      </main>
+    </div>
   );
 }

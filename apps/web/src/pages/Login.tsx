@@ -1,22 +1,21 @@
-import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Wordmark } from "@diametral/design-system/react";
+import { LogIn } from "lucide-react";
+import { Button, Mark } from "../ui.tsx";
 
 /** No session: the API refuses everything, sign-in goes through the company's SSO. */
 export function Login() {
   const back = `${location.pathname}${location.search}`;
   return (
-    <div className="cq-login">
-      <Card>
-        <CardHeader>
-          <Wordmark variant="square" />
-          <CardTitle>Sign in to Calque</CardTitle>
-          <CardDescription>Use your company account.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Button variant="primary" block onClick={() => location.assign(`/auth/login?return=${encodeURIComponent(back)}`)}>
-            Sign in with SSO
-          </Button>
-        </CardContent>
-      </Card>
-    </div>
+    <main className="cq-login">
+      <div className="cq-login-card cq-card">
+        <span className="cq-login-mark">
+          <Mark size={36} />
+        </span>
+        <h1>Sign in to Calque</h1>
+        <p>Build and edit decks with an agent, on your company's template. Use your company account.</p>
+        <Button variant="primary" size="lg" onClick={() => location.assign(`/auth/login?return=${encodeURIComponent(back)}`)}>
+          <LogIn /> Sign in with SSO
+        </Button>
+      </div>
+    </main>
   );
 }

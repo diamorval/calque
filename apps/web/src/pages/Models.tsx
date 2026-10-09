@@ -1,37 +1,7 @@
-import {
-  Alert,
-  AlertDescription,
-  Badge,
-  Button,
-  Card,
-  CardAction,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-  Checkbox,
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  Field,
-  FieldDescription,
-  FieldLabel,
-  Input,
-  PageHeader,
-  PageHeaderDescription,
-  PageHeaderHeading,
-  PageHeaderTitle,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-  Tabs,
-} from "@diametral/design-system/react";
+import { KeyRound, Server, Star, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { api, type Me } from "../api.ts";
+import { Alert, Badge, Button, Dialog, Field, PageHead, Tabs } from "../ui.tsx";
 
 interface Provider {
   id: string;
@@ -53,7 +23,7 @@ interface Model {
 /** Settings > AI models (PipesHub pattern): provider catalog, Configure, Configured, Set as default. */
 export function Models({ me }: { me: Me }) {
   const [data, setData] = useState<{ providers: Provider[]; models: Model[] } | null>(null);
-  const [tab, setTab] = useState<string>("configured");
+  const [tab, setTab] = useState<"configured" | "providers">("configured");
   const [editing, setEditing] = useState<Provider | null>(null);
   const [error, setError] = useState<string | null>(null);
   const reload = useCallback(() => api<{ providers: Provider[]; models: Model[] }>("/api/models").then(setData), []);
@@ -73,23 +43,10 @@ export function Models({ me }: { me: Me }) {
   const label = (id: string) => data?.providers.find((p) => p.id === id)?.label ?? id;
 
   return (
-    <>
-      <PageHeader>
-        <PageHeaderHeading>
-          <PageHeaderTitle>AI models</PageHeaderTitle>
-          <PageHeaderDescription>The models the web app's agent runs on. Keys are tested when saved and never shown again.</PageHeaderDescription>
-        </PageHeaderHeading>
-      </PageHeader>
-      {!me.admin && (
-        <Alert tone="info">
-          <AlertDescription>Only workspace admins change the models.</AlertDescription>
-        </Alert>
-      )}
-      {error && (
-        <Alert tone="danger" role="alert">
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
+    <div className="cq-page">
+      <PageHead title="AI models" description="The models the web app's agent runs on. Keys are tested when saved and never shown again." />
+      {!me.admin && <Alert tone="info">Only workspace admins change the models.</Alert>}
+      {error && <Alert tone="danger">{error}</Alert>}
       <Tabs
         value={tab}
         onChange={setTab}
@@ -98,68 +55,77 @@ export function Models({ me }: { me: Me }) {
           { id: "providers", label: "Providers" },
         ]}
       />
-      {tab === "configured" && (
-        <>
-          {data?.models.length === 0 ? (
-            <p>No model yet: configure one from the Providers tab.</p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Provider</TableHead>
-                  <TableHead>Model</TableHead>
-                  <TableHead>Endpoint</TableHead>
-                  <TableHead>Default</TableHead>
-                  <TableHead />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+      {tab === "configured" &&
+        (data?.models.length === 0 ? (
+          <div className="cq-empty cq-card">
+            <Server />
+            <strong>No model yet</strong>
+            <span>Configure one from the Providers tab.</span>
+          </div>
+        ) : (
+          <div className="cq-card cq-table-wrap">
+            <table className="cq-table">
+              <thead>
+                <tr>
+                  <th>Provider</th>
+                  <th>Model</th>
+                  <th>Endpoint</th>
+                  <th>Default</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
                 {data?.models.map((m) => (
-                  <TableRow key={m.id} data-model={m.id}>
-                    <TableCell>{label(m.provider)}</TableCell>
-                    <TableCell>{m.model}</TableCell>
-                    <TableCell>{m.base_url ?? "—"}</TableCell>
-                    <TableCell>
+                  <tr key={m.id} data-model={m.id}>
+                    <td>{label(m.provider)}</td>
+                    <td>
+                      <span className="cq-mono">{m.model}</span>
+                    </td>
+                    <td className="cq-muted">{m.base_url ?? "—"}</td>
+                    <td>
                       {m.is_default ? (
-                        <Badge variant="solid">Default</Badge>
+                        <Badge tone="solid">Default</Badge>
                       ) : (
                         me.admin && (
                           <Button size="sm" onClick={() => act(() => api(`/api/models/${encodeURIComponent(m.id)}/default`, {}))}>
-                            Set as default
+                            <Star /> Set as default
                           </Button>
                         )
                       )}
-                    </TableCell>
-                    <TableCell>
+                    </td>
+                    <td>
                       {me.admin && (
                         <Button size="sm" variant="ghost" onClick={() => act(() => api(`/api/models/${encodeURIComponent(m.id)}`, undefined, "DELETE"))}>
-                          Remove
+                          <Trash2 /> Remove
                         </Button>
                       )}
-                    </TableCell>
-                  </TableRow>
+                    </td>
+                  </tr>
                 ))}
-              </TableBody>
-            </Table>
-          )}
-        </>
-      )}
-      {tab === "providers" && (
-          <div className="cq-cards">
-            {data?.providers.map((p) => (
-              <Card key={p.id} size="sm">
-                <CardHeader>
-                  <CardTitle>{p.label}</CardTitle>
-                  <CardDescription>{p.key ? "API key" : "No key needed"}{p.baseURL ? " · your endpoint" : ""}</CardDescription>
-                  <CardAction>
-                    <Button size="sm" disabled={!me.admin} aria-label={`Configure ${p.label}`} onClick={() => setEditing(p)}>
-                      Configure
-                    </Button>
-                  </CardAction>
-                </CardHeader>
-              </Card>
-            ))}
+              </tbody>
+            </table>
           </div>
+        ))}
+      {tab === "providers" && (
+        <ul className="cq-provider-grid">
+          {data?.providers.map((p) => (
+            <li key={p.id} className="cq-card cq-provider">
+              <span className="cq-monogram" aria-hidden>
+                {p.label.slice(0, 1)}
+              </span>
+              <div>
+                <strong>{p.label}</strong>
+                <span className="cq-hint">
+                  {p.key ? "API key" : "No key needed"}
+                  {p.baseURL ? " · your endpoint" : ""}
+                </span>
+              </div>
+              <Button size="sm" disabled={!me.admin} aria-label={`Configure ${p.label}`} onClick={() => setEditing(p)}>
+                Configure
+              </Button>
+            </li>
+          ))}
+        </ul>
       )}
       {editing && (
         <Configure
@@ -172,7 +138,7 @@ export function Models({ me }: { me: Me }) {
           }}
         />
       )}
-    </>
+    </div>
   );
 }
 
@@ -206,46 +172,36 @@ function Configure(props: { provider: Provider; onClose: () => void; onSaved: ()
   }
 
   return (
-    <Dialog open onOpenChange={(open) => !open && props.onClose()}>
-      <DialogContent>
-        <form onSubmit={save} className="cq-stack">
-          <DialogHeader>
-            <DialogTitle>Configure {p.label}</DialogTitle>
-          </DialogHeader>
-          <Field>
-            <FieldLabel htmlFor="m-model">Model</FieldLabel>
-            <Input id="m-model" required value={model} placeholder={p.example} onChange={(e) => setModel(e.target.value)} />
+    <Dialog title={`Configure ${p.label}`} onClose={props.onClose}>
+      <form onSubmit={save}>
+        <div className="cq-dialog-body">
+          <Field label="Model" htmlFor="m-model">
+            <input className="cq-input" id="m-model" required value={model} placeholder={p.example} onChange={(e) => setModel(e.target.value)} />
           </Field>
-          <Field>
-            <FieldLabel htmlFor="m-key">API key{p.key ? "" : " (optional)"}</FieldLabel>
-            <Input id="m-key" type="password" autoComplete="off" required={p.key} value={key} onChange={(e) => setKey(e.target.value)} />
+          <Field label={`API key${p.key ? "" : " (optional)"}`} htmlFor="m-key">
+            <input className="cq-input" id="m-key" type="password" autoComplete="off" required={p.key} value={key} onChange={(e) => setKey(e.target.value)} />
           </Field>
           {(p.baseURL || p.defaultBaseURL) && (
-            <Field>
-              <FieldLabel htmlFor="m-base">Base URL{p.baseURL ? "" : " (optional)"}</FieldLabel>
-              <Input id="m-base" type="url" required={p.baseURL} value={base} placeholder={p.defaultBaseURL ?? "https://…/v1"} onChange={(e) => setBase(e.target.value)} />
+            <Field label={`Base URL${p.baseURL ? "" : " (optional)"}`} htmlFor="m-base">
+              <input className="cq-input" id="m-base" type="url" required={p.baseURL} value={base} placeholder={p.defaultBaseURL ?? "https://…/v1"} onChange={(e) => setBase(e.target.value)} />
             </Field>
           )}
-          <Field orientation="horizontal">
-            <Checkbox id="m-default" checked={isDefault} onCheckedChange={(v) => setDefault(!!v)} />
-            <FieldLabel htmlFor="m-default">Use as the default model</FieldLabel>
-          </Field>
-          <FieldDescription>Saving sends a one-token request to check the key and the model.</FieldDescription>
-          {error && (
-            <Alert tone="danger" role="alert">
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
-          <DialogFooter>
-            <Button type="button" onClick={props.onClose}>
-              Cancel
-            </Button>
-            <Button type="submit" variant="primary" loading={saving}>
-              Test and save
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
+          <label className="cq-check">
+            <input type="checkbox" checked={isDefault} onChange={(e) => setDefault(e.target.checked)} />
+            Use as the default model
+          </label>
+          <span className="cq-hint">
+            <KeyRound size={13} /> Saving sends a one-token request to check the key and the model.
+          </span>
+          {error && <Alert tone="danger">{error}</Alert>}
+        </div>
+        <div className="cq-dialog-foot">
+          <Button onClick={props.onClose}>Cancel</Button>
+          <Button type="submit" variant="primary" disabled={saving}>
+            {saving ? "Testing…" : "Test and save"}
+          </Button>
+        </div>
+      </form>
     </Dialog>
   );
 }
