@@ -26,6 +26,33 @@ node apps/server/src/stdio.ts          # stdio, for a local MCP client
 | `CALQUE_LLM_MODEL` | unset | preconfigured gateway, saved as model `env`, default unless another is set |
 | `CALQUE_LLM_PROVIDER` / `_BASE_URL` / `_API_KEY` | `openai-compatible` / – / – | the gateway's provider, endpoint and key |
 
+## Deploy
+
+One image (`Dockerfile` at the repo root): this server, the built web app and deck UI, the Python
+engine (locked dependencies) and LibreOffice + pdftoppm for renders. Not one image each for web,
+agent and engine: the web app is static files served here, the agent runs in this process and the
+engine is a subprocess per call (`src/engine.ts`), so they ship together. It runs as `node`, keeps
+its state in the `/data` volume (`CALQUE_DATA`) and serves the packs baked in `/app/packs`
+(`CALQUE_PACKS`; brand fonts in `packs/<id>/fonts/` are baked too when present at build time).
+
+```bash
+docker compose up -d --build   # calque + Postgres; needs CALQUE_SECRET, CALQUE_OIDC_ISSUER,
+                               # CALQUE_PUBLIC_URL, POSTGRES_PASSWORD (URL-safe) in .env
+docker compose logs -f calque
+```
+
+The compose file refuses to start without those. Without an issuer the server only listens on
+loopback, so a bare `docker run` is for a smoke test only:
+
+```bash
+docker build -t calque .
+docker run -d --name calque --network host -e CALQUE_SECRET=dev calque
+node scripts/docker-smoke.ts   # a deck built and rendered end to end (also run in CI)
+```
+
+Put an HTTPS reverse proxy in front of `:8787` at `CALQUE_PUBLIC_URL`; the health check is
+`GET /api/tools`.
+
 ## Connect
 
 - **Claude Code, local:** `.mcp.json` at the repo root starts the stdio server; the prompts show as
