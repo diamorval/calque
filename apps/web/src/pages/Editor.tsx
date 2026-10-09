@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from "react";
 import { agent, tool } from "../api.ts";
 import { Chat, type Ask } from "../components/Chat.tsx";
 import { AddSlides, ReviewDeck } from "../components/DeckActions.tsx";
+import { bySeverity, type Finding, lintSummary } from "../lint.ts";
 import { navigate } from "../nav.ts";
 import { ago, Dialog, Spinner } from "../ui.tsx";
 
@@ -18,7 +19,8 @@ const EDITS = ["Tighten every title to one line", "Add an agenda slide after the
 /** The editor: the deck workspace (slide-ui) with the agent chat in its side panel. */
 export function Editor({ id }: { id: string }) {
   const [deck, setDeck] = useState<Deck | null>(null);
-  const [errors, setErrors] = useState<number | null>(null);
+  const [findings, setFindings] = useState<Finding[] | null>(null);
+  const [report, setReport] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [history, setHistory] = useState(false);
@@ -29,7 +31,7 @@ export function Editor({ id }: { id: string }) {
   const reload = useCallback(async () => {
     try {
       setDeck(await tool<Deck>("open_deck", { deck_id: id }));
-      setErrors((await tool<{ errors: number }>("lint_deck", { deck_id: id })).errors);
+      setFindings((await tool<{ findings: Finding[] }>("lint_deck", { deck_id: id })).findings);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -63,6 +65,7 @@ export function Editor({ id }: { id: string }) {
         )}
       </div>
     );
+  const summary = findings && lintSummary(findings);
   return (
     <>
       <DeckViewer
@@ -70,14 +73,16 @@ export function Editor({ id }: { id: string }) {
         working={busy}
         actions={
           <>
-            {errors !== null &&
-              (errors ? (
-                <Tag tone="danger">
-                  <TriangleAlert /> {errors} lint error{errors > 1 ? "s" : ""}
-                </Tag>
+            {summary &&
+              (findings?.length ? (
+                <Button variant="ghost" aria-label={`Lint: ${summary.label}`} onClick={() => setReport(true)}>
+                  <Tag tone={summary.tone}>
+                    <TriangleAlert /> {summary.label}
+                  </Tag>
+                </Button>
               ) : (
                 <Tag tone="success">
-                  <CircleCheck /> Lint clean
+                  <CircleCheck /> {summary.label}
                 </Tag>
               ))}
             <Button variant="ghost" onClick={() => setDialog("add")}>
@@ -182,6 +187,38 @@ export function Editor({ id }: { id: string }) {
                           Restore
                         </Button>
                       )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </Dialog>
+      )}
+      {report && findings && (
+        <Dialog title={`Lint: ${summary?.label}`} wide onClose={() => setReport(false)}>
+          <div className="cq-dialog-body">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Severity</TableHead>
+                  <TableHead>Slide</TableHead>
+                  <TableHead>Finding</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {bySeverity(findings).map((f, i) => (
+                  <TableRow key={i}>
+                    <TableCell>
+                      <Tag tone={f.severity === "ERROR" ? "danger" : f.severity === "WARN" ? "warning" : "neutral"}>{f.severity}</Tag>
+                    </TableCell>
+                    <TableCell>{f.slide ? `Slide ${f.slide}` : "Deck"}</TableCell>
+                    <TableCell>
+                      {f.message}
+                      <div className="cq-hint">
+                        <span className="cq-mono">{f.check}</span>
+                        {f.shape_id !== null && ` · shape ${f.shape_id}`}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
