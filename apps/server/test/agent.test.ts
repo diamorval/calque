@@ -84,6 +84,25 @@ describe("web agent", { timeout: ENGINE_TIMEOUT }, () => {
     expect(r.json.messages.filter((m: Json) => m.role === "tool")).toHaveLength(3);
   });
 
+  it("streams a failed tool call with its error, and the model gets the error back", async () => {
+    script = (b) => (toolsCalled(b) === 0 ? { tool: { name: "create_deck", args: { deck: { title: "x" } } } } : { content: "The deck was invalid." });
+    const res = await http.request("/api/agent/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/x-ndjson" },
+      body: JSON.stringify({ pack_id: "acme-test", messages: [{ role: "user", content: "build" }] }),
+    });
+    const lines = (await res.text()).trim().split("\n").map((l) => JSON.parse(l));
+    const step = lines[0].step.tools[0];
+    expect(step.name).toBe("create_deck");
+    expect(step.error).toMatch(/\S/);
+    const toolMessage = (fake.requests.at(-1) as Json).messages.findLast((m: Json) => m.role === "tool").content;
+    expect(toolMessage).toContain(JSON.parse(step.error).message); // the model sees the full error to correct itself
+    const done = lines.at(-1).done;
+    expect(done.text).toBe("The deck was invalid.");
+    const result = done.messages.find((m: Json) => m.role === "tool").content[0];
+    expect(result.output.type).toBe("error-text"); // the conversation keeps the failure for the chat's history
+  });
+
   it("applies 5 typical comments (colour, rewording, move, chart, deletion) to 0 lint error", async () => {
     const { deck_id } = await TOOLS.create_deck.run(app, LOCAL, { deck: acmeDeck() });
     const comment = (slide_id: string, text: string, shape_id?: number) =>

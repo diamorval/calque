@@ -142,7 +142,7 @@ describe("web app routes", { timeout: ENGINE_TIMEOUT }, () => {
       body: JSON.stringify({ messages: [{ role: "user", content: "which packs?" }] }),
     });
     const lines = (await res.text()).trim().split("\n").map((l) => JSON.parse(l));
-    expect(lines[0]).toMatchObject({ step: { tools: ["list_packs"] } });
+    expect(lines[0]).toMatchObject({ step: { tools: [{ name: "list_packs" }] } });
     expect(lines.at(-1)).toMatchObject({ done: { model: "env", text: "3 packs" } });
   });
 });

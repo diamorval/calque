@@ -209,7 +209,7 @@ export async function startDemo() {
       const b = JSON.parse(String(init?.body));
       if (b.deck_id)
         return stream([
-          { step: { tools: ["open_deck"] } },
+          { step: { tools: [{ name: "open_deck" }] } },
           {
             done: {
               model: "demo",
@@ -239,8 +239,8 @@ export async function startDemo() {
         { role: "assistant", content: text },
       ];
       return stream([
-        { step: { tools: ["list_packs"] } },
-        { step: { tools: ["create_deck"] } },
+        { step: { tools: [{ name: "list_packs" }] } },
+        { step: { tools: [{ name: "create_deck" }] } },
         { done: { model: "demo", text, messages } },
       ]);
     }

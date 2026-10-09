@@ -7,7 +7,7 @@ import { stream } from "hono/streaming";
 import { Client } from "@modelcontextprotocol/client";
 import { createMcpHandler, InMemoryTransport, oauthMetadataResponse } from "@modelcontextprotocol/server";
 import { applyComments, chat, type Message } from "@calque/agent";
-import { PROVIDERS, type ModelConfig, type ProviderId } from "@calque/llm";
+import { PROVIDERS, type ModelConfig, type ProviderId, type Step } from "@calque/llm";
 import { z } from "zod";
 import { discovery, gate, userOf, type AuthConfig } from "./auth.ts";
 import { Conflict } from "./decks.ts";
@@ -219,13 +219,15 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
       return stream(c, async (s) => {
         const line = (o: object) => s.write(`${JSON.stringify(o)}\n`);
         try {
-          await line({ done: await go((st) => void line({ step: { text: st.text, tools: st.toolCalls.map((t) => t.toolName) } })) });
+          // each tool: its name, and its error when it failed
+          const tools = (st: Step) => st.toolCalls.map((t) => ({ name: t.toolName, ...(t.error !== undefined ? { error: t.error } : {}) }));
+          await line({ done: await go((st) => void line({ step: { text: st.text, tools: tools(st) } })) });
         } catch (e) {
           await line({ error: failure(e) });
         }
       });
     };
-  type OnStep = (s: { text: string; toolCalls: { toolName: string }[] }) => void;
+  type OnStep = (s: Step) => void;
 
   http.post(
     "/api/agent/chat",
