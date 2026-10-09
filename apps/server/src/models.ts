@@ -119,7 +119,10 @@ export class Models {
 
   async remove(user: User, id: string) {
     if (!isAdmin(user)) throw new Forbidden(`only ${ADMIN_TEAM} configure models`);
-    await this.db.query("delete from models where id = $1", [id]);
+    const { rows } = await this.db.query<{ is_default: boolean }>("delete from models where id = $1 returning is_default", [id]);
+    // the default gone, the most recently configured model takes over: the agent keeps a model
+    if (rows[0]?.is_default)
+      await this.db.query("update models set is_default = true where id = (select id from models order by updated_at desc, id limit 1)");
   }
 
   /** The model to run: `id`, else the default. Read on every call, so a new default needs no restart. */

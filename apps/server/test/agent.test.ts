@@ -58,6 +58,20 @@ describe("web agent", { timeout: ENGINE_TIMEOUT }, () => {
     await expect(app.models.setDefault({ id: "bob", teams: ["sales"] }, "env")).rejects.toThrow(Forbidden);
   });
 
+  it("removing the default model promotes the most recently configured one", async () => {
+    const add = (model: string) => api("/api/models", { provider: "openai-compatible", model, base_url: fake.url, api_key: "good-key" });
+    await add("older");
+    await add("newer");
+    expect((await api("/api/models/openai-compatible:older/default", {})).status).toBe(200);
+    expect((await api("/api/models/openai-compatible:older", undefined, "DELETE")).status).toBe(200);
+    const models = (await api("/api/models")).json.models as Json[];
+    expect(models.filter((m) => m.is_default).map((m) => m.id)).toEqual(["openai-compatible:newer"]);
+    expect((await api("/api/agent/chat", { messages: [{ role: "user", content: "hi" }] })).json.model).toBe("openai-compatible:newer");
+
+    await api("/api/models/openai-compatible:other", undefined, "DELETE"); // not the default: the default stays
+    expect((await app.models.resolve()).id).toBe("openai-compatible:newer");
+  });
+
   it("builds a deck from a brief through the MCP tools, to 0 lint error", async () => {
     script = (b) => {
       const steps = toolsCalled(b);

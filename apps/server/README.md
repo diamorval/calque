@@ -66,7 +66,7 @@ prompts as Claude. Models go through `@calque/llm` only.
 | --- | --- |
 | `GET /api/models` | provider catalog + configured models (never their keys) |
 | `POST /api/models` | `{provider, model, api_key?, base_url?, default?}`: tested with a 1-token call, refused (422) if the provider refuses |
-| `POST /api/models/:id/default`, `DELETE /api/models/:id` | the default is read on every call: no restart |
+| `POST /api/models/:id/default`, `DELETE /api/models/:id` | the default is read on every call: no restart; removing the default promotes the most recently configured model |
 | `POST /api/agent/chat` | `{messages, workflow?, pack_id?, deck_id?, model?}` → `{model, text, messages}`; the client keeps the conversation. `Accept: application/x-ndjson` streams `{step: {text, tools: [{name, error?}]}}` lines, then `{done}` |
 | `POST /api/agent/apply-comments` | `{deck_id, model?}`: the open comments become `patch_deck` calls |
 
