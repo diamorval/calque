@@ -78,7 +78,8 @@ or `any` (informative). The regex runs case-insensitive and multi-line on each t
 `#` starts a comment. Pack rules (`lint.banned_words`, `lint.placeholders`) are appended at run
 time and may raise a WARN here to ERROR; they never lower one.
 
-Exemption: the text of a slide cloned from the pack `closing` role keeps its signature line.
+Exemption: the text of a slide cloned from the pack `closing` role keeps its signature line, as
+long as it reads exactly as the template writes it. Copy rewritten there is linted like any other.
 
 ```anti-slop
 # --- typography (generic) ---------------------------------------------------

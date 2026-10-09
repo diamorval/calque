@@ -39,6 +39,15 @@ def cmd_validate(a) -> int:
     except PackError as e:
         print(e, file=sys.stderr)
         return 1
+    missing = [
+        f for f in pack.manifest["fonts"].get("files", []) if not (pack.dir / "fonts" / f).is_file()
+    ]
+    if missing:
+        print(
+            f"warning: fonts/ lacks {', '.join(missing)}: renders use the fallback fonts and "
+            "overflow is estimated",
+            file=sys.stderr,
+        )
     print(f"ok: {pack.id} {pack.manifest['version']}")
     return 0
 
