@@ -1,0 +1,47 @@
+name: pages
+# The showcase: the web app on GitHub Pages, replaying decks the real engine built (apps/web/demo).
+on:
+  push: { branches: [main] }
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency: { group: pages, cancel-in-progress: true }
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      # optional: read access to the pack's pinned sources, for its brand fonts (fonts/ is not committed)
+      GH_TOKEN: ${{ secrets.PACK_SOURCES_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --locked
+        working-directory: engine
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libreoffice-impress poppler-utils
+      - if: env.GH_TOKEN != ''
+        run: pnpm pack:sync diametral
+      - run: node demo/snapshot.ts
+        working-directory: apps/web
+      - run: pnpm --filter @calque/web exec vite build --base=/${{ github.event.repository.name }}/
+        env: { VITE_DEMO: "1" }
+      # deep links (/d/:id) land on 404.html: the same app
+      - run: cp apps/web/dist/index.html apps/web/dist/404.html
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: apps/web/dist }
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: { name: github-pages, url: "${{ steps.deploy.outputs.page_url }}" }
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

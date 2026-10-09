@@ -68,6 +68,7 @@ node apps/server/src/stdio.ts         # MCP over stdio (.mcp.json)
 pnpm --filter @calque/slide-ui build  # deck UI bundle, served as ui:// and /decks/:id
 pnpm --filter @calque/web dev         # web app on Vite, proxied to the server on :8787
 pnpm e2e                              # Playwright: fake IdP + fake model + the real server and engine
+node apps/web/demo/snapshot.ts        # GitHub Pages demo data; then VITE_DEMO=1 vite build (.github/workflows/pages.yml)
 node apps/server/eval/agent.ts anthropic:<model> openai:<model>  # web agent on real models (needs keys)
 ```
 
