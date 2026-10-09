@@ -121,4 +121,23 @@ describe("web agent", { timeout: ENGINE_TIMEOUT }, () => {
     expect(spec.slides[2].source.params.series[0].values[0]).toBe(20);
     expect((await TOOLS.lint_deck.run(app, LOCAL, { deck_id })).errors).toBe(0);
   });
+
+  it("gives the model the attached files: a document's text, an image's file reference", async () => {
+    const send = async (name: string, content: string, type: string) => {
+      const form = new FormData();
+      form.append("file", new File([content], name, { type }));
+      return (await (await http.request("/api/files", { method: "POST", body: form })).json()) as Json;
+    };
+    const brief = await send("brief.md", "# Brief\nNorth led growth: +18% in Q3.", "text/markdown");
+    const logo = await send("logo.png", "not really a png", "image/png");
+    script = () => ({ content: "Read it." });
+    const r = await api("/api/agent/chat", { pack_id: "acme-test", files: [brief.file_id, logo.file_id], messages: [{ role: "user", content: "Build from the brief" }] });
+    expect(r.json.text).toBe("Read it.");
+    const system = fake.requests.at(-1)?.messages[0].content as string;
+    expect(system).toContain("# Attached files");
+    expect(system).toContain("North led growth: +18% in Q3.");
+    expect(system).toContain(`"image": "file:${logo.file_id}"`);
+
+    expect((await api("/api/agent/chat", { files: ["0b9b3c4e-0000-4000-8000-000000000000"], messages: [{ role: "user", content: "hi" }] })).status).toBe(404);
+  });
 });

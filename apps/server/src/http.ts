@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join, normalize } from "node:path";
 import { Readable } from "node:stream";
 import { Hono, type Context } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { stream } from "hono/streaming";
 import { Client } from "@modelcontextprotocol/client";
 import { createMcpHandler, InMemoryTransport, oauthMetadataResponse } from "@modelcontextprotocol/server";
@@ -12,6 +13,7 @@ import { z } from "zod";
 import { discovery, gate, userOf, type AuthConfig } from "./auth.ts";
 import { Conflict } from "./decks.ts";
 import { EngineError, REPO } from "./engine.ts";
+import { attachment, MAX_UPLOAD, saveFile, ticketUser, TooLarge } from "./files.ts";
 import { buildServer, UI_HTML } from "./mcp.ts";
 import { InvalidModel, isAdmin } from "./models.ts";
 import { addFont, draftDir, draftPack, editPack, Forbidden, NotFound, publishDraft, setVisibility, type User } from "./packs.ts";
@@ -25,8 +27,9 @@ const PREVIEW: User = { id: "preview", teams: [], local: true };
 const LOCAL: User = { id: "local", name: "Local", teams: [], local: true };
 export const WEB_DIST = join(REPO, "apps/web/dist");
 
-function status(e: unknown): 400 | 403 | 404 | 409 | 422 {
+function status(e: unknown): 400 | 403 | 404 | 409 | 413 | 422 {
   if (e instanceof Forbidden) return 403;
+  if (e instanceof TooLarge) return 413;
   if (e instanceof NotFound) return 404;
   if (e instanceof Conflict) return 409;
   if (e instanceof EngineError || e instanceof InvalidModel || e instanceof z.ZodError) return 422;
@@ -61,6 +64,7 @@ const ChatBody = z.object({
   pack_id: z.string().optional(),
   deck_id: z.string().optional(),
   model: z.string().optional().describe("A configured model id; default: the workspace default."),
+  files: z.array(z.string()).optional().describe("Uploaded file ids attached to the conversation (POST /api/files)."),
 });
 const Visibility = z.object({ visibility: z.enum(["workspace", "team"]), teams: z.array(z.string()).optional() });
 
@@ -121,10 +125,29 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
     const form = await c.req.parseBody();
     const f = form[field];
     if (!(f instanceof File)) throw new Error(`missing file field ${JSON.stringify(field)}`);
-    return { form, name: f.name, bytes: Buffer.from(await f.arrayBuffer()) };
+    return { form, name: f.name, type: f.type, bytes: Buffer.from(await f.arrayBuffer()) };
   };
 
   http.get("/api/me", route(async (_, user) => ({ ...user, admin: isAdmin(user), auth: !!check })));
+
+  // Uploads: a file in (multipart field `file`), its file_id out, usable only by its uploader.
+  // `?ticket=` (from the upload_url tool) stands in for the caller's credentials.
+  const limit = bodyLimit({
+    maxSize: MAX_UPLOAD + 1024 * 1024, // + multipart framing; saveFile checks the file itself
+    onError: (c) => c.json({ error: "TooLarge", message: `file over ${MAX_UPLOAD / 1024 / 1024} MB` }, 413),
+  });
+  http.post("/api/files", limit, async (c) => {
+    const ticket = c.req.query("ticket");
+    const user = ticket ? await ticketUser(app.secret, ticket) : await who(c);
+    if (!user) return c.json({ error: "Unauthorized", message: "invalid or expired upload ticket" }, 401);
+    if (user instanceof Response) return user;
+    try {
+      const f = await upload(c, "file");
+      return c.json(await saveFile(app.db, app.data, user, f.name, f.type || "application/octet-stream", f.bytes));
+    } catch (e) {
+      return fail(c, e);
+    }
+  });
 
   // REST: the same tools as MCP, one endpoint each.
   http.get("/api/tools", (c) =>
@@ -194,7 +217,7 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
   /** Run the web agent as `user`. With `Accept: application/x-ndjson`, streams one line per step
   ({"step": {tools}}), then {"done": result} or {"error": …}; else answers JSON when done. */
   const agent =
-    (parse: (b: unknown) => { model?: string | undefined }, run: (client: Client, model: ModelConfig, b: never, onStep: OnStep) => Promise<object>) =>
+    (parse: (b: unknown) => { model?: string | undefined }, run: (client: Client, model: ModelConfig, b: never, onStep: OnStep, user: User) => Promise<object>) =>
     async (c: Context) => {
       const user = await who(c);
       if (user instanceof Response) return user;
@@ -203,7 +226,7 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
         const model = await app.models.resolve(b.model);
         const client = await connect(app, user);
         try {
-          return { model: model.id, ...(await run(client, model, b as never, onStep)) };
+          return { model: model.id, ...(await run(client, model, b as never, onStep, user)) };
         } finally {
           await client.close();
         }
@@ -229,9 +252,10 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
 
   http.post(
     "/api/agent/chat",
-    agent(ChatBody.parse, (client, model, b: z.infer<typeof ChatBody>, onStep) =>
-      chat({ client, model, onStep, messages: b.messages as Message[], workflow: b.workflow, pack_id: b.pack_id, deck_id: b.deck_id }),
-    ),
+    agent(ChatBody.parse, async (client, model, b: z.infer<typeof ChatBody>, onStep, user) => {
+      const files = await Promise.all((b.files ?? []).map((id) => attachment(app.db, app.data, user, id)));
+      return chat({ client, model, onStep, messages: b.messages as Message[], workflow: b.workflow, pack_id: b.pack_id, deck_id: b.deck_id, files });
+    }),
   );
   const ApplyBody = z.object({ deck_id: z.string(), model: z.string().optional() });
   http.post(

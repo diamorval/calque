@@ -138,6 +138,13 @@ export async function startDemo() {
       },
     ],
     [
+      /^POST \/api\/files$/,
+      (_, f: FormData) => {
+        const file = f.get("file") as File;
+        return { file_id: `demo-${Date.now()}`, name: file.name, size: file.size, type: file.type };
+      },
+    ],
+    [
       /^POST \/api\/packs\/drafts\/[^/]+\/fonts$/,
       (_, f: FormData) => {
         const font = f.get("font");

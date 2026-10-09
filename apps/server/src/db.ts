@@ -54,6 +54,14 @@ create table if not exists models (
   updated_by text not null,
   updated_at timestamptz not null default now()
 );
+create table if not exists files (
+  id uuid primary key,
+  owner text not null,
+  name text not null,
+  size bigint not null,
+  type text not null,
+  created_at timestamptz not null default now()
+);
 create unique index if not exists one_default_model on models (is_default) where is_default;`;
 
 /** Postgres when `url` is a postgres:// URL, else embedded PGlite (a data dir, or in memory). */

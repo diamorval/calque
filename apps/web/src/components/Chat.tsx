@@ -1,9 +1,16 @@
 import { Alert, AlertDescription } from "diametral-ds/alert";
 import { Button } from "diametral-ds/button";
 import { Kbd } from "diametral-ds/kbd";
-import { ArrowUp, Check, Sparkles } from "lucide-react";
+import { ArrowUp, Check, Paperclip, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { agent } from "../api.ts";
+import { agent, upload } from "../api.ts";
+
+/** A file attached to the conversation, uploaded to /api/files. */
+interface Attached {
+  file_id: string;
+  name: string;
+}
+const ACCEPT = "image/*,.pptx,.pdf,.docx,.xlsx,.csv,.txt,.md";
 
 /** An AI SDK model message, as the server returns them; the client keeps the conversation. */
 export interface ChatMessage {
@@ -21,14 +28,14 @@ export interface AgentResult {
   messages: ChatMessage[];
 }
 
-const load = (key: string): ChatMessage[] => {
+const load = <T = ChatMessage,>(key: string): T[] => {
   try {
     return JSON.parse(sessionStorage.getItem(key) ?? "[]");
   } catch {
     return [];
   }
 };
-export const saveChat = (key: string, messages: ChatMessage[]) => {
+export const saveChat = (key: string, messages: unknown[]) => {
   try {
     sessionStorage.setItem(key, JSON.stringify(messages));
   } catch {
@@ -86,28 +93,57 @@ export function Chat(props: {
   const [error, setError] = useState<string | null>(null);
   const [model, setModel] = useState<string | null>(null);
   const [workflow, setWorkflow] = useState<Ask["workflow"]>();
+  // sent with every turn, so the agent keeps them as context; `pending` go with the next message
+  const [files, setFiles] = useState<Attached[]>(() => load<Attached>(`${props.storageKey}:files`));
+  const [pending, setPending] = useState<Attached[]>([]);
+  const [uploading, setUploading] = useState(false);
   const log = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
+  const picker = useRef<HTMLInputElement>(null);
   useEffect(() => saveChat(props.storageKey, messages), [props.storageKey, messages]);
+  useEffect(() => saveChat(`${props.storageKey}:files`, files), [props.storageKey, files]);
+
+  async function attach(list: FileList | null) {
+    if (!list?.length) return;
+    setUploading(true);
+    setError(null);
+    try {
+      for (const f of Array.from(list)) {
+        const form = new FormData();
+        form.append("file", f);
+        const r = await upload<Attached>("/api/files", form);
+        setPending((p) => [...p, { file_id: r.file_id, name: r.name }]);
+      }
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setUploading(false);
+      if (picker.current) picker.current.value = "";
+    }
+  }
   useEffect(() => {
     log.current?.scrollTo({ top: log.current.scrollHeight, behavior: "smooth" });
   }, [messages, steps, error]);
 
   async function send(e?: FormEvent, ask?: Ask) {
     e?.preventDefault();
-    const content = ask?.text ?? text.trim();
-    if (!content || steps || props.disabled) return;
-    const asked = [...messages, { role: "user" as const, content }];
+    const typed = ask?.text ?? text.trim();
+    if (!typed || steps || uploading || props.disabled) return;
+    const note = pending.length ? `\n\nAttached: ${pending.map((f) => f.name).join(", ")}` : "";
+    const asked = [...messages, { role: "user" as const, content: typed + note }];
+    const all = [...files, ...pending];
     const flow = ask ? ask.workflow : workflow;
     if (ask) setWorkflow(ask.workflow);
     setMessages(asked);
+    setFiles(all);
+    setPending([]);
     if (!ask) setText("");
     setSteps([]);
     setError(null);
     try {
       const r = await agent<AgentResult>(
         "/api/agent/chat",
-        { messages: asked, pack_id: props.pack_id, deck_id: props.deck_id, workflow: flow },
+        { messages: asked, pack_id: props.pack_id, deck_id: props.deck_id, workflow: flow, ...(all.length ? { files: all.map((f) => f.file_id) } : {}) },
         (tools) => setSteps((s) => [...(s ?? []), ...tools]),
       );
       const conversation = [...asked, ...r.messages];
@@ -205,14 +241,42 @@ export function Chat(props: {
             }
           }}
         />
+        {pending.length > 0 && (
+          <div className="cq-attached">
+            {pending.map((f) => (
+              <Button
+                key={f.file_id}
+                type="button"
+                variant="outline"
+                size="sm"
+                aria-label={`Remove ${f.name}`}
+                onClick={() => setPending((p) => p.filter((x) => x !== f))}
+              >
+                {f.name} <X />
+              </Button>
+            ))}
+          </div>
+        )}
         <div className="cq-composer-foot">
+          <input ref={picker} type="file" multiple hidden accept={ACCEPT} onChange={(e) => void attach(e.target.files)} />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="Attach files"
+            title="Attach images, PPTX, PDF, Word, Excel, CSV, text or Markdown"
+            disabled={uploading || !!steps || props.disabled}
+            onClick={() => picker.current?.click()}
+          >
+            {uploading ? <span className="cq-spinner" /> : <Paperclip />}
+          </Button>
           {props.footer}
           {model && <span className="cq-hint">Model: {model}</span>}
           <span className="cq-spacer" />
           <span className="cq-hint cq-keys">
             <Kbd>↵</Kbd> send · <Kbd>⇧↵</Kbd> new line
           </span>
-          <Button type="submit" size="icon" aria-label="Send" disabled={!!steps || props.disabled || !text.trim()}>
+          <Button type="submit" size="icon" aria-label="Send" disabled={!!steps || uploading || props.disabled || !text.trim()}>
             <ArrowUp />
           </Button>
         </div>

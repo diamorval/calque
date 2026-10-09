@@ -158,7 +158,7 @@
                               "type": "boolean"
                             },
                             "image": {
-                              "description": "Image replacing a picture, cropped to fill: a path relative to the deck's, the uploads' or the pack's folder.",
+                              "description": "Image replacing a picture, cropped to fill: an uploaded file as `file:<file_id>`, or a path relative to the deck's, the uploads' or the pack's folder.",
                               "type": "string"
                             },
                             "table": {
