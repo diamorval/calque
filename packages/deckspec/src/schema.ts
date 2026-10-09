@@ -71,7 +71,7 @@ export const ShapeValue = z.union([
     bold: z.boolean().optional(),
     size: z.union([z.string(), z.number().positive()]).optional().describe("A size role or points."),
     fit: z.boolean().optional().describe("Grow the box to keep the text on one line."),
-    image: z.string().optional().describe("Path or asset id of an image replacing a picture, cropped to fill."),
+    image: z.string().optional().describe("An image replacing a picture, cropped to fill: an uploaded file as `file:<file_id>`, or a local path."),
     table: z.array(z.array(z.string())).optional(),
     width_frac: z.number().min(0).max(1).optional().describe("Bar/progress width as a fraction of the original."),
   }),

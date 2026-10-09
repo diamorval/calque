@@ -39,6 +39,21 @@ Hosts with MCP Apps show the deck UI (`ui://calque/deck.html`) on `create_deck`,
 `import_pptx`, `patch_deck`, `add_slides`, `restore_version`. The others get `preview_url`
 (`/decks/:id`), the same UI over REST: comments posted there are read by `list_comments`.
 
+### Files in
+
+A template or deck is too big for a tool argument in base64 (a corporate template is ~14 MB).
+Upload it, then pass its `file_id`:
+
+1. The `upload_url` tool returns a one-time URL (signed ticket, 15 minutes) that uploads as the
+   calling user, so a client without its own token (Claude Code's shell) can post the file:
+   `curl -F file=@template.pptx '<upload_url>'`. A client holding a bearer token can also
+   `POST /api/files` with it directly.
+2. The answer is `{file_id, name, size, type}`. Pass `{"file_id": …}` as `file` to `import_pptx` or as
+   `template` to `import_pack`, or place an image with `"image": "file:<file_id>"` in a clone value.
+
+Files are capped at 50 MB, stored under `$CALQUE_DATA/uploads/<file_id>`, and usable only by their
+uploader. `{base64}` (and `{path}` on a stdio server) still work.
+
 ## Web app
 
 The server also serves the built web app (`apps/web/dist`) on `/`. With `CALQUE_OIDC_ISSUER` set,
@@ -51,6 +66,7 @@ design system: `node_modules/@diametral/design-system/keycloak/diametral`.
 | --- | --- |
 | `GET /api/me` | the signed-in user, their teams, `admin` |
 | `GET /api/decks` | the user's decks |
+| `POST /api/files` | multipart `file` (50 MB max, else 413) → `{file_id, name, size, type}`, owned by the caller; `?ticket=` from `upload_url` instead of credentials |
 | `POST /api/packs/drafts` | multipart `template`, `id`, `name`: extracted draft (manifest with guessed roles, one PNG per template slide) |
 | `POST /api/packs/drafts/:id/fonts` | multipart `font` (.ttf, .otf) |
 | `POST /api/packs/drafts/:id/publish` | `{manifest, voice?, visibility, teams?}`: validated (template lint, test deck), then published |
@@ -67,7 +83,7 @@ prompts as Claude. Models go through `@calque/llm` only.
 | `GET /api/models` | provider catalog + configured models (never their keys) |
 | `POST /api/models` | `{provider, model, api_key?, base_url?, default?}`: tested with a 1-token call, refused (422) if the provider refuses |
 | `POST /api/models/:id/default`, `DELETE /api/models/:id` | the default is read on every call: no restart |
-| `POST /api/agent/chat` | `{messages, workflow?, pack_id?, deck_id?, model?}` → `{model, text, messages}`; the client keeps the conversation. `Accept: application/x-ndjson` streams `{step}` lines, then `{done}` |
+| `POST /api/agent/chat` | `{messages, workflow?, pack_id?, deck_id?, model?, files?}` → `{model, text, messages}`; the client keeps the conversation. `files`: uploaded file ids; documents (txt, md, csv, docx, xlsx, pptx; not PDF yet) reach the model as text, images as `file:<id>` references. `Accept: application/x-ndjson` streams `{step}` lines, then `{done}` |
 | `POST /api/agent/apply-comments` | `{deck_id, model?}`: the open comments become `patch_deck` calls |
 
 `node apps/server/eval/agent.ts anthropic:<model> openai:<model>` runs the Phase 4 checks on real models

@@ -157,7 +157,7 @@
                               "type": "boolean"
                             },
                             "image": {
-                              "description": "Path or asset id of an image replacing a picture, cropped to fill.",
+                              "description": "An image replacing a picture, cropped to fill: an uploaded file as `file:<file_id>`, or a local path.",
                               "type": "string"
                             },
                             "table": {

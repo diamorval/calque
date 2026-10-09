@@ -6,6 +6,7 @@ import { DeckSpec, PatchOp, Slide } from "@calque/deckspec";
 import type { Db } from "./db.ts";
 import type { Decks, Finding } from "./decks.ts";
 import { REPO } from "./engine.ts";
+import { getFile, MAX_UPLOAD, uploadTicket } from "./files.ts";
 import type { Models } from "./models.ts";
 import { importPack, listPacks, type User } from "./packs.ts";
 
@@ -38,15 +39,17 @@ const version = z.number().int().min(1).optional().describe("A past version; def
 const File = z
   .union([
     z.strictObject({ path: z.string().describe("Local path; only when the server runs on the user's machine (stdio).") }),
+    z.strictObject({ file_id: z.string().describe("An uploaded file (POST /api/files, see upload_url).") }),
     z.strictObject({ base64: z.string(), name: z.string().optional() }),
   ])
-  .describe("A .pptx file: a local path (stdio) or its content in base64.");
+  .describe("A .pptx file: an uploaded file_id (best for big files), a local path (stdio) or its content in base64.");
 
 async function materialize(app: App, user: User, f: z.infer<typeof File>): Promise<string> {
   if ("path" in f) {
     if (!user.local) throw new Error("file paths are only read by a local (stdio) server: send base64");
     return f.path;
   }
+  if ("file_id" in f) return (await getFile(app.db, app.data, user, f.file_id)).path;
   const dir = join(app.data, "uploads");
   await mkdir(dir, { recursive: true });
   const path = join(dir, `${randomUUID()}.pptx`);
@@ -256,6 +259,20 @@ export const TOOLS = {
         ...(user.local ? { path: r.path } : {}),
       };
     },
+  }),
+
+  upload_url: tool({
+    title: "Upload URL",
+    description:
+      "A one-time URL to upload a file (a template or deck .pptx, an image) without base64: POST it as multipart field `file`, e.g. `curl -F file=@deck.pptx '<upload_url>'`. Returns {file_id, name, size, type}; pass the file_id to import_pptx / import_pack, or use an image as `file:<file_id>` in a clone value's `image`. Valid 15 minutes.",
+    input: z.object({}),
+    readOnly: true,
+    run: async (app, user) => ({
+      upload_url: `${app.publicUrl}/api/files?ticket=${await uploadTicket(app.secret, user)}`,
+      method: "POST",
+      field: "file",
+      max_bytes: MAX_UPLOAD,
+    }),
   }),
 
   import_pack: tool({

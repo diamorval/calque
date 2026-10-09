@@ -135,6 +135,8 @@
 .cq-composer textarea { border: 0; padding: 2px 0; background: transparent; resize: none; line-height: 1.5; max-height: 200px; }
 .cq-composer textarea:focus { box-shadow: none; }
 .cq-composer-foot { display: flex; align-items: center; gap: 8px; }
+.cq-attached { display: flex; flex-wrap: wrap; gap: 6px; }
+.cq-attached button { text-transform: none; letter-spacing: normal; font-weight: 400; max-width: 100%; }
 .cq-composer-foot .cq-spacer { flex: 1; }
 .cq-keys { display: inline-flex; align-items: center; gap: 4px; }
 .cq-pack-pick { width: auto; height: 30px; font-size: 13px; background-color: var(--cq-surface-2); }

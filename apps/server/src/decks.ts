@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { DeckSpec, PatchOp } from "@calque/deckspec";
 import type { Db } from "./db.ts";
 import { engine } from "./engine.ts";
+import { FILE_REF, getFile, uploadPath } from "./files.ts";
 import { getPack, listPacks, NotFound, type User } from "./packs.ts";
 
 export interface Issue {
@@ -66,6 +67,22 @@ interface DeckRow {
 
 export class Conflict extends Error {}
 
+/** Every `file:<id>` image reference in a DeckSpec's clone values, rewritten by `fn`. */
+function mapFileRefs(spec: DeckSpec, fn: (id: string) => string): DeckSpec {
+  return {
+    ...spec,
+    slides: spec.slides.map((s) => {
+      if (s.source.kind !== "clone") return s;
+      const values = Object.fromEntries(
+        Object.entries(s.source.values).map(([k, v]) =>
+          v && typeof v === "object" && !Array.isArray(v) && v.image?.startsWith(FILE_REF) ? [k, { ...v, image: fn(v.image.slice(FILE_REF.length)) }] : [k, v],
+        ),
+      );
+      return { ...s, source: { ...s.source, values } };
+    }),
+  };
+}
+
 /** Deck versions, their built PPTX and renders. Every change is a new DeckSpec version. */
 export class Decks {
   readonly db: Db;
@@ -126,6 +143,7 @@ export class Decks {
   /** New deck: builds before anything is stored, so a deck that does not build is never saved. */
   async create(user: User, spec: DeckSpec, note: string, id: string = randomUUID()) {
     const pack = await getPack(this.db, user, spec.pack_id);
+    await this.ownFiles(user, spec);
     await mkdir(this.dir(id), { recursive: true });
     const report = await this.build(pack.dir, id, spec, 1);
     await this.db.query("insert into decks (id, pack_id, owner, title, head) values ($1, $2, $3, $4, 1)", [
@@ -153,6 +171,7 @@ export class Decks {
   async commit(user: User, id: string, from: number, spec: DeckSpec, note: string, undoTo: number | null = from) {
     const deck = await this.deck(user, id);
     if (spec.pack_id !== deck.pack_id) throw new Error("a deck stays on its pack");
+    await this.ownFiles(user, spec);
     const next = from + 1;
     const report = await this.build(deck.packDir, id, spec, next);
     const { rows } = await this.db.query(
@@ -203,6 +222,13 @@ export class Decks {
     return this.commit(user, id, deck.head, await this.spec(id, target), `restore v${target}`, rows[0].undo_to);
   }
 
+  /** A DeckSpec may only place the uploaded files of the user writing it. */
+  private async ownFiles(user: User, spec: DeckSpec) {
+    const ids: string[] = [];
+    mapFileRefs(spec, (fid) => (ids.push(fid), fid));
+    for (const fid of ids) await getFile(this.db, this.data, user, fid);
+  }
+
   /** Build version `version` (cached on disk with its report). */
   async build(packDir: string, id: string, spec: DeckSpec, version: number): Promise<BuildReport> {
     const out = this.pptx(id, version);
@@ -211,7 +237,9 @@ export class Decks {
     const tmp = `${out}.${randomUUID()}.tmp.pptx`;
     const base = spec.base ? join(this.dir(id), spec.base) : undefined;
     try {
-      const report = await engine<BuildReport>("build", { pack: packDir, deck: spec, out: tmp, base });
+      // `file:<id>` images are the user's uploads, resolved to their path for the engine only
+      const deck = mapFileRefs(spec, (fid) => uploadPath(this.data, fid));
+      const report = await engine<BuildReport>("build", { pack: packDir, deck, out: tmp, base });
       await rename(tmp, out);
       await writeFile(meta, JSON.stringify({ ...report, path: out }));
       return { ...report, path: out };
