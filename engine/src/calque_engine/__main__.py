@@ -56,7 +56,10 @@ def cmd_build(a) -> int:
     from .api import call
 
     deck = json.loads(Path(a.deck).read_text(encoding="utf-8"))
-    r = call({"op": "build", "pack": a.pack, "deck": deck, "out": a.out, "base": a.base})
+    # images: relative to the pack, the deck file's folder or the base's folder
+    roots = [a.pack, str(Path(a.deck).parent), *([str(Path(a.base).parent)] if a.base else [])]
+    req = {"op": "build", "pack": a.pack, "deck": deck, "out": a.out, "base": a.base}
+    r = call({**req, "image_roots": roots})
     if not r["ok"]:
         print(r["message"], file=sys.stderr)
         return 1
