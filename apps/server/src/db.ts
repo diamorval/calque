@@ -1,3 +1,4 @@
+import { closeSync, openSync, readFileSync, rmSync, writeSync } from "node:fs";
 import { PGlite } from "@electric-sql/pglite";
 import pg from "pg";
 
@@ -62,7 +63,47 @@ export async function openDb(url = process.env.DATABASE_URL): Promise<Db> {
     await pool.query(SCHEMA);
     return { query: (sql, params) => pool.query(sql, params) as never, close: () => pool.end() };
   }
+  const unlock = url && !url.startsWith("memory://") ? lock(`${url}.lock`) : () => {};
   const lite = await PGlite.create(url);
   await lite.exec(SCHEMA);
-  return { query: (sql, params) => lite.query(sql, params), close: () => lite.close() };
+  return {
+    query: (sql, params) => lite.query(sql, params),
+    close: () => lite.close().finally(unlock),
+  };
+}
+
+export class DbLocked extends Error {}
+
+/** PGlite has no lock of its own: two processes on one data dir corrupt it. One owner per dir. */
+function lock(path: string): () => void {
+  for (;;) {
+    try {
+      const fd = openSync(path, "wx");
+      writeSync(fd, String(process.pid));
+      closeSync(fd);
+      const unlock = () => rmSync(path, { force: true });
+      process.once("exit", unlock);
+      return unlock;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+    }
+    const pid = Number(readFileSync(path, "utf8"));
+    if (alive(pid)) {
+      throw new DbLocked(
+        `${path.slice(0, -5)} is in use by process ${pid}: one Calque server owns it. ` +
+          "Connect to that server (stdio.ts does), stop it, or set CALQUE_DATA / DATABASE_URL elsewhere.",
+      );
+    }
+    rmSync(path, { force: true }); // stale: its process is gone
+  }
+}
+
+function alive(pid: number): boolean {
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === "EPERM";
+  }
 }
