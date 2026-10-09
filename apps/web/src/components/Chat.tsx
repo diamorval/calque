@@ -10,6 +10,11 @@ export interface ChatMessage {
   role: "user" | "assistant" | "tool" | "system";
   content: string | { type: string; text?: string; toolName?: string }[];
 }
+/** A message sent from outside the composer (a toolbar action), with the workflow it runs. */
+export interface Ask {
+  text: string;
+  workflow?: "draft-slides" | "edit-slides" | "review-deck";
+}
 export interface AgentResult {
   model: string;
   text: string;
@@ -70,6 +75,8 @@ export function Chat(props: {
   suggestions?: string[];
   /** Left of the send button (the new deck's brand pack). */
   footer?: ReactNode;
+  /** Sent as soon as it changes; its workflow stays on for the replies that follow. */
+  ask?: Ask | null;
   /** `conversation`: every message so far, the agent's included */
   onDone?: (r: AgentResult, conversation: ChatMessage[]) => void;
 }) {
@@ -78,6 +85,7 @@ export function Chat(props: {
   const [steps, setSteps] = useState<string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [model, setModel] = useState<string | null>(null);
+  const [workflow, setWorkflow] = useState<Ask["workflow"]>();
   const log = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   useEffect(() => saveChat(props.storageKey, messages), [props.storageKey, messages]);
@@ -85,18 +93,21 @@ export function Chat(props: {
     log.current?.scrollTo({ top: log.current.scrollHeight, behavior: "smooth" });
   }, [messages, steps, error]);
 
-  async function send(e?: FormEvent) {
+  async function send(e?: FormEvent, ask?: Ask) {
     e?.preventDefault();
-    if (!text.trim() || steps || props.disabled) return;
-    const asked = [...messages, { role: "user" as const, content: text.trim() }];
+    const content = ask?.text ?? text.trim();
+    if (!content || steps || props.disabled) return;
+    const asked = [...messages, { role: "user" as const, content }];
+    const flow = ask ? ask.workflow : workflow;
+    if (ask) setWorkflow(ask.workflow);
     setMessages(asked);
-    setText("");
+    if (!ask) setText("");
     setSteps([]);
     setError(null);
     try {
       const r = await agent<AgentResult>(
         "/api/agent/chat",
-        { messages: asked, pack_id: props.pack_id, deck_id: props.deck_id },
+        { messages: asked, pack_id: props.pack_id, deck_id: props.deck_id, workflow: flow },
         (tools) => setSteps((s) => [...(s ?? []), ...tools]),
       );
       const conversation = [...asked, ...r.messages];
@@ -109,6 +120,10 @@ export function Chat(props: {
       setSteps(null);
     }
   }
+
+  useEffect(() => {
+    if (props.ask) void send(undefined, props.ask);
+  }, [props.ask]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // one turn per run of assistant messages: the agent's steps, then its answer
   const shown: { role: ChatMessage["role"]; text: string; tools: string[] }[] = [];

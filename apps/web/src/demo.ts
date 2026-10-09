@@ -188,6 +188,40 @@ export async function startDemo() {
         return { comment };
       },
     ],
+    // an imported file opens a deck the engine built earlier on that pack
+    [
+      /^POST \/api\/tools\/import_pptx$/,
+      (_, b) => ({
+        deck_id: (decks.find((d) => d.pack_id === b.pack_id) ?? decks[0])?.id,
+      }),
+    ],
+    // the review report, from the saved lint: a generated deck has no safe fixes to apply
+    [
+      /^POST \/api\/tools\/review_deck$/,
+      (_, b) => {
+        if (b.apply_safe_fixes)
+          return Response.json(READ_ONLY, { status: 403 });
+        const lint: Json =
+          api[
+            `POST /api/tools/lint_deck ${JSON.stringify({ deck_id: b.deck_id })}`
+          ] ?? { version: 1, findings: [] };
+        const of = (s: string) =>
+          lint.findings.filter((f: Json) => f.severity === s);
+        return {
+          report: {
+            version: lint.version,
+            ERROR: of("ERROR"),
+            WARN: of("WARN"),
+            NOTE: of("NOTE"),
+            safe_fixes: [],
+            judgment_calls: lint.findings.filter(
+              (f: Json) => f.severity !== "NOTE",
+            ),
+          },
+          applied: [],
+        };
+      },
+    ],
   ];
 
   const real = globalThis.fetch;
@@ -246,15 +280,14 @@ export async function startDemo() {
     }
     for (const [re, answer] of routes) {
       const m = req.match(re);
-      if (m)
-        return Response.json(
-          answer(
-            m,
-            init?.body instanceof FormData
-              ? init.body
-              : JSON.parse((init?.body as string) || "{}"),
-          ),
-        );
+      if (!m) continue;
+      const out = answer(
+        m,
+        init?.body instanceof FormData
+          ? init.body
+          : JSON.parse((init?.body as string) || "{}"),
+      );
+      return out instanceof Response ? out : Response.json(out);
     }
     return Response.json(READ_ONLY, { status: 403 });
   };
