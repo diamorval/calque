@@ -1,12 +1,13 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { parse } from "yaml";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { REPO } from "../src/engine.ts";
 import { createHttp } from "../src/http.ts";
 import { sessions } from "../src/session.ts";
 import type { App } from "../src/tools.ts";
 import { fakeModel, fakeOidc, lastResult, toolsCalled } from "./fakes.ts";
-import { acmeDeck, ENGINE_TIMEOUT, testApp } from "./helpers.ts";
+import { acmeDeck, ENGINE_TIMEOUT, fakeFont, testApp } from "./helpers.ts";
 
 type Json = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -93,12 +94,26 @@ describe("web app routes", { timeout: ENGINE_TIMEOUT }, () => {
     expect((await req(draft.slides[0].image_url, { cookie: alice })).headers.get("content-type")).toBe("image/png");
     expect((await req(draft.slides[0].image_url, { bearer: await idp.token("bob") })).status).toBe(404);
 
-    const font = new FormData();
-    font.set("font", new Blob([Buffer.from("not really a font")]), "Brand-Regular.ttf");
-    expect((await (await req(`/api/packs/drafts/${draft.draft_id}/fonts`, { method: "POST", body: font, cookie: alice })).json()) as Json).toEqual({ fonts: ["Brand-Regular.ttf"] });
+    expect(draft.review.colors["theme.accent1"]).toMatch(/^[0-9A-F]{6}$/);
+    expect(draft.review.fonts["role.font.body"]).toBeTruthy();
+    expect(draft.archetypes).toContain("cards");
+    expect(draft.archetypes).not.toContain("cover");
 
-    const published = await json(`/api/packs/drafts/${draft.draft_id}/publish`, { manifest: draft.manifest, voice: "# Voice\n\nPlain words.", visibility: "team" });
+    const upFont = async (bytes: Buffer, name: string) => {
+      const font = new FormData();
+      font.set("font", new Blob([new Uint8Array(bytes)]), name);
+      return req(`/api/packs/drafts/${draft.draft_id}/fonts`, { method: "POST", body: font, cookie: alice });
+    };
+    expect((await upFont(Buffer.from("not really a font"), "Bad.ttf")).status).toBe(400);
+    expect((await (await upFont(fakeFont("Brand Sans"), "Brand-Regular.ttf")).json()) as Json).toEqual({ fonts: ["Brand-Regular.ttf"], family: "Brand Sans" });
+
+    const archetyped = { ...draft.manifest, roles: { ...draft.manifest.roles, archetypes: { cards: [3] } } };
+    const published = await json(`/api/packs/drafts/${draft.draft_id}/publish`, { manifest: archetyped, voice: "# Voice\n\nPlain words.", visibility: "team" });
     expect(published.body).toMatchObject({ status: "published", id: "newco", visibility: "team", teams: ["sales", "calque-admins"] });
+    // the uploaded font's family is now a pack font
+    const yaml = parse(readFileSync(join(app.data, "packs/newco/pack.yaml"), "utf8"));
+    expect(yaml.lint.extra_fonts).toContain("Brand Sans");
+    expect(yaml.roles.archetypes).toEqual({ cards: [3] });
 
     const packs = (who: { cookie?: string; bearer?: string }) => json("/api/tools/list_packs", {}, who).then((r) => r.body.packs.map((p: Json) => p.id));
     expect(await packs({ cookie: alice })).toContain("newco");
@@ -122,6 +137,7 @@ describe("web app routes", { timeout: ENGINE_TIMEOUT }, () => {
     expect(draft.manifest).toMatchObject({ id: "newco", name: "NewCo" });
     expect(draft.voice).toBe("# Voice\n\nPlain words.");
     expect(draft.fonts).toEqual(["Brand-Regular.ttf"]);
+    expect(draft.manifest.lint.extra_fonts).toContain("Brand Sans");
     expect(draft.slides).toHaveLength(4);
     expect((await req(draft.slides[0].image_url, { cookie: alice })).headers.get("content-type")).toBe("image/png");
 

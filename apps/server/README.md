@@ -51,8 +51,8 @@ design system: `node_modules/@diametral/design-system/keycloak/diametral`.
 | --- | --- |
 | `GET /api/me` | the signed-in user, their teams, `admin` |
 | `GET /api/decks` | the user's decks |
-| `POST /api/packs/drafts` | multipart `template`, `id`, `name`: extracted draft (manifest with guessed roles, one PNG per template slide) |
-| `POST /api/packs/drafts/:id/fonts` | multipart `font` (.ttf, .otf) |
+| `POST /api/packs/drafts` | multipart `template` (.pptx or .potx), `id`, `name`, optional `tokens` (tokens.json): extracted draft (manifest with guessed roles and the fonts/colours the slides use, resolved colours and fonts to review, archetype names, one PNG per template slide) |
+| `POST /api/packs/drafts/:id/fonts` | multipart `font` (.ttf, .otf): its family is allowed by lint (`lint.extra_fonts`) on publish |
 | `POST /api/packs/drafts/:id/publish` | `{manifest, voice?, visibility, teams?}`: validated (template lint, test deck), then published |
 | `POST /api/packs/:id/visibility` | `{visibility, teams?}`, owner only |
 

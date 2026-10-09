@@ -287,7 +287,7 @@ class _Linter:
                 or bottom > h + CANVAS_TOL
             ):
                 self.add(
-                    "ERROR",
+                    "WARN" if self.template else "ERROR",  # the company's own layout
                     num,
                     shape.shape_id,
                     "off-canvas",
@@ -444,7 +444,8 @@ def lint(
         signature line).
     exempt_closing_slides: positions to treat as `closing` clones when no map is at hand.
     template: lint the template itself: placeholders, gaps and slop are its job, skip them;
-        off-palette construction guides (connectors) are tolerated.
+        off-palette construction guides (connectors) are tolerated, text off the canvas warns
+        (its clones are still checked in decks).
     """
     closing = set(exempt_closing_slides or ())
     roles = set(pack.slides_for("closing"))
