@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { parse, stringify } from "yaml";
 import { engine, REPO } from "./engine.ts";
 import type { Db } from "./db.ts";
+import type { Role } from "./decks.ts";
 
 /** Who is calling. `local`: stdio or auth disabled, sees every pack and may pass file paths. */
 export interface User {
@@ -12,6 +13,8 @@ export interface User {
   name?: string;
   teams: string[];
   local?: boolean;
+  /** Acting through a preview link (src/preview.ts): its deck, role, label and token. */
+  guest?: { deck: string; role: Role; label: string; token: string };
 }
 
 export interface PackRow {

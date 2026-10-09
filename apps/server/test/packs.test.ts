@@ -53,7 +53,7 @@ describe("import_pack and pack visibility", { timeout: ENGINE_TIMEOUT }, () => {
     const deck = { ...acmeDeck(), pack_id: "acme-sales" };
     const made = await run(app, alice, "create_deck", { deck });
     await expect(run(app, bob, "create_deck", { deck })).rejects.toThrow(/no pack "acme-sales"/);
-    await expect(run(app, bob, "open_deck", { deck_id: made.deck_id })).rejects.toThrow(/no pack/);
+    await expect(run(app, bob, "open_deck", { deck_id: made.deck_id })).rejects.toThrow(/no deck/); // not his deck
     await expect(run(app, alice, "import_pack", { template: { path: join(ACME, "template.pptx") } })).rejects.toThrow(/base64/);
   });
 });

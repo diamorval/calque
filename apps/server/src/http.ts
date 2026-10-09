@@ -15,13 +15,10 @@ import { EngineError, REPO } from "./engine.ts";
 import { buildServer, UI_HTML } from "./mcp.ts";
 import { InvalidModel, isAdmin } from "./models.ts";
 import { addFont, draftDir, draftPack, editPack, Forbidden, NotFound, publishDraft, setVisibility, type User } from "./packs.ts";
+import { previewGuest } from "./preview.ts";
 import type { Sessions } from "./session.ts";
 import { TOOLS, toolNamed, type App } from "./tools.ts";
 
-/** The preview link is a capability URL: knowing a deck's id (random UUID) opens its preview,
-reads it and comments on it, nothing else. The MCP App inside Claude loads its PNGs from here,
-where no web session exists. */
-const PREVIEW: User = { id: "preview", teams: [], local: true };
 const LOCAL: User = { id: "local", name: "Local", teams: [], local: true };
 export const WEB_DIST = join(REPO, "apps/web/dist");
 
@@ -76,6 +73,14 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
     if (s) return s;
     const a = await check(c.req.raw);
     return a instanceof Response ? a : userOf(a);
+  }
+
+  /** A preview route's caller: a guest through the deck's signed link (`?t=`), else `who`, who must own the deck.
+  Without auth (local only) the link is not checked. */
+  async function viewer(c: Context): Promise<User | Response> {
+    const t = c.req.query("t");
+    if (!t || !check) return who(c);
+    return previewGuest(app.secret, t, param(c, "id")) ?? c.json({ error: "Unauthorized", message: "preview link expired or invalid" }, 401);
   }
 
   const mcp = createMcpHandler(({ authInfo }) => buildServer(app, userOf(authInfo)));
@@ -245,24 +250,30 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
     return c.html(await readFile(UI_HTML, "utf8"));
   });
   http.get("/decks/:id/data", async (c) => {
+    const user = await viewer(c);
+    if (user instanceof Response) return user;
     try {
-      return c.json(await TOOLS.open_deck.run(app, PREVIEW, { deck_id: param(c, "id"), render: true }));
+      return c.json(await TOOLS.open_deck.run(app, user, { deck_id: param(c, "id"), render: true }));
     } catch (e) {
       return fail(c, e);
     }
   });
   http.post("/decks/:id/comments", async (c) => {
+    const user = await viewer(c);
+    if (user instanceof Response) return user;
     try {
       const b = TOOLS.add_comment.input.parse({ ...(await c.req.json()), deck_id: param(c, "id") });
-      return c.json(await TOOLS.add_comment.run(app, PREVIEW, b));
+      return c.json(await TOOLS.add_comment.run(app, user, b));
     } catch (e) {
       return fail(c, e);
     }
   });
   http.get("/decks/:id/slides/:png", async (c) => {
+    const user = await viewer(c);
+    if (user instanceof Response) return user;
     const n = Number(param(c, "png").replace(/\.png$/, ""));
     try {
-      const { slides } = await app.decks.render(PREVIEW, param(c, "id"));
+      const { slides } = await app.decks.render(user, param(c, "id"));
       const s = slides.find((x) => x.number === n);
       if (!s) return c.notFound();
       return new Response(Readable.toWeb(createReadStream(s.png)) as ReadableStream, {
@@ -273,10 +284,12 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
     }
   });
   http.get("/decks/:id/deck.pptx", async (c) => {
+    const user = await viewer(c);
+    if (user instanceof Response) return user;
     try {
       const v = c.req.query("v");
-      const { path, version } = await app.decks.exportPath(PREVIEW, param(c, "id"), v ? Number(v) : undefined);
-      const deck = await app.decks.deck(PREVIEW, param(c, "id"));
+      const { path, version } = await app.decks.exportPath(user, param(c, "id"), v ? Number(v) : undefined);
+      const deck = await app.decks.deck(user, param(c, "id"), "viewer");
       const name = `${deck.title.replace(/[^\p{L}\p{N} _-]+/gu, "").trim() || "deck"} v${version}.pptx`;
       return new Response(Readable.toWeb(createReadStream(path)) as ReadableStream, {
         headers: {

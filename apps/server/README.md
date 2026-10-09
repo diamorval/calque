@@ -37,7 +37,12 @@ node apps/server/src/stdio.ts          # stdio, for a local MCP client
 
 Hosts with MCP Apps show the deck UI (`ui://calque/deck.html`) on `create_deck`, `open_deck`,
 `import_pptx`, `patch_deck`, `add_slides`, `restore_version`. The others get `preview_url`
-(`/decks/:id`), the same UI over REST: comments posted there are read by `list_comments`.
+(`/decks/:id?t=…`), the same UI over REST: comments posted there are read by `list_comments`.
+
+A deck is its owner's only: to anyone else it does not exist (404). Preview, PNG and download URLs
+carry a signed token (`?t=`, HMAC with `CALQUE_SECRET`, 7 days) that lets whoever holds the link
+read that one deck and comment on it, as `guest (link from <owner>)`; the owner's session or bearer
+token works without it. Without `CALQUE_OIDC_ISSUER` (local only) the token is not checked.
 
 ## Web app
 
