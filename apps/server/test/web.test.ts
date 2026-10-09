@@ -114,6 +114,26 @@ describe("web app routes", { timeout: ENGINE_TIMEOUT }, () => {
     expect(await packs({ bearer: await idp.token("bob") })).toContain("newco");
   });
 
+  it("edits a published pack through a draft, owner only", async () => {
+    expect((await json("/api/packs/acme-test/edit", {})).status).toBe(403);
+    expect((await json("/api/packs/newco/edit", {}, { bearer: await idp.token("bob") })).status).toBe(403);
+
+    const draft = (await json("/api/packs/newco/edit", {})).body;
+    expect(draft.manifest).toMatchObject({ id: "newco", name: "NewCo" });
+    expect(draft.voice).toBe("# Voice\n\nPlain words.");
+    expect(draft.fonts).toEqual(["Brand-Regular.ttf"]);
+    expect(draft.slides).toHaveLength(4);
+    expect((await req(draft.slides[0].image_url, { cookie: alice })).headers.get("content-type")).toBe("image/png");
+
+    const broken = { ...draft.manifest, roles: { ...draft.manifest.roles, closing: [9] } };
+    expect((await json(`/api/packs/drafts/${draft.draft_id}/publish`, { manifest: broken, visibility: "team" })).status).toBe(422);
+
+    const saved = await json(`/api/packs/drafts/${draft.draft_id}/publish`, { manifest: { ...draft.manifest, name: "NewCo Renamed" }, voice: "Short.", visibility: "team" });
+    expect(saved.body).toEqual({ status: "published", id: "newco" });
+    const pack = (await json("/api/tools/list_packs", {})).body.packs.find((p: Json) => p.id === "newco");
+    expect(pack).toMatchObject({ name: "NewCo Renamed", visibility: "workspace" });
+  });
+
   it("streams the agent's steps as NDJSON", async () => {
     const res = await req("/api/agent/chat", {
       method: "POST",
