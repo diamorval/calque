@@ -24,6 +24,14 @@ export const api = <T = Record<string, unknown>>(path: string, body?: unknown, m
 
 export const tool = <T = Record<string, unknown>>(name: string, args: Record<string, unknown> = {}) => api<T>(`/api/tools/${name}`, args);
 
+/** A file as a tool's `file` argument. Inline base64 for now: swap it here for an uploaded file's id. */
+export async function fileArg(f: File): Promise<{ base64: string; name: string }> {
+  const bytes = new Uint8Array(await f.arrayBuffer());
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return { base64: btoa(bin), name: f.name };
+}
+
 export const upload = <T = Record<string, unknown>>(path: string, form: FormData) =>
   fetch(path, { method: "POST", body: form }).then((r) => parse<T>(r));
 

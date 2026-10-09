@@ -3,10 +3,11 @@ import { Alert, AlertDescription } from "diametral-ds/alert";
 import { Button } from "diametral-ds/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "diametral-ds/table";
 import { Tag } from "diametral-ds/tag";
-import { CircleCheck, Download, History, Play, Sparkles, TriangleAlert, X } from "lucide-react";
+import { CircleCheck, Download, History, ListChecks, ListPlus, Play, Sparkles, TriangleAlert, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { agent, tool } from "../api.ts";
-import { Chat } from "../components/Chat.tsx";
+import { Chat, type Ask } from "../components/Chat.tsx";
+import { AddSlides, ReviewDeck } from "../components/DeckActions.tsx";
 import { navigate } from "../nav.ts";
 import { ago, Dialog, Spinner } from "../ui.tsx";
 
@@ -21,6 +22,9 @@ export function Editor({ id }: { id: string }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [history, setHistory] = useState(false);
+  // toolbar actions that go through the agent chat, and their dialogs
+  const [ask, setAsk] = useState<Ask | null>(null);
+  const [dialog, setDialog] = useState<"add" | "review" | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -76,6 +80,12 @@ export function Editor({ id }: { id: string }) {
                   <CircleCheck /> Lint clean
                 </Tag>
               ))}
+            <Button variant="ghost" onClick={() => setDialog("add")}>
+              <ListPlus /> Add slides
+            </Button>
+            <Button variant="ghost" onClick={() => setDialog("review")}>
+              <ListChecks /> Review
+            </Button>
             <Button variant="ghost" onClick={() => setHistory(true)}>
               <History /> History
             </Button>
@@ -96,6 +106,7 @@ export function Editor({ id }: { id: string }) {
             pack_id={deck.pack_id}
             placeholder="Ask for a change: reword, add a slide, review…"
             suggestions={EDITS}
+            ask={ask}
             empty={
               <div className="cq-empty">
                 <Sparkles />
@@ -119,6 +130,18 @@ export function Editor({ id }: { id: string }) {
             <X />
           </Button>
         </div>
+      )}
+      {dialog === "add" && <AddSlides onClose={() => setDialog(null)} onAsk={setAsk} />}
+      {dialog === "review" && (
+        <ReviewDeck
+          deck_id={id}
+          onClose={() => setDialog(null)}
+          onAsk={setAsk}
+          onApplySafe={() => {
+            setDialog(null);
+            void run("Applying safe fixes", () => tool("review_deck", { deck_id: id, apply_safe_fixes: true }));
+          }}
+        />
       )}
       {history && (
         <Dialog title="Version history" wide onClose={() => setHistory(false)}>
