@@ -68,6 +68,13 @@ describe("DeckViewer", () => {
     expect(screen.queryByRole("tabpanel", { name: "Agent" })).toBeNull();
   });
 
+  it("has no comment box for a viewer (no onComment)", () => {
+    render(<DeckViewer deck={{ ...deck, role: "viewer" }} />);
+    expect(screen.getByRole("button", { name: "Shape 2 (title)" })).toBeTruthy();
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.queryByText("Click an element to comment on it")).toBeNull();
+  });
+
   it("switches slides from the thumbnails and shows that slide's comments", () => {
     render(<DeckViewer deck={deck} onComment={vi.fn()} onApply={vi.fn()} />);
     expect(screen.getByLabelText("1 comment")).toBeTruthy();
