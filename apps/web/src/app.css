@@ -111,7 +111,7 @@
 
 /* ---------- chat ---------- */
 
-.cq-chat { display: grid; grid-template-rows: minmax(0, 1fr) auto auto; min-height: 0; height: 100%; }
+.cq-chat { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto auto; min-height: 0; height: 100%; }
 .cq-chat-log { overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
 .cq-msg { max-width: 100%; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
 .cq-msg[data-role="user"] { align-self: flex-end; max-width: 88%; padding: 8px 12px; background: var(--cq-surface-2); border: 1px solid var(--cq-line); }
@@ -125,8 +125,8 @@
 .cq-trace li[data-live] .cq-spinner::before { width: 11px; height: 11px; }
 .cq-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 16px 10px; }
 /* a design-system outline button, in sentence case: briefs are read, not shouted */
-.cq-chip { height: auto; padding-block: 6px; white-space: normal; text-align: left; line-height: 1.35; text-transform: none; letter-spacing: normal; font-weight: 400; color: var(--cq-muted); }
-.cq-chip:hover { color: var(--cq-fg); }
+.cq-chips .cq-chip { max-width: 100%; height: auto; padding-block: 6px; white-space: normal; text-align: left; line-height: 1.35; text-transform: none; letter-spacing: normal; font-weight: 400; color: var(--cq-muted); }
+.cq-chips .cq-chip:hover { color: var(--cq-fg); }
 .cq-composer {
   margin: 0 12px 12px; display: grid; gap: 6px; padding: 10px 10px 8px 12px; border: 1px solid var(--cq-line-strong);
   border-radius: var(--cq-r-lg); background: var(--cq-surface); box-shadow: var(--cq-shadow-sm); transition: border-color 0.12s, box-shadow 0.12s;
@@ -140,7 +140,7 @@
 .cq-pack-pick { width: auto; height: 30px; font-size: 13px; background-color: var(--cq-surface-2); }
 
 /* the new deck: a centred brief */
-.cq-brief { height: 100vh; max-width: 780px; margin: 0 auto; padding: 0 16px; display: grid; }
+.cq-brief { height: 100vh; height: 100dvh; max-width: 780px; margin: 0 auto; padding: 0 16px; display: grid; grid-template-columns: minmax(0, 1fr); }
 .cq-brief .cq-chat-log { padding: 32px 4px 16px; }
 .cq-brief .cq-chips, .cq-brief .cq-composer { margin-inline: 0; padding-inline: 0; }
 .cq-brief .cq-composer { padding: 14px 12px 10px 16px; margin-bottom: 28px; }
@@ -179,6 +179,9 @@
 .cq-presenter aside img { width: 100%; border: 1px solid var(--ds-rule); opacity: 0.85; }
 .cq-presenter [data-testid="notes"] { white-space: pre-wrap; font-size: 18px; line-height: 1.55; }
 
+/* touch screens have no Enter / Shift+Enter to learn */
+@media (hover: none) { .cq-keys { display: none; } }
+
 @media (max-width: 760px) {
   .cq-app { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
   .cq-side { position: static; height: auto; flex-direction: row; justify-content: flex-start; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--cq-line); padding: 6px 12px; }
@@ -186,6 +189,15 @@
   .cq-side-gap, .cq-side-rule { display: none; }
   .cq-main[data-full] .cq-workspace { height: auto; }
   .cq-page { padding: 24px 16px 48px; }
-  .cq-brief { height: calc(100vh - 64px); }
+  .cq-brief { height: calc(100dvh - 57px); }
+  .cq-brief .cq-chat-log { padding-top: 20px; }
+  .cq-brief .cq-composer { margin-bottom: 16px; }
+  .cq-brief-hero h1 { font-size: 30px; line-height: 1.15; }
+  .cq-brief-hero p { font-size: 14px; }
+  /* briefs: one swipeable row instead of a stack that pushes the composer away */
+  .cq-brief .cq-chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .cq-brief .cq-chips .cq-chip { flex: none; max-width: 78vw; }
+  .cq-pack-pick { min-width: 0; flex: 1; }
+  .cq-composer-foot .cq-spacer, .cq-keys { display: none; }
   .cq-presenter { grid-template: "head" auto "now" auto "side" auto / 1fr; }
 }
