@@ -6,7 +6,7 @@ the same tools (`src/tools.ts`). Every deck change is a new DeckSpec version in 
 ```bash
 pnpm --filter @calque/slide-ui build   # the deck UI (MCP App + web preview)
 node apps/server/src/main.ts           # HTTP on :8787
-node apps/server/src/stdio.ts          # stdio, for a local MCP client
+node apps/server/src/stdio.ts          # stdio, for a local MCP client (bridge to the HTTP server)
 ```
 
 | Variable | Default | |
@@ -28,8 +28,13 @@ node apps/server/src/stdio.ts          # stdio, for a local MCP client
 
 ## Connect
 
-- **Claude Code, local:** `.mcp.json` at the repo root starts the stdio server; the prompts show as
-  `/calque:build-presentation`, `/calque:review-deck`… Previews need `main.ts` running too.
+- **Claude Code, local:** `.mcp.json` at the repo root starts `stdio.ts`; the prompts show as
+  `/calque:build-presentation`, `/calque:review-deck`… `stdio.ts` is a bridge to `/mcp` of the
+  server on `127.0.0.1:$PORT` (no-auth mode), so previews, browser comments and MCP share one
+  database. If no server answers, it starts `main.ts` in its own process (previews then live as long
+  as that session; run `main.ts` yourself to keep them up). Only one process may open a PGlite
+  directory: a second one fails with the owner's pid instead of corrupting it. On a fresh checkout
+  `stdio.ts` runs `pnpm install` first (logs on stderr).
 - **Claude Code, remote:** `claude mcp add --transport http calque https://<host>/mcp`.
 - **Claude and Cowork:** custom connector on `https://<host>/mcp`. The server is an OAuth resource
   server: it advertises `/.well-known/oauth-protected-resource/mcp`, pointing at the issuer, and
