@@ -4,6 +4,8 @@ import { parse } from "yaml";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { REPO } from "../src/engine.ts";
 import { createHttp } from "../src/http.ts";
+import { access } from "../src/decks.ts";
+import { PREVIEW_TTL_S, previewGuest, previewToken } from "../src/preview.ts";
 import { sessions } from "../src/session.ts";
 import type { App } from "../src/tools.ts";
 import { fakeModel, fakeOidc, lastResult, toolsCalled } from "./fakes.ts";
@@ -148,6 +150,62 @@ describe("web app routes", { timeout: ENGINE_TIMEOUT }, () => {
     expect(saved.body).toEqual({ status: "published", id: "newco" });
     const pack = (await json("/api/tools/list_packs", {})).body.packs.find((p: Json) => p.id === "newco");
     expect(pack).toMatchObject({ name: "NewCo Renamed", visibility: "workspace" });
+  });
+
+  it("keeps decks to their owner; the signed preview link reads and comments on one deck", async () => {
+    const bob = { bearer: await idp.token("bob") };
+    const a = (await json("/api/tools/create_deck", { deck: acmeDeck() })).body;
+    const b = (await json("/api/tools/create_deck", { deck: acmeDeck() })).body;
+    const id = a.deck_id as string;
+
+    // another signed-in user: the deck does not exist for them
+    expect((await json("/api/tools/open_deck", { deck_id: id, render: false }, bob)).status).toBe(404);
+    expect((await json("/api/tools/patch_deck", { deck_id: id, ops: [{ op: "set", slide: "cover", shape_id: 2, value: "x" }] }, bob)).status).toBe(404);
+    expect((await json("/api/tools/export_pptx", { deck_id: id }, bob)).status).toBe(404);
+    expect((await json("/api/tools/add_comment", { deck_id: id, slide_id: "cover", text: "x" }, bob)).status).toBe(404);
+    expect((await json(`/decks/${id}/data`, undefined, bob)).status).toBe(404);
+    expect((await json("/api/tools/open_deck", { deck_id: "nope", render: false }, bob)).body.message).toBe('no deck "nope"');
+
+    // no session, no link: refused
+    expect((await req(`/decks/${id}/deck.pptx`)).status).toBe(401);
+    expect((await req(`/decks/${id}/data`)).status).toBe(401);
+    // the owner's session needs no link
+    expect((await req(`/decks/${id}/deck.pptx`, { cookie: alice })).status).toBe(200);
+
+    const link = new URL(a.preview_url);
+    const t = link.searchParams.get("t") ?? "";
+    expect((await req(`/decks/${id}/deck.pptx?t=${t}`)).status).toBe(200);
+    const data = (await json(`/decks/${id}/data?t=${t}`, undefined, {})).body;
+    expect(data.deck_id).toBe(id);
+    // the PNG URLs carry the same link, not a fresh (longer) one
+    expect(new URL(data.slides[0].image_url).searchParams.get("t")).toBe(t);
+    expect((await req(new URL(data.slides[0].image_url).pathname + new URL(data.slides[0].image_url).search)).headers.get("content-type")).toBe("image/png");
+    const posted = await req(`/decks/${id}/comments?t=${t}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ slide_id: "cover", text: "Looks good" }),
+    });
+    expect(posted.status).toBe(200);
+    const comments = (await json("/api/tools/list_comments", { deck_id: id })).body.comments;
+    expect(comments).toMatchObject([{ text: "Looks good", author: "guest (link from Alice Martin)" }]);
+
+    // tampered, expired, or for another deck: refused
+    const [body, sig] = t.split(".");
+    const forged = Buffer.from(JSON.stringify({ ...JSON.parse(Buffer.from(body ?? "", "base64url").toString()), d: b.deck_id })).toString("base64url");
+    expect((await req(`/decks/${b.deck_id}/deck.pptx?t=${forged}.${sig}`)).status).toBe(401);
+    expect((await req(`/decks/${id}/deck.pptx?t=${t}x`)).status).toBe(401);
+    expect((await req(`/decks/${b.deck_id}/deck.pptx?t=${t}`)).status).toBe(401);
+    const old = previewToken(app.secret, { id: "alice", teams: ["sales"] }, id, Date.now() - PREVIEW_TTL_S * 1000 - 7200_000);
+    expect((await req(`/decks/${id}/deck.pptx?t=${old}`)).status).toBe(401);
+    // a link minted by someone else for a deck they do not own opens nothing
+    const bobs = previewToken(app.secret, { id: "bob", teams: [] }, id);
+    expect((await req(`/decks/${id}/deck.pptx?t=${bobs}`)).status).toBe(404);
+
+    // the link's role: comment on its deck, never edit it, nothing on another deck
+    const guest = previewGuest(app.secret, t, id) ?? { id: "", teams: [] };
+    expect(guest?.guest?.role).toBe("commenter");
+    await expect(app.decks.patch(guest, id, [{ op: "set", slide: "cover", shape_id: 2, value: "x" }], "x")).rejects.toThrow(/editor access/);
+    expect(access(guest, { id: b.deck_id, owner: "alice" })).toBeNull();
   });
 
   it("streams the agent's steps as NDJSON", async () => {

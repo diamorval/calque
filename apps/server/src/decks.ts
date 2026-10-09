@@ -6,7 +6,7 @@ import type { DeckSpec, PatchOp } from "@calque/deckspec";
 import type { Db } from "./db.ts";
 import { engine } from "./engine.ts";
 import { FILE_REF, getFile } from "./files.ts";
-import { getPack, listPacks, NotFound, type User } from "./packs.ts";
+import { Forbidden, getPack, listPacks, NotFound, type User } from "./packs.ts";
 
 export interface Issue {
   slide: string | null;
@@ -83,6 +83,20 @@ function mapFileRefs(spec: DeckSpec, fn: (id: string) => string): DeckSpec {
   };
 }
 
+/** What a caller may do on a deck, each role including the ones before it. */
+export const ROLES = ["viewer", "commenter", "editor", "owner"] as const;
+export type Role = (typeof ROLES)[number];
+
+/** The caller's role on a deck, null: none (the deck does not exist for them). A preview link's
+guest has its link's role on that one deck, never more than whoever minted it still has; the local
+user owns every deck. */
+export function access(user: User, deck: { id: string; owner: string }): Role | null {
+  const own: Role | null = user.local || deck.owner === user.id ? "owner" : null;
+  if (!user.guest) return own;
+  if (!own || user.guest.deck !== deck.id) return null;
+  return ROLES[Math.min(ROLES.indexOf(own), ROLES.indexOf(user.guest.role))] ?? null;
+}
+
 /** Deck versions, their built PPTX and renders. Every change is a new DeckSpec version. */
 export class Decks {
   readonly db: Db;
@@ -110,12 +124,16 @@ export class Decks {
     return path;
   }
 
-  async deck(user: User, id: string): Promise<DeckRow & { packDir: string }> {
+  /** Deck `id`, if `user` has at least role `need` on it. */
+  async deck(user: User, id: string, need: Role): Promise<DeckRow & { packDir: string; role: Role }> {
     const { rows } = await this.db.query<DeckRow>("select * from decks where id = $1", [id]).catch(() => ({ rows: [] }));
     const row = rows[0];
-    if (!row) throw new NotFound(`no deck ${JSON.stringify(id)}`);
+    const role = row ? access(user, row) : null;
+    // a deck the caller has no access to does not exist for them
+    if (!row || !role) throw new NotFound(`no deck ${JSON.stringify(id)}`);
+    if (ROLES.indexOf(role) < ROLES.indexOf(need)) throw new Forbidden(`${need} access needed on deck ${id}`);
     const pack = await getPack(this.db, user, row.pack_id); // a deck on a hidden pack is hidden too
-    return { ...row, packDir: pack.dir };
+    return { ...row, packDir: pack.dir, role };
   }
 
   /** The user's decks, newest change first (decks on packs they no longer see are left out). */
@@ -176,7 +194,7 @@ export class Decks {
 
   /** Store `spec` as the next version of `id`, if `id` is still at `from` (else Conflict). */
   async commit(user: User, id: string, from: number, spec: DeckSpec, note: string, undoTo: number | null = from) {
-    const deck = await this.deck(user, id);
+    const deck = await this.deck(user, id, "editor");
     if (spec.pack_id !== deck.pack_id) throw new Error("a deck stays on its pack");
     await this.ownFiles(user, spec);
     const next = from + 1;
@@ -198,7 +216,7 @@ export class Decks {
   }
 
   private async patchNow(user: User, id: string, ops: PatchOp[], note: string) {
-    const deck = await this.deck(user, id);
+    const deck = await this.deck(user, id, "editor");
     const spec = await this.spec(id, deck.head);
     const res = await engine<{ deck: DeckSpec }>("patch", { pack: deck.packDir, deck: spec, ops });
     return this.commit(user, id, deck.head, res.deck, note);
@@ -210,7 +228,7 @@ export class Decks {
   }
 
   private async restoreNow(user: User, id: string, version?: number) {
-    const deck = await this.deck(user, id);
+    const deck = await this.deck(user, id, "editor");
     let target = version;
     if (target === undefined) {
       const { rows } = await this.db.query<{ undo_to: number | null }>(
@@ -258,7 +276,7 @@ export class Decks {
   }
 
   async report(user: User, id: string, version?: number) {
-    const deck = await this.deck(user, id);
+    const deck = await this.deck(user, id, "viewer");
     const v = version ?? deck.head;
     const spec = await this.spec(id, v);
     return { deck, version: v, spec, report: await this.build(deck.packDir, id, spec, v) };
@@ -317,7 +335,7 @@ export class Decks {
   }
 
   private async fixBaseNow(user: User, id: string) {
-    const deck = await this.deck(user, id);
+    const deck = await this.deck(user, id, "editor");
     const spec = await this.spec(id, deck.head);
     if (!spec.base) return { applied: [] as unknown[], version: deck.head };
     const name = `base-v${deck.head + 1}.pptx`;
@@ -348,17 +366,17 @@ export class Decks {
   }
 
   async addComment(user: User, id: string, c: { slide_id: string; shape_id?: number | null | undefined; text: string }) {
-    const deck = await this.deck(user, id);
+    const deck = await this.deck(user, id, "commenter");
     const { rows } = await this.db.query<Comment>(
       `insert into comments (deck_id, version, slide_id, shape_id, text, author) values ($1, $2, $3, $4, $5, $6)
        returning *`,
-      [id, deck.head, c.slide_id, c.shape_id ?? null, c.text, user.id],
+      [id, deck.head, c.slide_id, c.shape_id ?? null, c.text, user.guest ? `guest (${user.guest.label})` : user.id],
     );
     return rows[0] as Comment;
   }
 
   async comments(user: User, id: string, status?: "open" | "resolved") {
-    await this.deck(user, id);
+    await this.deck(user, id, "viewer");
     const { rows } = await this.db.query<Comment>(
       `select * from comments where deck_id = $1 and ($2::text is null or status = $2) order by id`,
       [id, status ?? null],
@@ -367,7 +385,7 @@ export class Decks {
   }
 
   async resolve(user: User, id: string, ids: number[]) {
-    await this.deck(user, id);
+    await this.deck(user, id, "editor");
     if (ids.length) await this.db.query("update comments set status = 'resolved' where deck_id = $1 and id = any($2)", [id, ids]);
   }
 }

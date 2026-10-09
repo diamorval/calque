@@ -18,22 +18,25 @@ const POLL_MS = 4000;
 
 function web(id: string): Backend {
   const base = `/decks/${id}`;
+  // the signed preview link (?t=) authorizes every request; image URLs in the data carry it already
+  const t = new URLSearchParams(location.search).get("t");
+  const q = t ? `?t=${encodeURIComponent(t)}` : "";
   let version = 0;
   return {
     async load() {
-      const res = await fetch(`${base}/data`);
+      const res = await fetch(`${base}/data${q}`);
       if (!res.ok) throw new Error((await res.json()).message);
       const deck = (await res.json()) as DeckView;
       version = deck.head;
       return deck;
     },
     async comment(c) {
-      const res = await fetch(`${base}/comments`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(c) });
+      const res = await fetch(`${base}/comments${q}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(c) });
       if (!res.ok) throw new Error((await res.json()).message);
     },
     watch(changed) {
       setInterval(async () => {
-        const res = await fetch(`${base}/data`);
+        const res = await fetch(`${base}/data${q}`);
         if (res.ok && ((await res.json()) as DeckView).head !== version) changed();
       }, POLL_MS);
     },

@@ -4,11 +4,12 @@ import { join } from "node:path";
 import { z } from "zod";
 import { DeckSpec, PatchOp, Slide } from "@calque/deckspec";
 import type { Db } from "./db.ts";
-import type { Decks, Finding } from "./decks.ts";
+import type { Decks, Finding, Role } from "./decks.ts";
 import { REPO } from "./engine.ts";
 import { getFile, MAX_UPLOAD, uploadTicket } from "./files.ts";
 import type { Models } from "./models.ts";
 import { importPack, listPacks, type User } from "./packs.ts";
+import { previewToken } from "./preview.ts";
 
 export interface App {
   db: Db;
@@ -29,10 +30,19 @@ export interface Tool<S extends z.ZodObject = z.ZodObject> {
   /** Called by the deck UI only, hidden from the model. */
   appOnly?: boolean;
   readOnly?: boolean;
+  /** The least role on `deck_id` the caller needs, checked before the tool runs. */
+  role?: Role;
   run(app: App, user: User, args: z.infer<S>): Promise<Record<string, unknown>>;
 }
 
-const tool = <S extends z.ZodObject>(t: Tool<S>) => t as unknown as Tool;
+const tool = <S extends z.ZodObject>(t: Tool<S>) =>
+  ({
+    ...t,
+    run: async (app, user, args) => {
+      if (t.role) await app.decks.deck(user, (args as { deck_id: string }).deck_id, t.role);
+      return t.run(app, user, args);
+    },
+  }) satisfies Tool<S> as unknown as Tool;
 
 const deckId = z.string().describe("Deck id, as returned by create_deck or import_pptx.");
 const version = z.number().int().min(1).optional().describe("A past version; default: the current one.");
@@ -57,17 +67,20 @@ async function materialize(app: App, user: User, f: z.infer<typeof File>): Promi
   return path;
 }
 
-const links = (app: App, id: string) => ({ preview_url: `${app.publicUrl}/decks/${id}` });
+/** The deck's preview link, signed for `user` (its owner). */
+const token = (app: App, user: User, id: string) => encodeURIComponent(previewToken(app.secret, user, id));
+const links = (app: App, user: User, id: string) => ({ preview_url: `${app.publicUrl}/decks/${id}?t=${token(app, user, id)}` });
 
 async function openDeck(app: App, user: User, id: string, v?: number, render = true) {
-  const deck = await app.decks.deck(user, id);
+  const deck = await app.decks.deck(user, id, "viewer");
   const at = v ?? deck.head;
+  const t = token(app, user, id);
   const spec = await app.decks.spec(id, at);
   const slides = render
     ? (await app.decks.render(user, id, at)).slides.map(({ id: sid, number, width_px, height_px, shapes }) => ({
         id: sid,
         number,
-        image_url: `${app.publicUrl}/decks/${id}/slides/${number}.png?v=${at}`,
+        image_url: `${app.publicUrl}/decks/${id}/slides/${number}.png?v=${at}&t=${t}`,
         width_px,
         height_px,
         shapes,
@@ -84,7 +97,7 @@ async function openDeck(app: App, user: User, id: string, v?: number, render = t
     spec,
     slides,
     open_comments: open,
-    ...links(app, id),
+    ...links(app, user, id),
   };
 }
 
@@ -116,7 +129,7 @@ export const TOOLS = {
     ui: true,
     run: async (app, user, a) => {
       const r = await app.decks.create(user, a.deck, a.note ?? "create");
-      return { ...r, ...links(app, r.deck_id) };
+      return { ...r, ...links(app, user, r.deck_id) };
     },
   }),
 
@@ -125,14 +138,15 @@ export const TOOLS = {
     description: "Insert one or a few slides into a deck, without a narrative arc. `at` is the 0-based position (default: before the closing slide, else at the end).",
     input: z.object({ deck_id: deckId, slides: z.array(Slide).min(1), at: z.number().int().min(0).optional() }),
     ui: true,
+    role: "editor",
     run: async (app, user, a) => {
-      const deck = await app.decks.deck(user, a.deck_id);
+      const deck = await app.decks.deck(user, a.deck_id, "editor");
       const spec = await app.decks.spec(a.deck_id, deck.head);
       const last = spec.slides.at(-1);
       const at = a.at ?? (last?.message_type === "closing" ? spec.slides.length - 1 : spec.slides.length);
       const ops = a.slides.map((slide, i) => ({ op: "insert_slide" as const, at: at + i, slide }));
       const r = await app.decks.patch(user, a.deck_id, ops, `add ${a.slides.length} slide(s)`);
-      return { ...r, ...links(app, a.deck_id) };
+      return { ...r, ...links(app, user, a.deck_id) };
     },
   }),
 
@@ -142,6 +156,7 @@ export const TOOLS = {
     input: z.object({ deck_id: deckId, version, render: z.boolean().default(true) }),
     ui: true,
     readOnly: true,
+    role: "viewer",
     run: (app, user, a) => openDeck(app, user, a.deck_id, a.version, a.render),
   }),
 
@@ -152,7 +167,7 @@ export const TOOLS = {
     ui: true,
     run: async (app, user, a) => {
       const r = await app.decks.importPptx(user, await materialize(app, user, a.file), a.pack_id, a.language);
-      return { ...r, ...links(app, r.deck_id) };
+      return { ...r, ...links(app, user, r.deck_id) };
     },
   }),
 
@@ -167,10 +182,11 @@ export const TOOLS = {
       resolves: z.array(z.number().int()).optional().describe("Comment ids this patch applies."),
     }),
     ui: true,
+    role: "editor",
     run: async (app, user, a) => {
       const r = await app.decks.patch(user, a.deck_id, a.ops, a.note ?? "patch");
       await app.decks.resolve(user, a.deck_id, a.resolves ?? []);
-      return { ...r, resolved: a.resolves ?? [], ...links(app, a.deck_id) };
+      return { ...r, resolved: a.resolves ?? [], ...links(app, user, a.deck_id) };
     },
   }),
 
@@ -179,7 +195,8 @@ export const TOOLS = {
     description: "Undo the last change, or go back to a given version. Either way it is a new version: nothing is lost.",
     input: z.object({ deck_id: deckId, version }),
     ui: true,
-    run: async (app, user, a) => ({ ...(await app.decks.restore(user, a.deck_id, a.version)), ...links(app, a.deck_id) }),
+    role: "editor",
+    run: async (app, user, a) => ({ ...(await app.decks.restore(user, a.deck_id, a.version)), ...links(app, user, a.deck_id) }),
   }),
 
   add_comment: tool({
@@ -187,6 +204,7 @@ export const TOOLS = {
     description: "Comment on a slide, or on one shape of it (shape_id from the shape map).",
     input: z.object({ deck_id: deckId, slide_id: z.string(), shape_id: z.number().int().optional(), text: z.string().min(1) }),
     appOnly: true,
+    role: "commenter",
     run: async (app, user, a) => ({ comment: await app.decks.addComment(user, a.deck_id, a) }),
   }),
 
@@ -195,7 +213,8 @@ export const TOOLS = {
     description: "Comments left on the deck (in the preview or the in-chat UI), each anchored on a slide id and shape_id. Apply them with patch_deck and pass their ids in `resolves`.",
     input: z.object({ deck_id: deckId, status: z.enum(["open", "resolved"]).optional().default("open") }),
     readOnly: true,
-    run: async (app, user, a) => ({ comments: await app.decks.comments(user, a.deck_id, a.status), ...links(app, a.deck_id) }),
+    role: "viewer",
+    run: async (app, user, a) => ({ comments: await app.decks.comments(user, a.deck_id, a.status), ...links(app, user, a.deck_id) }),
   }),
 
   lint_deck: tool({
@@ -203,6 +222,7 @@ export const TOOLS = {
     description: "Lint the built PPTX against its pack: off-pack font or colour, placeholder left, page numbers, geometry, overflow, anti-slop. ERRORs must be fixed before delivery.",
     input: z.object({ deck_id: deckId, version }),
     readOnly: true,
+    role: "viewer",
     run: async (app, user, a) => {
       const r = await app.decks.lint(user, a.deck_id, a.version);
       return { version: r.version, errors: r.findings.filter((f) => f.severity === "ERROR").length, findings: r.findings };
@@ -214,6 +234,7 @@ export const TOOLS = {
     description:
       "Audit a deck: lint, render, and a report by severity that separates safe auto-fixes from judgment calls, plus the visual checklist to run on the slide images. Report first; call again with apply_safe_fixes once the user approves, which applies the safe fixes as a new version and re-verifies.",
     input: z.object({ deck_id: deckId, apply_safe_fixes: z.boolean().default(false) }),
+    role: "editor",
     run: async (app, user, a) => {
       const before = await app.decks.lint(user, a.deck_id);
       const spec = await app.decks.spec(a.deck_id, before.version);
@@ -241,7 +262,7 @@ export const TOOLS = {
           : undefined,
         slides: opened.slides?.map((s) => ({ id: s.id, number: s.number, image_url: s.image_url })),
         visual_checklist: await checklist(),
-        ...links(app, a.deck_id),
+        ...links(app, user, a.deck_id),
       };
     },
   }),
@@ -251,11 +272,12 @@ export const TOOLS = {
     description: "Download link for the deck's PPTX (and its local path on a stdio server).",
     input: z.object({ deck_id: deckId, version }),
     readOnly: true,
+    role: "viewer",
     run: async (app, user, a) => {
       const r = await app.decks.exportPath(user, a.deck_id, a.version);
       return {
         version: r.version,
-        download_url: `${app.publicUrl}/decks/${a.deck_id}/deck.pptx?v=${r.version}`,
+        download_url: `${app.publicUrl}/decks/${a.deck_id}/deck.pptx?v=${r.version}&t=${token(app, user, a.deck_id)}`,
         ...(user.local ? { path: r.path } : {}),
       };
     },
