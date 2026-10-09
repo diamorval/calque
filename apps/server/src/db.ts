@@ -62,6 +62,35 @@ create table if not exists files (
   type text not null,
   created_at timestamptz not null default now()
 );
+create table if not exists deck_shares (
+  deck_id uuid not null references decks(id),
+  principal_type text not null check (principal_type in ('user', 'team', 'workspace')),
+  principal text not null,
+  role text not null check (role in ('viewer', 'commenter', 'editor')),
+  granted_by text not null,
+  created_at timestamptz not null default now(),
+  primary key (deck_id, principal_type, principal)
+);
+create table if not exists deck_links (
+  id uuid primary key,
+  deck_id uuid not null references decks(id),
+  role text not null check (role in ('viewer', 'commenter')),
+  label text not null,
+  created_by text not null,
+  teams jsonb not null default '[]',
+  auto boolean not null default false,
+  expires_at timestamptz not null,
+  revoked_at timestamptz,
+  created_at timestamptz not null default now()
+);
+create table if not exists deck_audit (
+  id serial primary key,
+  deck_id uuid not null references decks(id),
+  actor text not null,
+  action text not null,
+  detail jsonb not null default '{}',
+  created_at timestamptz not null default now()
+);
 create unique index if not exists one_default_model on models (is_default) where is_default;`;
 
 /** Postgres when `url` is a postgres:// URL, else embedded PGlite (a data dir, or in memory). */

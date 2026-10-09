@@ -19,6 +19,7 @@ import { InvalidModel, isAdmin } from "./models.ts";
 import { addFont, draftDir, draftPack, editPack, Forbidden, NotFound, publishDraft, setVisibility, type User } from "./packs.ts";
 import { previewGuest } from "./preview.ts";
 import type { Sessions } from "./session.ts";
+import { adminLinks, live, revokeLink, transfer } from "./shares.ts";
 import { TOOLS, toolNamed, type App } from "./tools.ts";
 
 const LOCAL: User = { id: "local", name: "Local", teams: [], local: true };
@@ -84,7 +85,9 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
   async function viewer(c: Context): Promise<User | Response> {
     const t = c.req.query("t");
     if (!t || !check) return who(c);
-    return previewGuest(app.secret, t, param(c, "id")) ?? c.json({ error: "Unauthorized", message: "preview link expired or invalid" }, 401);
+    const guest = previewGuest(app.secret, t, param(c, "id"));
+    if (guest?.guest && (await live(app.db, guest.guest.link, param(c, "id")))) return guest;
+    return c.json({ error: "Unauthorized", message: "preview link expired, revoked or invalid" }, 401);
   }
 
   const mcp = createMcpHandler(({ authInfo }) => buildServer(app, userOf(authInfo)));
@@ -168,6 +171,19 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
   );
 
   http.get("/api/decks", route(async (_, user) => ({ decks: await app.decks.list(user) })));
+
+  // Admins (CALQUE_ADMIN_TEAM): a deck's links (no URL) and its owner, never its content.
+  const admin = (fn: (c: Context, user: User) => Promise<unknown>) =>
+    route(async (c, user) => {
+      if (user.guest || !isAdmin(user)) throw new Forbidden("admins only");
+      return fn(c, user);
+    });
+  http.get("/api/admin/decks/:id/links", admin(async (c, user) => ({ links: await adminLinks(app.decks, user, param(c, "id")) })));
+  http.post("/api/admin/decks/:id/links/:link/revoke", admin((c, user) => revokeLink(app.decks, user, param(c, "id"), param(c, "link"))));
+  http.post(
+    "/api/admin/decks/:id/transfer",
+    admin(async (c, user) => transfer(app.decks, user, param(c, "id"), z.object({ to: z.string().min(1) }).parse(await body(c)).to)),
+  );
 
   // Settings > Brand packs: draft from a template, review, publish; visibility per pack.
   http.post(

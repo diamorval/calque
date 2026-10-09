@@ -22,7 +22,7 @@ node apps/server/src/stdio.ts          # stdio, for a local MCP client (bridge t
 | `CALQUE_OIDC_CLIENT_ID` | the audience | the web app's OIDC client (authorization code + PKCE) |
 | `CALQUE_OIDC_CLIENT_SECRET` | unset: public client | its secret, for a confidential client |
 | `CALQUE_SECRET` | random, in `$CALQUE_DATA/secret` | seals model API keys at rest (AES-256-GCM): set it in production |
-| `CALQUE_ADMIN_TEAM` | `calque-admins` | team allowed to configure AI models |
+| `CALQUE_ADMIN_TEAM` | `calque-admins` | team allowed to configure AI models, transfer decks and revoke their guest links (never to read a deck) |
 | `CALQUE_LLM_MODEL` | unset | preconfigured gateway, saved as model `env`, default unless another is set |
 | `CALQUE_LLM_PROVIDER` / `_BASE_URL` / `_API_KEY` | `openai-compatible` / – / – | the gateway's provider, endpoint and key |
 
@@ -71,10 +71,33 @@ Hosts with MCP Apps show the deck UI (`ui://calque/deck.html`) on `create_deck`,
 `import_pptx`, `patch_deck`, `add_slides`, `restore_version`. The others get `preview_url`
 (`/decks/:id?t=…`), the same UI over REST: comments posted there are read by `list_comments`.
 
-A deck is its owner's only: to anyone else it does not exist (404). Preview, PNG and download URLs
-carry a signed token (`?t=`, HMAC with `CALQUE_SECRET`, 7 days) that lets whoever holds the link
-read that one deck and comment on it, as `guest (link from <owner>)`; the owner's session or bearer
-token works without it. Without `CALQUE_OIDC_ISSUER` (local only) the token is not checked.
+### Sharing
+
+A deck belongs to its owner; to anyone it is not shared with it does not exist (404). Roles, each
+including the ones before it: **viewer** (open, lint, export, list comments, present), **commenter**
+(+ comment), **editor** (+ `patch_deck`, `add_slides`, `restore_version`, `review_deck`), **owner**
+(+ share, links, transfer). A tool needing more than the caller's role answers 403.
+
+- **Shares** (`deck_shares`): the owner gives a role to a user id, a team or the whole workspace
+  (`share_deck`, `unshare_deck`, `list_shares`). The best share wins, and a share counts only while
+  the user sees the deck's pack. `list_decks` (and `GET /api/decks`) returns the caller's decks and
+  the decks shared with them, each with `role` and `owner`.
+- **Guest links** (`deck_links`): `?t=` on preview, PNG and download URLs, a signed token (HMAC with
+  `CALQUE_SECRET`) naming a stored link: viewer or commenter on that one deck, until it expires or is
+  revoked, and never more than whoever minted it still has (pack visibility aside). Tool results
+  carry the caller's automatic preview link (commenter, 7 days, reused while it has a day left); the
+  owner mints others with `create_link` (viewer or commenter, 1 to 90 days) and revokes any of them
+  with `revoke_link`. Comments through a link are signed `guest (<label>)`. The owner's session or
+  bearer token works without a link. Without `CALQUE_OIDC_ISSUER` (local only) the token is not
+  checked.
+- **Transfer** (`transfer_deck`): the owner, or an admin, gives the deck to another user id; the
+  former owner keeps editor access through a share.
+- **Admins** (`CALQUE_ADMIN_TEAM`) have no access to deck content. They transfer decks and revoke
+  links: `revoke_link` / `transfer_deck`, or `GET /api/admin/decks/:id/links` (links without their
+  URL), `POST /api/admin/decks/:id/links/:link/revoke`, `POST /api/admin/decks/:id/transfer` `{to}`.
+
+Every share, unshare, link, revocation and transfer is logged in `deck_audit` (deck, actor, action,
+detail).
 
 ### Files in
 
@@ -102,7 +125,7 @@ design system: `node_modules/@diametral/design-system/keycloak/diametral`.
 | Route | |
 | --- | --- |
 | `GET /api/me` | the signed-in user, their teams, `admin` |
-| `GET /api/decks` | the user's decks |
+| `GET /api/decks` | the user's decks and the decks shared with them, each with `role` and `owner` |
 | `POST /api/files` | multipart `file` (50 MB max, else 413) → `{file_id, name, size, type}`, owned by the caller; `?ticket=` from `upload_url` instead of credentials |
 | `POST /api/packs/drafts` | multipart `template` (.pptx or .potx), `id`, `name`, optional `tokens` (tokens.json): extracted draft (manifest with guessed roles and the fonts/colours the slides use, resolved colours and fonts to review, archetype names, one PNG per template slide) |
 | `POST /api/packs/drafts/:id/fonts` | multipart `font` (.ttf, .otf): its family is allowed by lint (`lint.extra_fonts`) on publish |

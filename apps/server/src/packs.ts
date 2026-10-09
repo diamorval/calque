@@ -13,8 +13,9 @@ export interface User {
   name?: string;
   teams: string[];
   local?: boolean;
-  /** Acting through a preview link (src/preview.ts): its deck, role, label and token. */
-  guest?: { deck: string; role: Role; label: string; token: string };
+  /** Acting through a guest link (src/preview.ts): its deck, role, label, token and stored link id.
+  `id` and `teams` are then those of whoever minted the link. */
+  guest?: { deck: string; role: Role; label: string; token: string; link: string };
 }
 
 export interface PackRow {

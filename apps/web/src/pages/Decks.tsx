@@ -15,14 +15,43 @@ interface DeckRow {
   pack_id: string;
   head: number;
   updated_at: string;
+  owner: string;
+  role: "owner" | "editor" | "commenter" | "viewer";
+}
+
+const ROLE = { owner: "Owner", editor: "Editor", commenter: "Commenter", viewer: "Viewer" };
+
+function DeckCard({ d }: { d: DeckRow }) {
+  return (
+    <li>
+      <a className="cq-deck-card" href={`/d/${d.id}`} onClick={(e) => go(e, `/d/${d.id}`)}>
+        <span className="cq-deck-cover">
+          <img src={`${import.meta.env.BASE_URL}decks/${d.id}/slides/1.png?v=${d.head}`} alt="" loading="lazy" />
+        </span>
+        <span className="cq-deck-info">
+          <strong>{d.title}</strong>
+          <span>
+            {d.pack_id} · v{d.head} · {ago(d.updated_at)}
+          </span>
+          {d.role !== "owner" && (
+            <span>
+              {ROLE[d.role]} · from {d.owner}
+            </span>
+          )}
+        </span>
+      </a>
+    </li>
+  );
 }
 
 export function Decks() {
-  const [decks, setDecks] = useState<DeckRow[] | null>(null);
+  const [all, setAll] = useState<DeckRow[] | null>(null);
   const [importing, setImporting] = useState(false);
   useEffect(() => {
-    api<{ decks: DeckRow[] }>("/api/decks").then((r) => setDecks(r.decks));
+    api<{ decks: DeckRow[] }>("/api/decks").then((r) => setAll(r.decks));
   }, []);
+  const decks = all && all.filter((d) => d.role === "owner");
+  const shared = all?.filter((d) => d.role !== "owner") ?? [];
 
   return (
     <div className="cq-page">
@@ -63,21 +92,19 @@ export function Decks() {
             </a>
           </li>
           {decks.map((d) => (
-            <li key={d.id}>
-              <a className="cq-deck-card" href={`/d/${d.id}`} onClick={(e) => go(e, `/d/${d.id}`)}>
-                <span className="cq-deck-cover">
-                  <img src={`${import.meta.env.BASE_URL}decks/${d.id}/slides/1.png?v=${d.head}`} alt="" loading="lazy" />
-                </span>
-                <span className="cq-deck-info">
-                  <strong>{d.title}</strong>
-                  <span>
-                    {d.pack_id} · v{d.head} · {ago(d.updated_at)}
-                  </span>
-                </span>
-              </a>
-            </li>
+            <DeckCard key={d.id} d={d} />
           ))}
         </ul>
+      )}
+      {shared.length > 0 && (
+        <section className="cq-shared" aria-label="Shared with me">
+          <h2>Shared with me</h2>
+          <ul className="cq-deck-grid">
+            {shared.map((d) => (
+              <DeckCard key={d.id} d={d} />
+            ))}
+          </ul>
+        </section>
       )}
       {importing && <ImportPptx onClose={() => setImporting(false)} />}
     </div>

@@ -2,19 +2,36 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { ROLES, type Role } from "./decks.ts";
 import type { User } from "./packs.ts";
 
-/** Preview links: a signed, expiring token (`?t=`) that gives a role on one deck to whoever holds
-it, as a guest of the deck's owner. Minted for the owner wherever a tool returns a preview, PNG or
-download URL; the MCP App inside Claude loads its PNGs with it, where no web session exists. */
+/** Guest links: a signed, expiring token (`?t=`) that gives a role on one deck to whoever holds it,
+as a guest of whoever minted it. Each link is a `deck_links` row: the token is checked here
+(signature, deck, expiry), the row (not revoked) by `access` in decks.ts. Minted for the caller
+wherever a tool returns a preview, PNG or download URL (one reused `auto` link per user and deck);
+the MCP App inside Claude loads its PNGs with it, where no web session exists. The deck's owner
+also mints links on purpose (create_link). */
 export const PREVIEW_TTL_S = 7 * 24 * 3600;
-/** What a preview link lets its holder do: read and comment. */
+/** What an automatic preview link lets its holder do: read and comment. */
 export const PREVIEW_ROLE: Role = "commenter";
-const HOUR = 3600;
+
+/** A `deck_links` row. */
+export interface Link {
+  id: string;
+  deck_id: string;
+  role: Role;
+  label: string;
+  created_by: string;
+  teams: string[]; // the minter's teams, for pack visibility and team grants
+  auto: boolean;
+  expires_at: string | Date;
+  revoked_at?: string | Date | null;
+  created_at?: string | Date;
+}
 
 interface Claims {
+  k: string; // link id
   d: string; // deck id
   r: Role;
-  o: string; // owner id
-  t: string[]; // owner's teams, for pack visibility
+  o: string; // minter id
+  t: string[]; // minter's teams
   l: string; // label, for comment attribution
   e: number; // expiry, unix seconds
 }
@@ -22,17 +39,16 @@ interface Claims {
 const b64 = (b: Buffer | string) => Buffer.from(b).toString("base64url");
 const mac = (secret: string, body: string) => createHmac("sha256", `preview:${secret}`).update(body).digest();
 
-export function previewToken(secret: string, user: User, deckId: string, now = Date.now()): string {
-  // a guest passes its own link on: never extend it
-  if (user.guest) return user.guest.token;
-  // expiry rounded up to the hour: URLs (and cached PNGs) stay stable between calls
-  const e = Math.ceil((now / 1000 + PREVIEW_TTL_S) / HOUR) * HOUR;
-  const claims: Claims = { d: deckId, r: PREVIEW_ROLE, o: user.id, t: user.teams, l: `link from ${user.name ?? user.id}`, e };
+/** The token of a stored link: the same for the same row, so URLs (and cached PNGs) stay stable. */
+export function linkToken(secret: string, link: Link): string {
+  const e = Math.floor(new Date(link.expires_at).getTime() / 1000);
+  const claims: Claims = { k: link.id, d: link.deck_id, r: link.role, o: link.created_by, t: link.teams, l: link.label, e };
   const body = b64(JSON.stringify(claims));
   return `${body}.${b64(mac(secret, body))}`;
 }
 
-/** The guest a valid token for `deckId` stands for; undefined if tampered, expired or for another deck. */
+/** The guest a valid token for `deckId` stands for; undefined if tampered, expired or for another
+deck. Whether its link still exists is checked against the database on use. */
 export function previewGuest(secret: string, token: string, deckId: string, now = Date.now()): User | undefined {
   const [body = "", sig = ""] = token.split(".");
   const want = mac(secret, body);
@@ -44,6 +60,6 @@ export function previewGuest(secret: string, token: string, deckId: string, now 
   } catch {
     return undefined;
   }
-  if (c.d !== deckId || !(c.e * 1000 > now) || !ROLES.includes(c.r)) return undefined;
-  return { id: c.o, teams: c.t, guest: { deck: c.d, role: c.r, label: c.l, token } };
+  if (!c.k || c.d !== deckId || !(c.e * 1000 > now) || !ROLES.includes(c.r)) return undefined;
+  return { id: c.o, teams: c.t, guest: { deck: c.d, role: c.r, label: c.l, token, link: c.k } };
 }

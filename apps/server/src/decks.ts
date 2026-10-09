@@ -6,7 +6,7 @@ import type { DeckSpec, PatchOp } from "@calque/deckspec";
 import type { Db } from "./db.ts";
 import { engine } from "./engine.ts";
 import { FILE_REF, getFile } from "./files.ts";
-import { Forbidden, getPack, listPacks, NotFound, type User } from "./packs.ts";
+import { Forbidden, getPack, listPacks, NotFound, visible, type PackRow, type User } from "./packs.ts";
 
 export interface Issue {
   slide: string | null;
@@ -87,14 +87,48 @@ function mapFileRefs(spec: DeckSpec, fn: (id: string) => string): DeckSpec {
 export const ROLES = ["viewer", "commenter", "editor", "owner"] as const;
 export type Role = (typeof ROLES)[number];
 
-/** The caller's role on a deck, null: none (the deck does not exist for them). A preview link's
-guest has its link's role on that one deck, never more than whoever minted it still has; the local
-user owns every deck. */
-export function access(user: User, deck: { id: string; owner: string }): Role | null {
-  const own: Role | null = user.local || deck.owner === user.id ? "owner" : null;
-  if (!user.guest) return own;
-  if (!own || user.guest.deck !== deck.id) return null;
-  return ROLES[Math.min(ROLES.indexOf(own), ROLES.indexOf(user.guest.role))] ?? null;
+const rank = (r: Role) => ROLES.indexOf(r);
+
+/** The best role `user` holds on each of `ids` through a share: to them, to one of their teams, or
+to the workspace. */
+export async function granted(db: Db, user: User, ids: string[]): Promise<Map<string, Role>> {
+  const out = new Map<string, Role>();
+  if (!ids.length) return out;
+  const { rows } = await db.query<{ deck_id: string; role: Role }>(
+    `select deck_id, role from deck_shares where deck_id = any($1::uuid[]) and (principal_type = 'workspace'
+       or (principal_type = 'user' and principal = $2) or (principal_type = 'team' and principal = any($3::text[])))`,
+    [ids, user.id, user.teams],
+  );
+  for (const r of rows) {
+    const had = out.get(r.deck_id);
+    if (!had || rank(r.role) > rank(had)) out.set(r.deck_id, r.role);
+  }
+  return out;
+}
+
+/** The caller's role on a deck, null: none (the deck does not exist for them). The owner, else the
+best share, which counts only while the user sees the deck's pack. A guest link's holder has its
+link's role on that one deck while the link is stored and not revoked, never more than whoever
+minted it still has (pack visibility aside: that is what a link is for). The local user owns every
+deck. Admins get nothing here: they transfer decks and revoke links without reading them. */
+export async function access(db: Db, user: User, deck: { id: string; owner: string; pack_id: string }): Promise<Role | null> {
+  if (user.guest) {
+    if (user.guest.deck !== deck.id) return null;
+    const { rows } = await db
+      .query<{ role: Role }>("select role from deck_links where id = $1 and deck_id = $2 and revoked_at is null and expires_at > now()", [
+        user.guest.link,
+        deck.id,
+      ])
+      .catch(() => ({ rows: [] as { role: Role }[] })); // a malformed link id
+    const link = rows[0];
+    const minter = link ? await access(db, { id: user.id, teams: user.teams }, deck) : null;
+    if (!link || !minter) return null;
+    return ROLES[Math.min(rank(minter), rank(link.role), rank(user.guest.role))] ?? null;
+  }
+  if (user.local || deck.owner === user.id) return "owner";
+  const { rows } = await db.query<PackRow>("select * from packs where id = $1", [deck.pack_id]);
+  if (!rows[0] || !visible(rows[0], user)) return null;
+  return (await granted(db, user, [deck.id])).get(deck.id) ?? null;
 }
 
 /** Deck versions, their built PPTX and renders. Every change is a new DeckSpec version. */
@@ -128,24 +162,41 @@ export class Decks {
   async deck(user: User, id: string, need: Role): Promise<DeckRow & { packDir: string; role: Role }> {
     const { rows } = await this.db.query<DeckRow>("select * from decks where id = $1", [id]).catch(() => ({ rows: [] }));
     const row = rows[0];
-    const role = row ? access(user, row) : null;
+    const role = row ? await access(this.db, user, row) : null;
     // a deck the caller has no access to does not exist for them
     if (!row || !role) throw new NotFound(`no deck ${JSON.stringify(id)}`);
-    if (ROLES.indexOf(role) < ROLES.indexOf(need)) throw new Forbidden(`${need} access needed on deck ${id}`);
-    const pack = await getPack(this.db, user, row.pack_id); // a deck on a hidden pack is hidden too
+    if (rank(role) < rank(need)) throw new Forbidden(`${need} access needed on deck ${id}`);
+    // a deck on a hidden pack is hidden too, except through a guest link
+    const pack = user.guest
+      ? ((await this.db.query<PackRow>("select * from packs where id = $1", [row.pack_id])).rows[0] as PackRow)
+      : await getPack(this.db, user, row.pack_id);
     return { ...row, packDir: pack.dir, role };
   }
 
-  /** The user's decks, newest change first (decks on packs they no longer see are left out). */
+  /** The user's decks and the decks shared with them, with their role, newest change first (decks
+  on packs they no longer see are left out). */
   async list(user: User) {
     const { rows } = await this.db.query<DeckRow & { updated_at: string }>(
       `select d.*, v.created_at as updated_at from decks d
        join deck_versions v on v.deck_id = d.id and v.version = d.head
-       where d.owner = $1 order by v.created_at desc`,
-      [user.id],
+       where d.owner = $1 or d.id in (select deck_id from deck_shares where principal_type = 'workspace'
+         or (principal_type = 'user' and principal = $1) or (principal_type = 'team' and principal = any($2::text[])))
+       order by v.created_at desc`,
+      [user.id, user.teams],
     );
     const seen = new Set((await listPacks(this.db, user)).map((p) => p.id));
-    return rows.filter((r) => seen.has(r.pack_id)).map(({ id, pack_id, title, head, updated_at }) => ({ id, pack_id, title, head, updated_at }));
+    const grants = await granted(this.db, user, rows.filter((r) => r.owner !== user.id).map((r) => r.id));
+    return rows
+      .filter((r) => seen.has(r.pack_id))
+      .map(({ id, pack_id, owner, title, head, updated_at }) => ({
+        id,
+        pack_id,
+        owner,
+        title,
+        head,
+        updated_at,
+        role: owner === user.id ? ("owner" as Role) : (grants.get(id) as Role),
+      }));
   }
 
   async spec(id: string, version: number): Promise<DeckSpec> {

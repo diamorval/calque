@@ -121,14 +121,20 @@ function Root({ backend }: { backend: Backend }) {
         <span className="cq-spinner">Loading deck…</span>
       </div>
     );
+  // a viewer reads only; applying comments edits the deck
+  const edits = !deck.role || deck.role === "editor" || deck.role === "owner";
   return (
     <DeckViewer
       deck={deck}
-      onComment={async (c) => {
-        await backend.comment(c);
-        setDeck(await backend.load());
-      }}
-      {...(backend.apply ? { onApply: backend.apply } : {})}
+      {...(deck.role !== "viewer"
+        ? {
+            onComment: async (c: NewComment) => {
+              await backend.comment(c);
+              setDeck(await backend.load());
+            },
+          }
+        : {})}
+      {...(backend.apply && edits ? { onApply: backend.apply } : {})}
     />
   );
 }
