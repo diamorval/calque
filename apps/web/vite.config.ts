@@ -6,5 +6,7 @@ const server = process.env.CALQUE_SERVER ?? "http://localhost:8787";
 
 export default defineConfig({
   plugins: [react()],
+  // the GitHub Pages demo (VITE_DEMO=1) serves the responses saved by demo/snapshot.ts
+  publicDir: process.env.VITE_DEMO ? "demo/out" : "public",
   server: { proxy: Object.fromEntries(["/api", "/auth", "/decks"].map((p) => [p, server])) },
 });

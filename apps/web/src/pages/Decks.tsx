@@ -48,7 +48,7 @@ export function Decks() {
             <li key={d.id}>
               <a className="cq-deck-card" href={`/d/${d.id}`} onClick={(e) => go(e, `/d/${d.id}`)}>
                 <span className="cq-deck-cover">
-                  <img src={`/decks/${d.id}/slides/1.png?v=${d.head}`} alt="" loading="lazy" />
+                  <img src={`${import.meta.env.BASE_URL}decks/${d.id}/slides/1.png?v=${d.head}`} alt="" loading="lazy" />
                 </span>
                 <span className="cq-deck-info">
                   <strong>{d.title}</strong>
