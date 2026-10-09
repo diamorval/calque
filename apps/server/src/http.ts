@@ -169,7 +169,9 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
     "/api/packs/drafts",
     route(async (c, user) => {
       const { form, bytes } = await upload(c, "template");
-      return draftPack(user, app.data, bytes, String(form.id ?? ""), String(form.name ?? form.id ?? ""));
+      // optional: the company's own tokens.json instead of the drafted one
+      const tokens = form.tokens instanceof File ? (JSON.parse(await form.tokens.text()) as Record<string, unknown>) : undefined;
+      return draftPack(user, app.data, bytes, String(form.id ?? ""), String(form.name ?? form.id ?? ""), tokens);
     }),
   );
   http.get("/api/packs/drafts/:id/slides/:png", async (c) => {
