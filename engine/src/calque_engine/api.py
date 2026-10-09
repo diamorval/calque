@@ -28,10 +28,17 @@ def op_validate(pack: str, deck: dict[str, Any]) -> dict[str, Any]:
     return {"warnings": _issues(warnings)}
 
 
-def op_build(pack: str, deck: dict[str, Any], out: str, base: str | None = None) -> dict[str, Any]:
+def op_build(
+    pack: str,
+    deck: dict[str, Any],
+    out: str,
+    base: str | None = None,
+    image_roots: list[str] | None = None,
+) -> dict[str, Any]:
+    """`image_roots`: the folders image values may be read from (see `build`)."""
     from .build import build
 
-    r = build(deck, load_pack(pack), out, base=base)
+    r = build(deck, load_pack(pack), out, base=base, image_roots=image_roots)
     return {
         "path": str(r.path),
         "warnings": _issues(r.warnings),

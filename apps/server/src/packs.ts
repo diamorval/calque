@@ -99,6 +99,8 @@ export async function importPack(db: Db, user: User, data: string, input: Import
     return { status: "draft" as const, manifest: draft.manifest, template_map: draft.template_map, tokens: draft.tokens };
   }
   const id = String(input.manifest.id ?? "");
+  // checked before it names a folder (the engine checks the manifest only after staging)
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) throw new Error(`pack id ${JSON.stringify(id)}: lowercase letters, digits and dashes`);
   const { rows } = await db.query<PackRow>("select * from packs where id = $1", [id]);
   if (rows[0] && rows[0].owner !== user.id && !user.local) throw new Error(`pack id ${JSON.stringify(id)} is taken`);
 

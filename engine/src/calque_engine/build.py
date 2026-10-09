@@ -65,8 +65,10 @@ def build(
     pack: Pack,
     out: str | Path,
     base: str | Path | None = None,
+    image_roots: list[str | Path] | None = None,
 ) -> BuildReport:
-    """Build a deck. `base` is the imported PPTX a DeckSpec with `base` edits."""
+    """Build a deck. `base` is the imported PPTX a DeckSpec with `base` edits. Image values are
+    paths relative to `image_roots` (default: the pack, and the base's folder)."""
     _load_renderers()
     raw = data.model_dump(exclude_none=True) if isinstance(data, DeckSpec) else data
     deck, warnings = validate(raw, pack)
@@ -74,6 +76,8 @@ def build(
     report = BuildReport(path=Path(out), warnings=list(warnings))
 
     template = Path(base) if base else pack.template
+    if image_roots is None:
+        image_roots = [pack.dir, *([template.parent] if base else [])]
     prs = Presentation(str(template))
     tmap = extract(template) if base else pack.template_map
     tmap_by_n = {s["number"]: s for s in tmap["slides"]}
@@ -101,7 +105,9 @@ def build(
                     new.notes_slide.notes_text_frame.text = originals[
                         n - 1
                     ].notes_slide.notes_text_frame.text
-            _apply_clone(new, s, st, deck.language, report, tmap_by_n[n], holes=not from_base)
+            _apply_clone(
+                new, s, st, deck.language, report, tmap_by_n[n], image_roots, holes=not from_base
+            )
         else:
             if base:
                 raise ValueError(f"[{s.id}] drawn slides cannot be added to an imported deck yet")
@@ -133,6 +139,7 @@ def _apply_clone(
     language: str,
     report: BuildReport,
     tslide: dict[str, Any],
+    image_roots: list[str | Path],
     holes: bool = True,
 ) -> None:
     values: dict[str, Any] = s.source.get("values", {})
@@ -142,7 +149,7 @@ def _apply_clone(
         if value is None:
             sl.delete_shape(shape)
             continue
-        sl.apply_value(shape, value, st)
+        sl.apply_value(shape, value, st, image_roots)
         if int(key) in fit and not (isinstance(value, dict) and "fit" in value):
             sl.fit_box(shape, st)
     if holes:

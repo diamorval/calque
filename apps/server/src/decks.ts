@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import type { DeckSpec, PatchOp } from "@calque/deckspec";
 import type { Db } from "./db.ts";
 import { engine } from "./engine.ts";
@@ -84,6 +84,13 @@ export class Decks {
 
   pptx(id: string, version: number): string {
     return join(this.dir(id), `v${version}.pptx`);
+  }
+
+  /** The imported deck `base` of deck `id`: a file in that deck's own folder, never elsewhere. */
+  basePath(id: string, base: string): string {
+    const path = resolve(this.dir(id), base);
+    if (dirname(path) !== resolve(this.dir(id))) throw new Error(`base ${JSON.stringify(base)} is not a file of this deck`);
+    return path;
   }
 
   async deck(user: User, id: string): Promise<DeckRow & { packDir: string }> {
@@ -209,9 +216,11 @@ export class Decks {
     const meta = `${out}.json`;
     if (existsSync(meta)) return JSON.parse(await readFile(meta, "utf8"));
     const tmp = `${out}.${randomUUID()}.tmp.pptx`;
-    const base = spec.base ? join(this.dir(id), spec.base) : undefined;
+    const base = spec.base ? this.basePath(id, spec.base) : undefined;
+    // images come from the deck's folder, uploads or the pack, nowhere else on the server
+    const image_roots = [this.dir(id), join(this.data, "uploads"), packDir];
     try {
-      const report = await engine<BuildReport>("build", { pack: packDir, deck: spec, out: tmp, base });
+      const report = await engine<BuildReport>("build", { pack: packDir, deck: spec, out: tmp, base, image_roots });
       await rename(tmp, out);
       await writeFile(meta, JSON.stringify({ ...report, path: out }));
       return { ...report, path: out };
@@ -286,7 +295,7 @@ export class Decks {
     const name = `base-v${deck.head + 1}.pptx`;
     const res = await engine<{ applied: unknown[] }>("fix", {
       pack: deck.packDir,
-      pptx: join(this.dir(id), spec.base),
+      pptx: this.basePath(id, spec.base),
       out: join(this.dir(id), name),
     });
     if (!res.applied.length) {
