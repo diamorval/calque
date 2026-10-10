@@ -337,9 +337,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
   .cq-panel { border-left: 0; border-top: 1px solid var(--cq-line); }
 }
 /* a phone: the actions behind a button, then one view at a time, the slides or the side panel,
-   switched from the bottom of the screen, where the thumb is */
+   switched from the bottom of the screen, where the thumb is. Turned sideways too. */
 .cq-bar-more, .cq-switch { display: none; }
-@media (max-width: 640px) {
+@media (max-width: 640px), (orientation: landscape) and (max-height: 480px) {
   .cq-workspace, .cq-workspace:not(:has(.cq-panel)) { grid-template: "bar" auto "rail" auto "stage" minmax(0, 1fr) "switch" auto / minmax(0, 1fr); }
   .cq-workspace[data-view="panel"] { grid-template: "bar" auto "panel" minmax(0, 1fr) "switch" auto / minmax(0, 1fr); }
   .cq-workspace[data-view="panel"] :is(.cq-thumbs, .cq-stage), .cq-workspace[data-view="slides"] .cq-panel { display: none; }
@@ -350,8 +350,13 @@ button, input, select, textarea { font: inherit; color: inherit; }
   .cq-bar-actions[data-open] { display: flex; flex-basis: 100%; justify-content: flex-start; margin-left: 0; }
   .cq-thumbs { flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--cq-line); padding: 10px 12px; }
   .cq-thumbs button { width: 96px; flex: none; }
-  .cq-stagebar { flex-wrap: wrap; padding: 6px 8px; }
-  .cq-stage-view, .cq-comment { padding-inline: 12px; }
+  .cq-stagebar { padding: 4px 8px; }
+  /* the slide's own actions as icons, to keep one row */
+  .cq-stagebar .cq-spacer ~ :is(button, a) { font-size: 0; gap: 0; }
+  /* the slide as large as the space left allows, whichever side bounds it */
+  .cq-stage-view { container-type: size; padding: 8px 12px; }
+  .cq-canvas { width: min(100%, 100cqh * var(--cq-ar, 1.78)); }
+  .cq-comment { padding-inline: 12px; }
   .cq-comment { padding-bottom: 12px; }
   .cq-comment-row { flex-wrap: wrap; }
   .cq-comment textarea { flex-basis: 100%; }
@@ -368,4 +373,16 @@ button, input, select, textarea { font: inherit; color: inherit; }
   }
   .cq-switch button[aria-pressed="true"] { background: var(--cq-accent-soft); color: var(--cq-accent); }
   .cq-switch svg { width: 17px; height: 17px; }
+}
+/* a phone turned sideways: the slide on the left, the comment box and the switch on the right */
+@media (orientation: landscape) and (max-height: 480px) {
+  .cq-workspace[data-view="slides"] {
+    grid-template: "bar bar" auto "nav comment" auto "view comment" minmax(0, 1fr) "view switch" auto / minmax(0, 1fr) minmax(240px, 34%);
+  }
+  .cq-workspace[data-view="slides"] .cq-thumbs { display: none; }
+  .cq-workspace[data-view="slides"] .cq-stage { display: contents; }
+  .cq-stagebar { grid-area: nav; background: var(--cq-sunken); }
+  .cq-stage-view { grid-area: view; background: var(--cq-sunken); }
+  .cq-comment { grid-area: comment; align-items: start; padding: 12px; border-left: 1px solid var(--cq-line); background: var(--cq-surface); }
+  .cq-workspace[data-view="slides"] .cq-switch { border-left: 1px solid var(--cq-line); }
 }

@@ -1,5 +1,5 @@
 import { Check, ChevronLeft, ChevronRight, Ellipsis, Images, MessageSquare, MessageSquarePlus, Reply, RotateCcw, Sparkles, SquareDashed, X } from "lucide-react";
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode, type TouchEvent } from "react";
 import { shapeLabel, SlideCanvas } from "./SlideCanvas.tsx";
 import { Thumbnails } from "./Thumbnails.tsx";
 import { EN_STRINGS, type SlideUiStrings } from "./strings.ts";
@@ -51,6 +51,8 @@ export function DeckViewer(props: {
   // on a phone: the actions folded or not, and one view at a time, the slides or the side panel
   const [more, setMore] = useState(false);
   const [view, setView] = useState<"slides" | "panel">("slides");
+  // a swipe on the slide turns it, as in a photo viewer; not while the page is pinch-zoomed
+  const swipe = useRef<{ x: number; y: number } | null>(null);
   const last = deck.slides.length - 1;
   const index = Math.min(current, last);
   const slide = deck.slides[index];
@@ -91,6 +93,19 @@ export function DeckViewer(props: {
       setBusy(false);
     }
   }
+
+  const swipeStart = (e: TouchEvent) => {
+    const t = e.touches[0];
+    swipe.current = e.touches.length === 1 && t && (window.visualViewport?.scale ?? 1) <= 1 ? { x: t.clientX, y: t.clientY } : null;
+  };
+  const swipeEnd = (e: TouchEvent) => {
+    const from = swipe.current;
+    const t = e.changedTouches[0];
+    swipe.current = null;
+    if (!from || !t) return;
+    const dx = t.clientX - from.x;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > 2 * Math.abs(t.clientY - from.y)) go(index + (dx < 0 ? 1 : -1));
+  };
 
   const comments = (
     <Comments
@@ -165,7 +180,7 @@ export function DeckViewer(props: {
             <SquareDashed /> {s.shapes}
           </button>
         </div>
-        <div className="cq-stage-view">
+        <div className="cq-stage-view" onTouchStart={swipeStart} onTouchEnd={swipeEnd}>
           <SlideCanvas strings={s} slide={slide} selected={shape} comments={here} outline={outline} onSelect={setShape} />
           {props.working && (
             <div className="cq-working" role="status">

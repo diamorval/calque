@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { choose, signIn } from "./helpers.ts";
 
 // A phone (iPhone 15 width): the app as an app, a tab bar at the bottom, the editor one view at a time.
@@ -6,10 +6,27 @@ test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true
 
 /** Nothing wider than the screen: no sideways scrolling. */
 async function fits(page: Page) {
-  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 }
 
-test("on a phone: tab bar, account menu, the editor's actions and Slides | Agent switch", async ({ page, request }) => {
+/** Where an element is on screen. */
+async function rect(el: Locator) {
+  const box = await el.boundingBox();
+  if (!box) throw new Error("not on screen");
+  return box;
+}
+
+/** A one-finger swipe across an element, from right to left (dx < 0) or the other way. */
+async function swipe(page: Page, selector: string, dx: number) {
+  const el = page.locator(selector);
+  const box = await rect(el);
+  const at = (x: number) => [{ identifier: 0, clientX: x, clientY: box.y + box.height / 2 }];
+  const x = box.x + box.width / 2 - dx / 2;
+  await el.dispatchEvent("touchstart", { touches: at(x), changedTouches: at(x) });
+  await el.dispatchEvent("touchend", { touches: [], changedTouches: at(x + dx) });
+}
+
+test("on a phone: tab bar, account menu, the editor (actions, Slides | Agent, swipe, sideways), present by touch", async ({ page, request }) => {
   const manifest = await request.get("/manifest.webmanifest");
   expect(manifest.headers()["content-type"]).toBe("application/manifest+json");
   expect((await manifest.json()).display).toBe("standalone");
@@ -44,6 +61,32 @@ test("on a phone: tab bar, account menu, the editor's actions and Slides | Agent
   await expect(page.getByRole("navigation", { name: "Slides" })).toBeHidden();
   await page.getByRole("button", { name: "Slides", exact: true }).click();
   await expect(page.getByRole("navigation", { name: "Slides" })).toBeVisible();
+
+  // a swipe on the slide turns it
+  await swipe(page, ".cq-stage-view", -120);
+  await expect(page.locator(".cq-pos")).toHaveText("2 / 7");
+  await swipe(page, ".cq-stage-view", 120);
+  await expect(page.locator(".cq-pos")).toHaveText("1 / 7");
+
+  // turned sideways: the slide and the comment box side by side, nothing over the other
+  await page.setViewportSize({ width: 844, height: 390 });
+  await fits(page);
+  const slide = await rect(page.locator(".cq-canvas"));
+  const box = await rect(page.getByLabel("Comment on slide 1"));
+  expect(slide.x + slide.width).toBeLessThanOrEqual(box.x);
+  expect(slide.y + slide.height).toBeLessThanOrEqual(390);
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  // present: a tap on the right goes forward, on the left back, the button exits
+  const deck = page.url();
+  await page.getByRole("button", { name: "Present" }).click(); // the actions are still unfolded
+  await expect(page.getByRole("img", { name: "Slide 1" })).toBeVisible();
+  await page.mouse.click(350, 422);
+  await expect(page.getByRole("img", { name: "Slide 2" })).toBeVisible();
+  await page.mouse.click(40, 422);
+  await expect(page.getByRole("img", { name: "Slide 1" })).toBeVisible();
+  await page.getByRole("button", { name: "Exit" }).click();
+  await expect(page).toHaveURL(deck);
 
   await page.getByRole("link", { name: "Decks" }).click();
   await expect(page).toHaveURL(/\/$/);

@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import { EN_STRINGS, type SlideUiStrings } from "./strings.ts";
 import type { Comment, ShapeBox, SlideView } from "./types.ts";
 
@@ -21,7 +22,7 @@ export function SlideCanvas(props: {
   const pins = new Map<number, number>();
   for (const c of comments) if (c.shape_id !== null) pins.set(c.shape_id, (pins.get(c.shape_id) ?? 0) + 1);
   return (
-    <div className="cq-canvas" data-outline={props.outline || undefined} style={{ aspectRatio: `${slide.width_px} / ${slide.height_px}` }}>
+    <div className="cq-canvas" data-outline={props.outline || undefined} style={{ aspectRatio: `${slide.width_px} / ${slide.height_px}`, "--cq-ar": slide.width_px / slide.height_px } as CSSProperties}>
       <img src={slide.image_url} alt={strings.slide(slide.number)} onClick={() => onSelect(null)} />
       {slide.shapes
         .filter((s) => s.bbox_px[2] > 0 && s.bbox_px[3] > 0)
