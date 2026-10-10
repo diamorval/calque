@@ -3,12 +3,14 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { DeckSpec, PatchOp, Slide } from "@calque/deckspec";
+import { compliance } from "./compliance.ts";
 import type { Db } from "./db.ts";
 import type { Decks, Finding, Role } from "./decks.ts";
 import { REPO } from "./engine.ts";
 import { getFile, MAX_UPLOAD, TooLarge, uploadTicket } from "./files.ts";
 import type { Models } from "./models.ts";
 import { importPack, listPacks, type User } from "./packs.ts";
+import { packPortal } from "./portal.ts";
 import { userToken } from "./preview.ts";
 import { approvalOf, recordExport, setApproval } from "./review.ts";
 import { resetLink, setGeneralAccess, share, shares, transfer, unshare } from "./shares.ts";
@@ -539,6 +541,24 @@ export const TOOLS = {
     }),
     run: async (app, user, a) =>
       importPack(app.db, user, app.data, { ...a, template: await materialize(app, user, a.template) }),
+  }),
+
+  open_pack: tool({
+    title: "Open brand pack",
+    description:
+      "A brand pack's charter, read-only: DESIGN.md, palette and fonts (tokens.json), voice, storyline, exemplar, anti-slop rules, placeholders, the template slides with their roles, and its exemplar pages and icons (also pack://<id>/exemplar/<file> and pack://<id>/icons/<file>). `extends` and `inherited`: what it takes from its group pack.",
+    input: z.object({ pack_id: z.string() }),
+    readOnly: true,
+    run: (app, user, a) => packPortal(app.db, user, a.pack_id),
+  }),
+
+  compliance_report: tool({
+    title: "Brand compliance report",
+    description:
+      "For pack owners and admins: per pack they manage, the decks made on it (by owner and team), the lint ERRORs and WARNs of each deck's latest version, the trend week by week and the approval status. Decks not linted yet are linted a few at a time: call again to fill them in.",
+    input: z.object({ pack_id: z.string().optional().describe("One pack; default: every pack you manage.") }),
+    readOnly: true,
+    run: (app, user, a) => compliance(app.db, app.decks, user, a.pack_id),
   }),
 } satisfies Record<string, Tool>;
 

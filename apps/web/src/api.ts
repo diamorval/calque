@@ -97,6 +97,8 @@ export interface Pack {
   archived?: boolean;
   /** The workspace's default pack, preselected for a new deck. */
   default?: boolean;
+  /** The group pack it inherits voice, storyline, exemplar and slop rules from. */
+  extends?: string | null;
   /** The caller manages it: its owner, or an admin. */
   editable: boolean;
 }

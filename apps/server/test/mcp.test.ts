@@ -40,6 +40,7 @@ describe("MCP server over Streamable HTTP", { timeout: ENGINE_TIMEOUT }, () => {
         "list_comments", "list_packs", "open_deck", "patch_deck", "restore_version", "review_deck", "upload_url",
         "list_decks", "share_deck", "unshare_deck", "list_shares", "set_general_access", "reset_link", "transfer_deck",
         "resolve_comments", "set_approval", "rename_deck", "duplicate_deck",
+        "open_pack", "compliance_report",
       ].sort(),
     );
     const open = tools.find((t) => t.name === "open_deck");
@@ -58,6 +59,12 @@ describe("MCP server over Streamable HTTP", { timeout: ENGINE_TIMEOUT }, () => {
     expect(uris).toContain("core://workflows/build");
     expect(uris).toContain("pack://diametral/voice");
     expect(uris).toContain("pack://acme-test/template-map");
+    expect(uris).toContain("pack://diametral/exemplar/exemplar-s1-s9.jpg");
+    expect(uris).toContain("pack://diametral/icons/compass.png");
+    const icon = (await client.readResource({ uri: "pack://diametral/icons/compass.png" })).contents[0] as Json;
+    expect(icon.mimeType).toBe("image/png");
+    expect(Buffer.from(icon.blob, "base64").subarray(1, 4).toString()).toBe("PNG");
+    await expect(client.readResource({ uri: "pack://diametral/icons/..%2Fpack.yaml" })).rejects.toThrow(/no icons image/);
     const ui = (await client.readResource({ uri: "ui://calque/deck.html" })).contents[0] as Json;
     expect(ui.mimeType).toBe("text/html;profile=mcp-app");
     expect(ui.text).toContain('<div id="root">');

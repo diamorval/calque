@@ -4,6 +4,7 @@ import { cp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import type { DeckSpec, PatchOp } from "@calque/deckspec";
 import { audit } from "./audit.ts";
+import { recordLint } from "./compliance.ts";
 import type { Db } from "./db.ts";
 import { engine } from "./engine.ts";
 import { FILE_REF, getFile, saveFile, uploadPath } from "./files.ts";
@@ -305,12 +306,13 @@ export class Decks {
     await this.ownFiles(user, spec);
     await mkdir(this.dir(id), { recursive: true });
     const report = await this.build(pack.dir, id, spec, 1);
-    await this.db.query("insert into decks (id, pack_id, owner, title, head, pack_version) values ($1, $2, $3, $4, 1, $5)", [
+    await this.db.query("insert into decks (id, pack_id, owner, title, head, pack_version, owner_teams) values ($1, $2, $3, $4, 1, $5, $6)", [
       id,
       spec.pack_id,
       user.id,
       spec.title,
       pack.version,
+      JSON.stringify(user.teams),
     ]);
     await this.db.query(
       "insert into deck_versions (deck_id, version, spec, note, author, author_name) values ($1, 1, $2, $3, $4, $5)",
@@ -439,6 +441,7 @@ export class Decks {
       language: spec.language,
       sources,
     });
+    await recordLint(this.db, id, v, res.findings);
     return { version: v, safe_checks: res.safe_checks, findings: res.findings.map((f) => ({ ...f, slide_id: f.slide ? (byPos.get(f.slide) ?? null) : null })) };
   }
 
@@ -640,7 +643,7 @@ export class Decks {
     const admin = !user.anonymous && isAdmin(user);
     if (!row || (!role && !admin)) throw new NotFound(`no deck ${JSON.stringify(id)}`);
     if (role !== "owner" && !admin) throw new Forbidden(`owner access needed on deck ${id}`);
-    for (const t of ["comments", "deck_shares", "deck_versions"]) await this.db.query(`delete from ${t} where deck_id = $1`, [id]);
+    for (const t of ["comments", "deck_shares", "deck_lint", "deck_versions"]) await this.db.query(`delete from ${t} where deck_id = $1`, [id]);
     await this.db.query("delete from decks where id = $1", [id]);
     await rm(this.dir(id), { recursive: true, force: true });
     for (const k of this.renders.keys()) if (k.startsWith(`${id}@`)) this.renders.delete(k);

@@ -104,6 +104,17 @@ const releaseDir = (data: string, id: string, version: number) => join(data, "pa
 const nextVersion = async (db: Db, id: string) =>
   Number((await db.query<{ next: number }>("select coalesce(max(version), 0) + 1 as next from pack_versions where pack_id = $1", [id])).rows[0]?.next ?? 1);
 
+/** Every pack's current release: id -> directory (engine.ts sends it, to resolve `extends`). */
+export async function packDirs(db: Db): Promise<Record<string, string>> {
+  const { rows } = await db.query<{ id: string; dir: string }>("select id, dir from packs");
+  return Object.fromEntries(rows.map((r) => [r.id, r.dir]));
+}
+
+/** A pack may extend (inherit voice, storyline, exemplar, slop rules from) a pack its publisher sees. */
+async function checkParent(db: Db, user: User, manifest: Record<string, unknown>) {
+  if (manifest.extends !== undefined && manifest.extends !== null) await getPack(db, user, String(manifest.extends));
+}
+
 export async function getPack(db: Db, user: User, id: string): Promise<PackRow> {
   const { rows } = await db.query<PackRow>("select * from packs where id = $1", [id]);
   const row = rows[0];
@@ -127,6 +138,8 @@ export async function listPacks(db: Db, user: User, opts: { archived?: boolean; 
           version: m.version as string,
           default_language: m.default_language as string | null,
           languages: Object.keys(m.missing_value ?? {}),
+          /** The group pack it inherits voice, storyline, exemplar and slop rules from. */
+          extends: (m.extends as string | undefined) ?? null,
           visibility: r.visibility,
           teams: r.teams,
           owner: r.owner,
@@ -174,6 +187,7 @@ export async function importPack(db: Db, user: User, data: string, input: Import
     const { rows } = await db.query<PackRow>("select * from packs where id = $1", [id]);
     if (rows[0] && !manages(rows[0], user)) throw new Error(`pack id ${JSON.stringify(id)} is taken`);
 
+    await checkParent(db, user, input.manifest);
     let manifest = input.manifest;
     await writeFile(join(stage, "tokens.json"), JSON.stringify(draft.tokens, null, 2) + "\n");
     await writeFile(join(stage, "template-map.yaml"), stringify(input.template_map ?? draft.template_map));
@@ -422,6 +436,7 @@ async function publishEdit(
   id: string,
   input: { manifest: Record<string, unknown>; voice?: string | undefined; note?: string | undefined },
 ) {
+  await checkParent(db, user, input.manifest);
   const manifest = await withFonts({ ...input.manifest, id }, join(dir, "fonts"));
   await writeFile(join(dir, "pack.yaml"), stringify(manifest));
   if (input.voice !== undefined) await writeFile(join(dir, "voice.md"), input.voice);

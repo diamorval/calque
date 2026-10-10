@@ -123,7 +123,17 @@ create unique index if not exists one_default_model on models (is_default) where
 alter table decks add column if not exists name text;
 -- the pack /new preselects (CALQUE_DEFAULT_PACK, or an admin's choice)
 alter table packs add column if not exists is_default boolean not null default false;
-create unique index if not exists one_default_pack on packs (is_default) where is_default;`;
+create unique index if not exists one_default_pack on packs (is_default) where is_default;
+-- compliance.ts: lint counts per deck version, and the teams of a deck's owner when they created it
+create table if not exists deck_lint (
+  deck_id uuid not null references decks(id),
+  version int not null,
+  errors int not null,
+  warns int not null,
+  at timestamptz not null default now(),
+  primary key (deck_id, version)
+);
+alter table decks add column if not exists owner_teams jsonb not null default '[]';`;
 
 /** Postgres when `url` is a postgres:// URL, else embedded PGlite (a data dir, or in memory). */
 export async function openDb(url = process.env.DATABASE_URL): Promise<Db> {
