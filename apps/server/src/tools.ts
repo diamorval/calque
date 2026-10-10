@@ -144,11 +144,23 @@ export const TOOLS = {
 
   import_pptx: tool({
     title: "Import PPTX",
-    description: "Import an existing deck to edit it in place: each slide becomes a clone of the imported file, edited by shape_id with patch_deck.",
-    input: z.object({ file: File, pack_id: z.string(), language: z.string().min(2) }),
+    description:
+      "Import a PPTX to edit it in place: each slide becomes a clone of the file, edited by shape_id with patch_deck. With `deck_id`, the file (typically that deck exported and edited in PowerPoint) comes back as the next version of that deck: history and comments are kept, slides keep their ids, and charts, diagrams and compositions stay drawn with the text and data edits merged (set_params keeps working). The `import` report lists the slides kept drawn, those imported as clones, those demoted to clones (with why) and conflicts.",
+    input: z.object({
+      file: File,
+      deck_id: deckId.optional().describe("Re-import into this existing deck as a new version."),
+      pack_id: z.string().optional().describe("Pack of a new deck (required without deck_id)."),
+      language: z.string().min(2).optional().describe("Deck language; required for a new deck."),
+    }),
     ui: true,
     run: async (app, user, a) => {
-      const r = await app.decks.importPptx(user, await materialize(app, user, a.file), a.pack_id, a.language);
+      const file = await materialize(app, user, a.file);
+      if (a.deck_id) {
+        const r = await app.decks.reimport(user, a.deck_id, file, a.language);
+        return { ...r, ...links(app, a.deck_id) };
+      }
+      if (!a.pack_id || !a.language) throw new Error("a new deck needs pack_id and language (or pass deck_id)");
+      const r = await app.decks.importPptx(user, file, a.pack_id, a.language);
       return { ...r, ...links(app, r.deck_id) };
     },
   }),

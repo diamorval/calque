@@ -64,6 +64,15 @@ interface DeckRow {
   head: number;
 }
 
+/** What an import recognised: slides kept drawn, imported as clones, demoted (and why), and
+drawn slides changed in Calque after the file was exported (the file wins). */
+export interface ImportReport {
+  drawn: string[];
+  imported: string[];
+  demoted: { slide: string; reason: string }[];
+  conflicts: { slide: string; reason: string }[];
+}
+
 export class Conflict extends Error {}
 
 /** Deck versions, their built PPTX and renders. Every change is a new DeckSpec version. */
@@ -301,8 +310,35 @@ export class Decks {
     const pack = await getPack(this.db, user, packId);
     const id = randomUUID();
     await mkdir(this.dir(id), { recursive: true });
-    const res = await engine<{ deck: DeckSpec }>("import", { pack: pack.dir, pptx: file, dest: this.dir(id), language });
-    return this.create(user, res.deck, "import", id);
+    const res = await engine<{ deck: DeckSpec; report: ImportReport }>("import", { pack: pack.dir, pptx: file, dest: this.dir(id), language });
+    return { ...(await this.create(user, res.deck, "import", id)), import: res.report };
+  }
+
+  /** Re-import a PPTX edited in PowerPoint into deck `id`, as its next version: slides the engine
+  tagged keep their ids (comments stay anchored), drawn slides stay drawn with the edits merged. */
+  reimport(user: User, id: string, file: string, language?: string) {
+    return this.serial(id, () => this.reimportNow(user, id, file, language));
+  }
+
+  private async reimportNow(user: User, id: string, file: string, language?: string) {
+    const deck = await this.deck(user, id);
+    const spec = await this.spec(id, deck.head);
+    // a new base per version: older versions keep building on theirs
+    const base = `base-v${deck.head + 1}-${randomUUID().slice(0, 8)}.pptx`;
+    const res = await engine<{ deck: DeckSpec; report: ImportReport }>("import", {
+      pack: deck.packDir,
+      pptx: file,
+      dest: this.dir(id),
+      language: language ?? spec.language,
+      base_id: base,
+      previous: spec,
+    });
+    try {
+      return { ...(await this.commit(user, id, deck.head, res.deck, "re-import from PowerPoint")), import: res.report };
+    } catch (e) {
+      await rm(join(this.dir(id), base), { force: true });
+      throw e;
+    }
   }
 
   async exportPath(user: User, id: string, version?: number): Promise<{ version: number; path: string }> {
