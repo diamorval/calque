@@ -62,7 +62,7 @@ def _pdf(path: Path, pages: list[str]) -> None:
         {
             NameObject("/Type"): NameObject("/Font"),
             NameObject("/Subtype"): NameObject("/Type1"),
-            NameObject("/BaseFont"): NameObject("/Helvetica"),
+            NameObject("/BaseFont"): NameObject("/Courier"),
         }
     )
     for line in pages:
