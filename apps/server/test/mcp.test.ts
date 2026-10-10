@@ -37,7 +37,8 @@ describe("MCP server over Streamable HTTP", { timeout: ENGINE_TIMEOUT }, () => {
     expect(tools.map((t) => t.name).sort()).toEqual(
       [
         "add_comment", "add_slides", "create_deck", "export_pptx", "import_pack", "import_pptx", "lint_deck",
-        "list_comments", "list_packs", "open_deck", "patch_deck", "restore_version", "review_deck",
+        "list_comments", "list_packs", "open_deck", "patch_deck", "restore_version", "review_deck", "upload_url",
+        "list_decks", "share_deck", "unshare_deck", "list_shares", "set_general_access", "reset_link", "transfer_deck",
       ].sort(),
     );
     const open = tools.find((t) => t.name === "open_deck");
@@ -70,12 +71,12 @@ describe("MCP server over Streamable HTTP", { timeout: ENGINE_TIMEOUT }, () => {
 
     const created = await call("create_deck", { deck: acmeDeck() });
     const id = created.deck_id;
-    expect(created.preview_url).toBe(`http://calque.test/decks/${id}`);
+    expect(created.preview_url).toMatch(new RegExp(`^http://calque.test/decks/${id}\\?t=[\\w-]+\\.[\\w-]+$`));
 
     const opened = await call("open_deck", { deck_id: id });
     expect(opened.slides).toHaveLength(acmeDeck().slides.length);
     const cover = opened.slides[0];
-    expect(cover.image_url).toBe(`http://calque.test/decks/${id}/slides/1.png?v=1`);
+    expect(cover.image_url).toMatch(new RegExp(`^http://calque.test/decks/${id}/slides/1\\.png\\?v=1&t=`));
     expect(cover.shapes.some((s: Json) => s.shape_id === 2)).toBe(true);
 
     const comment = (await call("add_comment", { deck_id: id, slide_id: "cover", shape_id: 2, text: "Say 'grew 12%'" })).comment;
@@ -115,7 +116,7 @@ describe("MCP server over Streamable HTTP", { timeout: ENGINE_TIMEOUT }, () => {
     expect((await call("lint_deck", { deck_id: imported.deck_id })).errors).toBe(0);
   });
 
-  it("serves the web preview: data, PNGs and comments read back by list_comments", async () => {
+  it("serves the web preview without auth (local only): data, PNGs and comments read back by list_comments", async () => {
     const { deck_id } = await call("create_deck", { deck: acmeDeck() });
     const data = (await (await http.request(`/decks/${deck_id}/data`)).json()) as Json;
     expect(data.slides.length).toBeGreaterThan(0);
@@ -128,7 +129,7 @@ describe("MCP server over Streamable HTTP", { timeout: ENGINE_TIMEOUT }, () => {
     });
     expect(posted.status).toBe(200);
     const comments = (await call("list_comments", { deck_id })).comments;
-    expect(comments).toMatchObject([{ slide_id: "regions", text: "Sort by growth", author: "preview" }]);
+    expect(comments).toMatchObject([{ slide_id: "regions", text: "Sort by growth", author: "local" }]);
   });
 
   it("returns tool errors as results, with the engine's issues", async () => {

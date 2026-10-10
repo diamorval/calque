@@ -28,10 +28,18 @@ def op_validate(pack: str, deck: dict[str, Any]) -> dict[str, Any]:
     return {"warnings": _issues(warnings)}
 
 
-def op_build(pack: str, deck: dict[str, Any], out: str, base: str | None = None) -> dict[str, Any]:
+def op_build(
+    pack: str,
+    deck: dict[str, Any],
+    out: str,
+    base: str | None = None,
+    image_roots: list[str] | None = None,
+    author: str | None = None,
+) -> dict[str, Any]:
+    """`image_roots`: the folders image values may be read from (see `build`)."""
     from .build import build
 
-    r = build(deck, load_pack(pack), out, base=base)
+    r = build(deck, load_pack(pack), out, base=base, image_roots=image_roots, author=author)
     return {
         "path": str(r.path),
         "warnings": _issues(r.warnings),
@@ -54,13 +62,28 @@ def op_import(pack: str, pptx: str, dest: str, language: str) -> dict[str, Any]:
     return {"deck": deck, "template_map": tmap}
 
 
-def op_extract(template: str, pack_id: str = "draft", name: str = "Draft") -> dict[str, Any]:
-    """Drafts for a new pack: template map (with title slots on role slides), tokens, manifest."""
-    from .extract import draft_manifest, draft_tokens, extract
+def op_extract(
+    template: str,
+    pack_id: str = "draft",
+    name: str = "Draft",
+    tokens: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Drafts for a new pack: template map (with title slots on role slides), tokens, manifest.
+    A .potx is rewritten in place as a .pptx. `tokens`: the company's own tokens.json, used
+    instead of the draft. `review`: the resolved colours and fonts, for a person to check."""
+    from . import tokens as tk
+    from .extract import as_presentation, draft_manifest, draft_tokens, extract, used_styles
 
+    as_presentation(template)
     tmap = extract(template)
-    manifest = draft_manifest(tmap, pack_id, name)
-    return {"template_map": tmap, "tokens": draft_tokens(tmap), "manifest": manifest}
+    manifest = draft_manifest(tmap, pack_id, name, used_styles(template))
+    tokens = tokens or draft_tokens(tmap)
+    values, flat = tk.resolve(tokens), tk.flatten(tokens)
+    review = {
+        kind: {p: fn(values[p]) for p, t in flat.items() if t.get("$type") == typ}
+        for kind, typ, fn in (("colors", "color", tk.hex6), ("fonts", "fontFamily", tk.family))
+    }
+    return {"template_map": tmap, "tokens": tokens, "manifest": manifest, "review": review}
 
 
 def op_lint(
@@ -110,6 +133,14 @@ def op_render(
     return asdict(r) if hasattr(r, "__dataclass_fields__") else dict(r)
 
 
+def op_text(path: str, name: str, limit: int = 100_000) -> dict[str, Any]:
+    """Plain text of an attached document (txt, md, csv, docx, xlsx, pptx), cut at `limit`."""
+    from .text import read_text
+
+    text = read_text(path, name)
+    return {"text": text[:limit], "truncated": len(text) > limit}
+
+
 OPS = {
     "validate_pack": op_validate_pack,
     "validate": op_validate,
@@ -120,6 +151,7 @@ OPS = {
     "lint": op_lint,
     "fix": op_fix,
     "render": op_render,
+    "text": op_text,
 }
 
 

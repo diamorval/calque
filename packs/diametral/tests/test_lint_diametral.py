@@ -182,3 +182,34 @@ def test_closing_slide_keeps_its_signature_line(tmp_path):
         for f in lint(tmp_path / "c.pptx", pack, "en", exempt_closing_slides={1})
         if f.check == "slop"
     ]
+
+
+def test_webinar_cover_and_closing(tmp_path):
+    """The persona-review webinar deck: a keyword too long for its tag, a closing rewritten in
+    off-charter copy. Built (server, with the map) and linted bare (CLI), the findings agree."""
+    pack = load_pack(PACK)
+
+    def deck(title):
+        cover = {"26": title, "27": "TRANSFORMATION ACHATS", "30": "WEBINAR", "31": "10/2026"}
+        closing = {"1710": "Réservez un rendez-vous — c'est révolutionnaire !"}
+        spec = {"pack_id": "diametral", "language": "fr", "title": "Webinar", "slides": []}
+        for sid, role, values in (("c", "cover", cover), ("e", "closing", closing)):
+            src = {"kind": "clone", "role": role, "values": values}
+            spec["slides"].append(
+                {"id": sid, "message": sid, "message_type": role, "form": role, "source": src}
+            )
+        report = build(spec, pack, tmp_path / "w.pptx")
+        mapped = lint(tmp_path / "w.pptx", pack, "fr", dict(report.slides.values()))
+        assert mapped == lint(tmp_path / "w.pptx", pack, "fr")
+        return {(f.slide, f.shape_id, f.check, f.severity) for f in mapped}
+
+    found = deck("L'IA dans les achats : ce que mesurent les CPO")
+    assert (1, 27, "capacity", "WARN") in found  # the grown keyword tag runs into the date
+    assert {(2, 1710, "slop", "ERROR"), (2, 1710, "slop", "WARN")} <= found
+    # The title holds two lines of Ufficio at 52 pt: its three-line preview came from a fallback
+    # face, which lint reports when the pack fonts are missing.
+    assert not {f for f in found if f[1] == 26}
+    if not (PACK / "fonts" / "Ufficio-300.otf").is_file():
+        assert (None, None, "fonts", "WARN") in found
+    long = deck("L'IA dans les achats : ce que mesurent vraiment les directions achats en 2026")
+    assert (1, 26, "capacity", "WARN") in long

@@ -87,18 +87,20 @@ describe("pack governance: admins, releases, template swaps, archive", { timeout
     await expect(replaceTokens(admin, app.data, draft.draft_id, Buffer.from("{nope"))).rejects.toThrow(/not valid JSON/);
     await expect(replaceTokens(bob, app.data, draft.draft_id, acmeTokens)).rejects.toThrow(/no draft/);
 
-    // a broken token tree: the release is refused, the current one stays
+    // a broken token tree is refused on upload (the extractor checks it, as on import)
     const broken = JSON.parse(acmeTokens.toString());
     broken.theme.accent1.$value = "#12345";
-    await replaceTokens(admin, app.data, draft.draft_id, Buffer.from(JSON.stringify(broken)));
-    await expect(publish(admin, draft)).rejects.toThrow();
+    await expect(replaceTokens(admin, app.data, draft.draft_id, Buffer.from(JSON.stringify(broken)))).rejects.toThrow(/hex colour/);
+    // roles that do not fit the template are refused on publish; the current release stays
+    const bad = { ...draft, manifest: { ...draft.manifest, roles: { ...(draft.manifest.roles as object), closing: [9] } } };
+    await expect(publish(admin, bad)).rejects.toThrow(/9/);
     expect((await getPack(app.db, admin, "acme-test")).version).toBe(3);
 
     // the template is swapped (re-extracted roles and map), the tokens put back: lint passes, release 4
     const swapped = await replaceTemplate(admin, app.data, draft.draft_id, readFileSync(join(ACME, "template.pptx")));
     expect(swapped.manifest).toMatchObject({ id: "acme-test", name: "Acme Test", roles: { cover: [1], divider: [2], content: [3], closing: [4] } });
     expect(swapped.slides).toHaveLength(4);
-    expect(await replaceTokens(admin, app.data, draft.draft_id, acmeTokens)).toEqual({ tokens: expect.arrayContaining(["role", "theme"]) });
+    expect(await replaceTokens(admin, app.data, draft.draft_id, acmeTokens)).toMatchObject({ tokens: expect.arrayContaining(["role", "theme"]) });
     const r = await publish(admin, swapped, { note: "new template" });
     expect(r).toMatchObject({ status: "published", version: 4 });
     const dir = (await getPack(app.db, admin, "acme-test")).dir;

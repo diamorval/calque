@@ -4,6 +4,7 @@ injected into a cleanly built deck is caught by the right check."""
 from pathlib import Path
 
 import pytest
+import yaml
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.util import Inches, Pt
@@ -146,3 +147,90 @@ def test_fault_detected(clean, fault, tmp_path):
     new = {(f.check, f.severity) for f in found if f.slide == POS} - before
     expected = ("slop", "NOTE") if fault == "notes" else (fault, None)
     assert any(c == expected[0] and expected[1] in (None, s) for c, s in new), found
+
+
+def _deck(pack, slides, out):
+    spec = {"pack_id": pack.id, "language": "en", "title": "T", "slides": slides}
+    return dict(build(spec, pack, out).slides.values())
+
+
+# signature role -> the message type its form carries
+MTYPES = {"cover": "cover", "summary": "summary", "divider": "divider", "closing": "closing"}
+
+
+def _clone(sid, role, values):
+    src = {"kind": "clone", "role": role, "values": values}
+    return {"id": sid, "message": sid, "message_type": MTYPES[role], "form": role, "source": src}
+
+
+def test_rewritten_closing_text_is_linted(clean, tmp_path):
+    """Only the closing line the template writes is exempt: the author's copy there is linted,
+    and the same with or without a build map."""
+    pack = clean[0]
+    n = pack.slides_for("closing")[0]
+    slots = next(s for s in pack.template_map["slides"] if s["number"] == n).get("slots", {})
+    if not slots:
+        pytest.skip("closing slide declares no slot")
+    values = {str(next(iter(slots.values()))): "In today's fast-paced world, margins rose"}
+    tmap = _deck(pack, [_clone("end", "closing", values)], tmp_path / "c.pptx")
+    mapped = [str(f) for f in lint(tmp_path / "c.pptx", pack, "en", tmap) if f.check == "slop"]
+    unmapped = [str(f) for f in lint(tmp_path / "c.pptx", pack, "en") if f.check == "slop"]
+    assert mapped and mapped == unmapped
+
+
+def _capacity_slot(pack):
+    """(role, shape id, capacity) of a slot on a role's first slide that declares a capacity
+    and is not a `fit` label."""
+    for role, nums in pack.manifest["roles"].items():
+        if role not in MTYPES or not nums:
+            continue
+        s = next(s for s in pack.template_map["slides"] if s["number"] == nums[0])
+        shapes = {x["id"]: x for x in s["shapes"]}
+        for sid in s.get("slots", {}).values():
+            cap = shapes.get(sid, {}).get("capacity")
+            if cap and sid not in s.get("fit", []):
+                return role, sid, cap
+    pytest.skip("pack declares no slot capacity")
+
+
+def test_slot_capacity_enforced(clean, tmp_path):
+    pack = clean[0]
+    role, sid, cap = _capacity_slot(pack)
+    long = " ".join(["word"] * (cap["chars_per_line"] * (cap["lines"] + 1) // 4 + 2))
+    tmap = _deck(pack, [_clone("s", role, {str(sid): long})], tmp_path / "c.pptx")
+    for found in (
+        lint(tmp_path / "c.pptx", pack, "en", tmap),
+        lint(tmp_path / "c.pptx", pack, "en"),
+    ):
+        assert any(f.check == "capacity" and f.shape_id == sid for f in found), found
+    tmap = _deck(pack, [_clone("s", role, {str(sid): "w"})], tmp_path / "d.pptx")
+    assert not [f for f in lint(tmp_path / "d.pptx", pack, "en", tmap) if f.check == "capacity"]
+
+
+def test_char_lines():
+    from calque_engine.lint import _char_lines
+
+    assert _char_lines("SUPERCALIFRAGILISTIC WORD", 10) == 3  # a 20-char word overhangs
+    assert _char_lines("Document title in two lines maximum", 25) == 2
+    assert _char_lines("short", 10) == 1
+
+
+def test_missing_pack_fonts_are_reported(neutral_pack, tmp_path, capsys):
+    """A face with no file in fonts/ renders in its fallback: lint says so, validate-pack too."""
+    from calque_engine.__main__ import main
+
+    pack = load_pack(neutral_pack)
+    tmap = _deck(pack, [_clone("s", "cover", {})], tmp_path / "c.pptx")
+    (fonts,) = [f for f in lint(tmp_path / "c.pptx", pack, "en", tmap) if f.check == "fonts"]
+    assert fonts.severity == "WARN" and fonts.slide is None
+    assert "rendered with fallback fonts" in fonts.message and pack.font("body") in fonts.message
+
+    manifest = neutral_pack / "pack.yaml"
+    data = yaml.safe_load(manifest.read_text())
+    same = {r: pack.font(r) for r in ("display", "body")}  # the fallback is the face itself
+    data["fonts"] = {"files": ["Face-Regular.ttf"], "fallback": same}
+    manifest.write_text(yaml.safe_dump(data))
+    found = lint(tmp_path / "c.pptx", load_pack(neutral_pack), "en", tmap)
+    assert [f for f in found if f.check == "fonts"] == []
+    assert main(["validate-pack", str(neutral_pack)]) == 0
+    assert "fonts/ lacks Face-Regular.ttf" in capsys.readouterr().err

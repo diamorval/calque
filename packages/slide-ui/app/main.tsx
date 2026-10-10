@@ -18,22 +18,27 @@ const POLL_MS = 4000;
 
 function web(id: string): Backend {
   const base = `/decks/${id}`;
+  // the deck's share link (?k=) or a per-user token (?t=) authorizes every request, else the web
+  // session; image URLs in the data carry it already
+  const s = new URLSearchParams(location.search);
+  const [k, t] = [s.get("k"), s.get("t")];
+  const q = t ? `?t=${encodeURIComponent(t)}` : k ? `?k=${encodeURIComponent(k)}` : "";
   let version = 0;
   return {
     async load() {
-      const res = await fetch(`${base}/data`);
+      const res = await fetch(`${base}/data${q}`);
       if (!res.ok) throw new Error((await res.json()).message);
       const deck = (await res.json()) as DeckView;
       version = deck.head;
       return deck;
     },
     async comment(c) {
-      const res = await fetch(`${base}/comments`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(c) });
+      const res = await fetch(`${base}/comments${q}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(c) });
       if (!res.ok) throw new Error((await res.json()).message);
     },
     watch(changed) {
       setInterval(async () => {
-        const res = await fetch(`${base}/data`);
+        const res = await fetch(`${base}/data${q}`);
         if (res.ok && ((await res.json()) as DeckView).head !== version) changed();
       }, POLL_MS);
     },
@@ -118,14 +123,20 @@ function Root({ backend }: { backend: Backend }) {
         <span className="cq-spinner">Loading deck…</span>
       </div>
     );
+  // a viewer reads only; applying comments edits the deck
+  const edits = !deck.role || deck.role === "editor" || deck.role === "owner";
   return (
     <DeckViewer
       deck={deck}
-      onComment={async (c) => {
-        await backend.comment(c);
-        setDeck(await backend.load());
-      }}
-      {...(backend.apply ? { onApply: backend.apply } : {})}
+      {...(deck.role !== "viewer"
+        ? {
+            onComment: async (c: NewComment) => {
+              await backend.comment(c);
+              setDeck(await backend.load());
+            },
+          }
+        : {})}
+      {...(backend.apply && edits ? { onApply: backend.apply } : {})}
     />
   );
 }

@@ -33,6 +33,8 @@ export interface DeckView {
   slides: SlideView[];
   open_comments: Comment[];
   preview_url: string;
+  /** The viewer's role on the deck: a viewer reads only, a commenter also comments. */
+  role?: "viewer" | "commenter" | "editor" | "owner";
 }
 
 export interface NewComment {
