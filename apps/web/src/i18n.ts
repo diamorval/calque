@@ -134,5 +134,6 @@ export function slideUiStrings(): SlideUiStrings {
     shape: (id, role) => t("Shape {id} ({role})", { id, role }),
     required: t("Required"),
     requiredHint: t("A required comment blocks the deck's approval until it is resolved"),
+    moreActions: t("More actions"),
   };
 }

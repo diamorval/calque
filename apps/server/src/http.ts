@@ -692,7 +692,7 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
   });
 
   // The web app (apps/web): its built files, and index.html for its client-side routes.
-  const TYPES: Record<string, string> = { js: "text/javascript", css: "text/css", svg: "image/svg+xml", woff2: "font/woff2", png: "image/png", ico: "image/x-icon" };
+  const TYPES: Record<string, string> = { js: "text/javascript", css: "text/css", svg: "image/svg+xml", woff2: "font/woff2", png: "image/png", ico: "image/x-icon", webmanifest: "application/manifest+json" };
   http.get("*", async (c) => {
     const path = normalize(join(WEB_DIST, new URL(c.req.url).pathname));
     const ext = path.split(".").pop() ?? "";

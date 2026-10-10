@@ -72,6 +72,9 @@ export function App() {
   const [theme, toggleTheme] = useTheme();
   const [me, setMe] = useState<Me | null | "signed-out">(null);
   const [brand, setBrand] = useState<Branding>(NEUTRAL);
+  // on a phone the theme, language and sign-out sit in a menu over the tab bar, closed on every page change
+  const [account, setAccount] = useState(false);
+  useEffect(() => setAccount(false), [path]);
   useEffect(() => {
     api<Me>("/api/me").then(setMe, (e) => setMe(e instanceof ApiError && e.status === 401 ? "signed-out" : null));
     // the deployment's name and logo (white-label); the neutral one if it cannot be read
@@ -104,27 +107,34 @@ export function App() {
         <NavItem href="/settings/models" label={t("AI models")} short={t("Models (short)")} icon={Cpu} active={path === "/settings/models"} />
         <NavItem href="/settings/packs" label={t("Brand packs")} short={t("Packs (short)")} icon={Palette} active={path.startsWith("/settings/packs") || path === "/settings/compliance"} />
         <span className="cq-side-rule" />
-        <button type="button" className="cq-nav" aria-label={theme === "dark" ? t("Light theme") : t("Dark theme")} title={t("Switch theme")} onClick={toggleTheme}>
-          {theme === "dark" ? <Sun /> : <Moon />}
+        <button type="button" className="cq-nav cq-me-toggle" aria-label={t("Account")} aria-expanded={account} onClick={() => setAccount((a) => !a)}>
+          <span className="cq-me-initials" aria-hidden>
+            {name.slice(0, 2).toUpperCase()}
+          </span>
         </button>
-        <button
-          type="button"
-          className="cq-nav"
-          aria-label={t("Language: {name}", { name: LANGS[lang] })}
-          title={t("Switch to {name}", { name: LANGS[lang === "fr" ? "en" : "fr"] })}
-          onClick={() => setLang(lang === "fr" ? "en" : "fr")}
-        >
-          <Languages />
-          <span aria-hidden>{lang.toUpperCase()}</span>
-        </button>
-        <Avatar className="cq-avatar" aria-label={t("Signed in as {name}", { name })} title={name}>
-          <AvatarFallback>{name.slice(0, 2).toUpperCase()}</AvatarFallback>
-        </Avatar>
-        {me.auth && (
-          <button type="button" className="cq-nav" aria-label={t("Sign out")} title={t("Sign out")} onClick={() => location.assign("/auth/logout")}>
-            <LogOut />
+        <div className="cq-side-me" data-open={account || undefined}>
+          <button type="button" className="cq-nav" aria-label={theme === "dark" ? t("Light theme") : t("Dark theme")} title={t("Switch theme")} onClick={toggleTheme}>
+            {theme === "dark" ? <Sun /> : <Moon />}
           </button>
-        )}
+          <button
+            type="button"
+            className="cq-nav"
+            aria-label={t("Language: {name}", { name: LANGS[lang] })}
+            title={t("Switch to {name}", { name: LANGS[lang === "fr" ? "en" : "fr"] })}
+            onClick={() => setLang(lang === "fr" ? "en" : "fr")}
+          >
+            <Languages />
+            <span aria-hidden>{lang.toUpperCase()}</span>
+          </button>
+          <Avatar className="cq-avatar" aria-label={t("Signed in as {name}", { name })} title={name}>
+            <AvatarFallback>{name.slice(0, 2).toUpperCase()}</AvatarFallback>
+          </Avatar>
+          {me.auth && (
+            <button type="button" className="cq-nav" aria-label={t("Sign out")} title={t("Sign out")} onClick={() => location.assign("/auth/logout")}>
+              <LogOut />
+            </button>
+          )}
+        </div>
       </nav>
       <main className="cq-main" data-full={path.startsWith("/d/") || undefined}>
         {page(path, me)}
