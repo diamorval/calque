@@ -1,9 +1,9 @@
 import { Alert, AlertDescription } from "diametral-ds/alert";
 import { Button } from "diametral-ds/button";
 import { Kbd } from "diametral-ds/kbd";
-import { ArrowUp, Check, Cloud, Paperclip, Sparkles, X } from "lucide-react";
+import { ArrowUp, Check, Cloud, MessageSquarePlus, Paperclip, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { agent, api, upload, type ToolStep } from "../api.ts";
+import { agent, api, tool, upload, type ToolStep } from "../api.ts";
 import { M365Picker, useM365 } from "./M365.tsx";
 
 /** A file attached to the conversation, uploaded to /api/files. */
@@ -14,7 +14,7 @@ interface Attached {
 const ACCEPT = "image/*,.pptx,.pdf,.docx,.xlsx,.csv,.txt,.md";
 const M365_ACCEPT = /\.(pptx|pdf|docx|xlsx|csv|txt|md|png|jpe?g|gif|webp|svg)$/i;
 
-/** An AI SDK model message, as the server returns them; the client keeps the conversation. */
+/** An AI SDK model message, as the server returns them; the server keeps the conversation. */
 export interface ChatMessage {
   role: "user" | "assistant" | "tool" | "system";
   content: string | { type: string; text?: string; toolName?: string; toolCallId?: string; output?: { type: string; value?: unknown } }[];
@@ -28,22 +28,9 @@ export interface AgentResult {
   model: string;
   text: string;
   messages: ChatMessage[];
+  /** A new-deck draft that created a deck: the deck its conversation moved to. */
+  deck_id?: string;
 }
-
-const load = <T = ChatMessage,>(key: string): T[] => {
-  try {
-    return JSON.parse(sessionStorage.getItem(key) ?? "[]");
-  } catch {
-    return [];
-  }
-};
-export const saveChat = (key: string, messages: unknown[]) => {
-  try {
-    sessionStorage.setItem(key, JSON.stringify(messages));
-  } catch {
-    // storage full or blocked: the conversation lives in memory only
-  }
-};
 
 /** A failed tool's error, short: the server's `message` when the error is its JSON. */
 function shortError(error: string, max = 160): string {
@@ -87,10 +74,12 @@ interface ModelChoice {
   model: string;
   label: string | null;
   is_default: boolean;
+  /** the one the agent runs for this viewer by default (their team's, else the workspace's) */
+  your_default?: boolean;
 }
 const PICKED = "calque:model";
 
-/** The configured models, and the one this viewer picked ("" = the workspace default). */
+/** The models this viewer may run, and the one they picked ("" = their default). */
 function useModelChoice() {
   const [models, setModels] = useState<ModelChoice[]>([]);
   const [picked, setPicked] = useState(() => {
@@ -113,8 +102,8 @@ function useModelChoice() {
       // storage blocked: the choice lasts for this page only
     }
   };
-  // a removed model falls back to the default
-  return { models, picked: models.some((m) => m.id === picked) ? picked : "", pick };
+  // a removed (or no longer allowed) model falls back to the default
+  return { models, mine: models.find((m) => m.your_default), picked: models.some((m) => m.id === picked) ? picked : "", pick };
 }
 
 /** The tools the agent called, one row each (a check, or a cross and why); the last one live while it runs. */
@@ -141,9 +130,9 @@ function Trace({ tools, live }: { tools: ToolStep[]; live?: boolean }) {
   );
 }
 
-/** The co-editing chat. `storageKey` keeps the conversation across reloads of this tab. */
+/** The co-editing chat. The server keeps the conversation: the deck's (everyone with access reads
+it, editors continue it), or without `deck_id` the viewer's new-deck draft. */
 export function Chat(props: {
-  storageKey: string;
   pack_id?: string | undefined;
   deck_id?: string | undefined;
   placeholder: string;
@@ -159,15 +148,16 @@ export function Chat(props: {
   /** `conversation`: every message so far, the agent's included */
   onDone?: (r: AgentResult, conversation: ChatMessage[]) => void;
 }) {
-  const [messages, setMessages] = useState<ChatMessage[]>(() => load(props.storageKey));
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // a viewer or commenter reads the deck's conversation, an editor continues it
+  const [writes, setWrites] = useState(true);
   const [text, setText] = useState("");
   const [steps, setSteps] = useState<ToolStep[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [model, setModel] = useState<string | null>(null);
   const choice = useModelChoice();
   const [workflow, setWorkflow] = useState<Ask["workflow"]>();
-  // sent with every turn, so the agent keeps them as context; `pending` go with the next message
-  const [files, setFiles] = useState<Attached[]>(() => load<Attached>(`${props.storageKey}:files`));
+  // go with the next message; the server keeps them with the conversation, as context for the agent
   const [pending, setPending] = useState<Attached[]>([]);
   const [uploading, setUploading] = useState(false);
   const m365 = useM365();
@@ -175,8 +165,27 @@ export function Chat(props: {
   const log = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
-  useEffect(() => saveChat(props.storageKey, messages), [props.storageKey, messages]);
-  useEffect(() => saveChat(`${props.storageKey}:files`, files), [props.storageKey, files]);
+  useEffect(() => {
+    let live = true;
+    tool<{ messages: ChatMessage[]; can_write: boolean }>("get_chat", props.deck_id ? { deck_id: props.deck_id } : {}).then(
+      (r) => live && (setMessages(r.messages), setWrites(r.can_write)),
+      () => live && setMessages([]),
+    );
+    return () => {
+      live = false;
+    };
+  }, [props.deck_id]);
+  const disabled = props.disabled || !writes;
+
+  async function restart() {
+    setError(null);
+    try {
+      await tool("clear_chat", props.deck_id ? { deck_id: props.deck_id } : {});
+      setMessages([]);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
 
   async function attach(list: FileList | null) {
     if (!list?.length) return;
@@ -203,14 +212,13 @@ export function Chat(props: {
   async function send(e?: FormEvent, ask?: Ask) {
     e?.preventDefault();
     const typed = ask?.text ?? text.trim();
-    if (!typed || steps || uploading || props.disabled) return;
+    if (!typed || steps || uploading || disabled) return;
     const note = pending.length ? `\n\nAttached: ${pending.map((f) => f.name).join(", ")}` : "";
     const asked = [...messages, { role: "user" as const, content: typed + note }];
-    const all = [...files, ...pending];
+    const files = pending;
     const flow = ask ? ask.workflow : workflow;
     if (ask) setWorkflow(ask.workflow);
     setMessages(asked);
-    setFiles(all);
     setPending([]);
     if (!ask) setText("");
     setSteps([]);
@@ -218,7 +226,14 @@ export function Chat(props: {
     try {
       const r = await agent<AgentResult>(
         "/api/agent/chat",
-        { messages: asked, pack_id: props.pack_id, deck_id: props.deck_id, workflow: flow, ...(choice.picked ? { model: choice.picked } : {}), ...(all.length ? { files: all.map((f) => f.file_id) } : {}) },
+        {
+          message: typed + note,
+          pack_id: props.pack_id,
+          deck_id: props.deck_id,
+          workflow: flow,
+          ...(choice.picked ? { model: choice.picked } : {}),
+          ...(files.length ? { files: files.map((f) => f.file_id) } : {}),
+        },
         (tools) => setSteps((s) => [...(s ?? []), ...tools]),
       );
       const conversation = [...asked, ...r.messages];
@@ -302,86 +317,95 @@ export function Chat(props: {
           ))}
         </div>
       )}
-      <form className="cq-composer" onSubmit={send}>
-        <textarea
-          ref={input}
-          aria-label="Message"
-          value={text}
-          rows={2}
-          placeholder={props.placeholder}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-              e.preventDefault();
-              void send();
-            }
-          }}
-        />
-        {pending.length > 0 && (
-          <div className="cq-attached">
-            {pending.map((f) => (
-              <Button
-                key={f.file_id}
-                type="button"
-                variant="outline"
-                size="sm"
-                aria-label={`Remove ${f.name}`}
-                onClick={() => setPending((p) => p.filter((x) => x !== f))}
-              >
-                {f.name} <X />
-              </Button>
-            ))}
-          </div>
-        )}
-        <div className="cq-composer-foot">
-          <input ref={picker} type="file" multiple hidden accept={ACCEPT} onChange={(e) => void attach(e.target.files)} />
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-label="Attach files"
-            title="Attach images, PPTX, PDF, Word, Excel, CSV, text or Markdown"
-            disabled={uploading || !!steps || props.disabled}
-            onClick={() => picker.current?.click()}
-          >
-            {uploading ? <span className="cq-spinner" /> : <Paperclip />}
-          </Button>
-          {m365 && (
+      {!writes ? (
+        <p className="cq-hint cq-chat-readonly">Only the deck's editors talk to the agent: you read the conversation.</p>
+      ) : (
+        <form className="cq-composer" onSubmit={send}>
+          <textarea
+            ref={input}
+            aria-label="Message"
+            value={text}
+            rows={2}
+            placeholder={props.placeholder}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                void send();
+              }
+            }}
+          />
+          {pending.length > 0 && (
+            <div className="cq-attached">
+              {pending.map((f) => (
+                <Button
+                  key={f.file_id}
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  aria-label={`Remove ${f.name}`}
+                  onClick={() => setPending((p) => p.filter((x) => x !== f))}
+                >
+                  {f.name} <X />
+                </Button>
+              ))}
+            </div>
+          )}
+          <div className="cq-composer-foot">
+            <input ref={picker} type="file" multiple hidden accept={ACCEPT} onChange={(e) => void attach(e.target.files)} />
             <Button
               type="button"
               variant="ghost"
               size="icon"
-              aria-label="From Microsoft 365"
-              title="Attach a file from OneDrive or SharePoint"
-              disabled={uploading || !!steps || props.disabled}
-              onClick={() => setPicking(true)}
+              aria-label="Attach files"
+              title="Attach images, PPTX, PDF, Word, Excel, CSV, text or Markdown"
+              disabled={uploading || !!steps || disabled}
+              onClick={() => picker.current?.click()}
             >
-              <Cloud />
+              {uploading ? <span className="cq-spinner" /> : <Paperclip />}
             </Button>
-          )}
-          {props.footer}
-          {choice.models.length > 1 && (
-            <select className="cq-select cq-model-pick" aria-label="AI model" value={choice.picked} onChange={(e) => choice.pick(e.target.value)}>
-              <option value="">Default model</option>
-              {choice.models.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.model}
-                  {m.label ? ` (${m.label})` : ""}
-                  {m.is_default ? " · default" : ""}
-                </option>
-              ))}
-            </select>
-          )}
-          {model && <span className="cq-hint">Model: {model}</span>}
-          <span className="cq-spacer" />
-          <span className="cq-hint cq-keys">
-            <Kbd>↵</Kbd> send · <Kbd>⇧↵</Kbd> new line
-          </span>
-          <Button type="submit" size="icon" aria-label="Send" disabled={!!steps || uploading || props.disabled || !text.trim()}>
-            <ArrowUp />
-          </Button>
-        </div>
-      </form>
+            {m365 && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label="From Microsoft 365"
+                title="Attach a file from OneDrive or SharePoint"
+                disabled={uploading || !!steps || disabled}
+                onClick={() => setPicking(true)}
+              >
+                <Cloud />
+              </Button>
+            )}
+            {props.footer}
+            {choice.models.length > 1 && (
+              <select className="cq-select cq-model-pick" aria-label="AI model" value={choice.picked} onChange={(e) => choice.pick(e.target.value)}>
+                <option value="">Default model{choice.mine ? ` (${choice.mine.model})` : ""}</option>
+                {choice.models.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.model}
+                    {m.label ? ` (${m.label})` : ""}
+                    {m.is_default ? " · default" : ""}
+                  </option>
+                ))}
+              </select>
+            )}
+            {model && <span className="cq-hint">Model: {model}</span>}
+            {messages.length > 0 && (
+              <Button type="button" variant="ghost" size="icon" aria-label="New conversation" title="Start the conversation over" disabled={!!steps || disabled} onClick={() => void restart()}>
+                <MessageSquarePlus />
+              </Button>
+            )}
+            <span className="cq-spacer" />
+            <span className="cq-hint cq-keys">
+              <Kbd>↵</Kbd> send · <Kbd>⇧↵</Kbd> new line
+            </span>
+            <Button type="submit" size="icon" aria-label="Send" disabled={!!steps || uploading || disabled || !text.trim()}>
+              <ArrowUp />
+            </Button>
+          </div>
+        </form>
+      )}
       {picking && m365 && (
         <M365Picker
           status={m365}

@@ -6,6 +6,7 @@ import { DeckSpec, PatchOp, Slide } from "@calque/deckspec";
 import { compliance } from "./compliance.ts";
 import type { Access } from "./access.ts";
 import { audit } from "./audit.ts";
+import { clearChat, getChat } from "./chats.ts";
 import type { Db } from "./db.ts";
 import type { Decks, Finding, Role } from "./decks.ts";
 import { REPO } from "./engine.ts";
@@ -16,8 +17,9 @@ import type { Models } from "./models.ts";
 import { importPack, listPacks, type User } from "./packs.ts";
 import { packPortal } from "./portal.ts";
 import { userToken } from "./preview.ts";
-import { approvalOf, recordExport, setApproval } from "./review.ts";
+import { approvalConfig, approvalOf, recordExport, setApproval, setKind } from "./review.ts";
 import { resetLink, setGeneralAccess, share, shares, transfer, unshare } from "./shares.ts";
+import { usageReport } from "./usage.ts";
 
 export interface App {
   db: Db;
@@ -110,6 +112,9 @@ async function openDeck(app: App, user: User, id: string, v?: number, render = t
     title: deck.title,
     pack_id: deck.pack_id,
     role: deck.role,
+    // its type, and the types its pack offers (set_deck_kind)
+    kind: deck.kind,
+    kinds: (await approvalConfig(deck.packDir)).kinds,
     version: at,
     head: deck.head,
     versions: await app.decks.versions(id),
@@ -271,13 +276,15 @@ export const TOOLS = {
 
   add_comment: tool({
     title: "Comment",
-    description: "Comment on a slide, or on one shape of it (shape_id from the shape map); with parent_id, reply in that comment's thread.",
+    description:
+      "Comment on a slide, or on one shape of it (shape_id from the shape map); with parent_id, reply in that comment's thread. `type` required: the deck cannot be approved until the thread is resolved.",
     input: z.object({
       deck_id: deckId,
       slide_id: z.string().optional(),
       shape_id: z.number().int().optional(),
       parent_id: z.number().int().optional().describe("The comment this replies to (a reply sits on its slide and shape)."),
       text: z.string().min(1),
+      type: z.enum(["suggestion", "required"]).optional().describe("A new thread's weight (default suggestion); a required one blocks approval until resolved."),
     }),
     appOnly: true,
     role: "commenter",
@@ -287,7 +294,7 @@ export const TOOLS = {
   list_comments: tool({
     title: "List comments",
     description:
-      "Comment threads left on the deck (in the preview or the in-chat UI), each anchored on a slide id and shape_id, with its status (open or resolved), author (id and author_name) and replies (read them: they refine the request). Apply them with patch_deck and pass their ids in `resolves`.",
+      "Comment threads left on the deck (in the preview or the in-chat UI), each anchored on a slide id and shape_id, with its status (open or resolved), type (suggestion, or required: it blocks approval until resolved), author (id and author_name) and replies (read them: they refine the request). Apply them with patch_deck and pass their ids in `resolves`.",
     input: z.object({ deck_id: deckId, status: z.enum(["open", "resolved", "all"]).optional().default("open") }),
     readOnly: true,
     role: "viewer",
@@ -389,7 +396,7 @@ export const TOOLS = {
   set_approval: tool({
     title: "Set approval status",
     description:
-      "Only on packs with approval on (open_deck's `approval.enabled`). Move the deck to in_review (an editor requests a review of a draft), approved (the pack owner or an admin, on a deck in review) or back to draft (the approver sends it back, or an editor withdraws it). Never needed to export.",
+      "Only on decks with approval on (open_deck's `approval.enabled`: the pack turns it on for every deck or for the deck's type). Move the deck to in_review (an editor requests a review of a draft), approved (the pack owner or an admin, on a deck in review with no open required comment) or back to draft (the approver sends it back, or an editor withdraws it). Never needed to export.",
     input: z.object({
       deck_id: deckId,
       status: z.enum(["draft", "in_review", "approved"]),
@@ -397,6 +404,15 @@ export const TOOLS = {
     }),
     role: "viewer",
     run: (app, user, a) => setApproval(app.decks, user, a.deck_id, a.status, a.note),
+  }),
+
+  set_deck_kind: tool({
+    title: "Set deck type",
+    description:
+      "Editor access. The deck's type, one of open_deck's `kinds` (e.g. internal, external, marketing), or null to clear it. A pack may require approval for some types only: the result says whether this deck now needs it.",
+    input: z.object({ deck_id: deckId, kind: z.string().min(1).nullable() }),
+    role: "editor",
+    run: (app, user, a) => setKind(app.decks, user, a.deck_id, a.kind),
   }),
 
   export_pdf: tool({
@@ -567,6 +583,33 @@ export const TOOLS = {
     input: z.object({ pack_id: z.string().optional().describe("One pack; default: every pack you manage.") }),
     readOnly: true,
     run: (app, user, a) => compliance(app.db, app.decks, user, a.pack_id),
+  }),
+
+  get_chat: tool({
+    title: "Agent conversation",
+    description:
+      "The web agent's conversation on a deck (anyone who can open it reads it; editors continue it), or without deck_id your new-deck draft: its messages, the attached file ids, and whether you may continue it (`can_write`).",
+    input: z.object({ deck_id: deckId.optional() }),
+    appOnly: true,
+    readOnly: true,
+    run: (app, user, a) => getChat(app.db, app.decks, user, a.deck_id),
+  }),
+
+  clear_chat: tool({
+    title: "Clear agent conversation",
+    description: "Start the web agent's conversation on a deck over (editor access), or your new-deck draft (without deck_id).",
+    input: z.object({ deck_id: deckId.optional() }),
+    appOnly: true,
+    run: (app, user, a) => clearChat(app.db, app.decks, user, a.deck_id),
+  }),
+
+  usage_report: tool({
+    title: "AI usage report",
+    description:
+      "Admin only: the web agent's runs and tokens (input, output) and time, summed per user, per team and per model, between `since` (default 30 days ago) and `until` (default now).",
+    input: z.object({ since: z.string().optional().describe("ISO date or time."), until: z.string().optional().describe("ISO date or time.") }),
+    readOnly: true,
+    run: (app, user, a) => usageReport(app.db, user, a),
   }),
 
   revoke_sessions: tool({

@@ -8,7 +8,11 @@ import { sealer } from "./seal.ts";
 export { Forbidden, isAdmin };
 
 /** The web app's AI models (PipesHub pattern): several providers, keys encrypted at rest, one default.
-Workspace-wide; only admins change them. Keys and custom header values never leave the server. */
+Only admins change them. Keys and custom header values never leave the server.
+
+Per team (S9): a model restricted to teams runs only for their members (and admins); a team may
+have its own default. The agent runs the model asked for if the user may use it, else their first
+team's default (in the order of their teams), else the workspace default. */
 
 export class InvalidModel extends Error {}
 
@@ -23,7 +27,12 @@ interface Row {
   headers: string | null; // sealed JSON
   is_default: boolean;
   updated_by: string;
+  /** the teams it is restricted to; []: everyone */
+  teams: string[];
 }
+
+/** Whether `user` may run model `r`: open to everyone, to one of their teams, or they are an admin. */
+const usable = (r: Pick<Row, "teams">, user?: User) => !user || !r.teams.length || isAdmin(user) || r.teams.some((t) => user.teams.includes(t));
 
 export interface ModelInput {
   /** edit this configuration; unset: a new one */
@@ -40,6 +49,8 @@ export interface ModelInput {
   api_version?: string | undefined;
   managed_identity?: boolean | undefined;
   default?: boolean | undefined;
+  /** restrict it to these teams ([]: everyone); unset keeps the stored ones */
+  teams?: string[] | undefined;
 }
 
 /** The egress policy (egress.ts) on the endpoint the server will call: the base URL, else the Azure
@@ -96,10 +107,12 @@ export class Models {
     return Object.entries(PROVIDERS).map(([id, p]) => ({ id, ...p }));
   }
 
-  /** Configured models, without their keys nor their header values. */
-  async list() {
+  /** Configured models, without their keys nor their header values. With `user`: only the ones
+  they may run, `your_default` marking the one the agent runs for them by default. */
+  async list(user?: User) {
     const { rows } = await this.db.query<Row>("select * from models order by id");
-    return rows.map((r) => {
+    const mine = user ? await this.defaultFor(user).then((r) => r?.id) : undefined;
+    return rows.filter((r) => usable(r, user)).map((r) => {
       const o: ModelOptions = r.options ? JSON.parse(r.options) : {};
       return {
         id: r.id,
@@ -113,8 +126,61 @@ export class Models {
         api_version: o.apiVersion ?? null,
         managed_identity: o.managedIdentity === true,
         is_default: r.is_default,
+        teams: r.teams,
+        ...(user ? { your_default: r.id === mine } : {}),
       };
     });
+  }
+
+  /** Each team's default model: {team: model id}. */
+  async teamDefaults(): Promise<Record<string, string>> {
+    const { rows } = await this.db.query<{ team: string; model_id: string }>("select team, model_id from model_team_defaults order by team");
+    return Object.fromEntries(rows.map((r) => [r.team, r.model_id]));
+  }
+
+  /** Restrict model `id` to `teams` ([]: everyone). Team defaults on it for other teams are dropped. */
+  async restrict(user: User, id: string, teams: string[]) {
+    if (!isAdmin(user)) throw new Forbidden(`only ${ADMIN_TEAM} configure models`);
+    if (!(await this.row(id))) throw new NotFound(`no model ${JSON.stringify(id)}`);
+    const list = [...new Set(teams.map((t) => t.trim()).filter(Boolean))];
+    await this.db.query("update models set teams = $2 where id = $1", [id, JSON.stringify(list)]);
+    if (list.length) await this.db.query("delete from model_team_defaults where model_id = $1 and not (team = any($2::text[]))", [id, list]);
+    await audit(this.db, user, "restrict", "model", id, { teams: list });
+    return (await this.list()).find((m) => m.id === id);
+  }
+
+  /** Team `team`'s default model: `id` (one the team may use), or null to fall back to the workspace's. */
+  async setTeamDefault(user: User, team: string, id: string | null) {
+    if (!isAdmin(user)) throw new Forbidden(`only ${ADMIN_TEAM} configure models`);
+    if (id === null) {
+      await this.db.query("delete from model_team_defaults where team = $1", [team]);
+    } else {
+      const r = await this.row(id);
+      if (!r) throw new NotFound(`no model ${JSON.stringify(id)}`);
+      if (r.teams.length && !r.teams.includes(team)) throw new InvalidModel(`model ${id} is restricted to ${r.teams.join(", ")}: not ${team}`);
+      await this.db.query(
+        `insert into model_team_defaults (team, model_id, updated_by) values ($1, $2, $3)
+         on conflict (team) do update set model_id = $2, updated_by = $3, updated_at = now()`,
+        [team, id, user.id],
+      );
+    }
+    await audit(this.db, user, "team_default", "model", id, { team });
+    return { team, model_id: id };
+  }
+
+  /** The model the agent runs for `user` by default: their first team's default, else the workspace
+  default, if they may run it. */
+  private async defaultFor(user: User): Promise<Row | undefined> {
+    if (user.teams.length) {
+      const { rows } = await this.db.query<Row & { team: string }>(
+        "select m.*, d.team from model_team_defaults d join models m on m.id = d.model_id where d.team = any($1::text[])",
+        [user.teams],
+      );
+      const first = rows.filter((r) => usable(r, user)).sort((a, b) => user.teams.indexOf(a.team) - user.teams.indexOf(b.team))[0];
+      if (first) return first;
+    }
+    const d = await this.defaultRow();
+    return d && usable(d, user) ? d : undefined;
   }
 
   private async row(id: string): Promise<Row | undefined> {
@@ -146,6 +212,8 @@ export class Models {
     }
     const id = input.id ?? (await this.newId(input));
     const prev = await this.row(id);
+    // a restriction applies before the default: an admin choosing both gets the team check below
+    const teams = input.teams ? [...new Set(input.teams.map((t) => t.trim()).filter(Boolean))] : (prev?.teams ?? []);
     const sealed = input.api_key ? this.seal(input.api_key) : (prev?.api_key ?? null);
     const headers = input.headers ? (Object.keys(input.headers).length ? this.seal(JSON.stringify(input.headers)) : null) : (prev?.headers ?? null);
     const opts = options(input);
@@ -156,19 +224,20 @@ export class Models {
     } catch (e) {
       throw new InvalidModel(`${PROVIDERS[input.provider].label} refused the configuration: ${(e as Error).message}`);
     }
-    await this.save(id, { ...row, label }, user.id);
+    await this.save(id, { ...row, label, teams }, user.id);
     await audit(this.db, user, prev ? "update" : "add", "model", id, { provider: input.provider, model: input.model, base_url: input.base_url ?? null, new_key: !!input.api_key });
     if (input.default || !(await this.defaultRow())) await this.setDefault(user, id);
     return (await this.list()).find((m) => m.id === id);
   }
 
-  private async save(id: string, r: Pick<Row, "provider" | "model" | "base_url" | "api_key" | "label" | "options" | "headers">, by: string) {
+  private async save(id: string, r: Pick<Row, "provider" | "model" | "base_url" | "api_key" | "label" | "options" | "headers"> & { teams?: string[] }, by: string) {
     await this.db.query(
-      `insert into models (id, provider, model, base_url, api_key, label, options, headers, updated_by) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      `insert into models (id, provider, model, base_url, api_key, label, options, headers, updated_by, teams) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, coalesce($10, '[]'::jsonb))
        on conflict (id) do update set provider = $2, model = $3, base_url = $4, api_key = $5, label = $6, options = $7, headers = $8,
-       updated_by = $9, updated_at = now()`,
-      [id, r.provider, r.model, r.base_url, r.api_key, r.label, r.options, r.headers, by],
+       updated_by = $9, updated_at = now(), teams = coalesce($10, models.teams)`,
+      [id, r.provider, r.model, r.base_url, r.api_key, r.label, r.options, r.headers, by, r.teams ? JSON.stringify(r.teams) : null],
     );
+    if (r.teams?.length) await this.db.query("delete from model_team_defaults where model_id = $1 and not (team = any($2::text[]))", [id, r.teams]);
   }
 
   private async defaultRow(): Promise<Row | undefined> {
@@ -193,10 +262,15 @@ export class Models {
       await this.db.query("update models set is_default = true where id = (select id from models order by updated_at desc, id limit 1)");
   }
 
-  /** The model to run: `id`, else the default. Read on every call, so a new default needs no restart. */
-  async resolve(id?: string): Promise<ModelConfig & { id: string }> {
-    const r = id ? await this.row(id) : await this.defaultRow();
-    if (!r) throw new NotFound(id ? `no model ${JSON.stringify(id)}` : "no AI model configured: add one in Settings > AI Models");
+  /** The model to run for `user`: `id` if they may run it, else their default (defaultFor). Read on
+  every call, so a new default needs no restart. Without `user`: `id`, else the workspace default. */
+  async resolve(id?: string, user?: User): Promise<ModelConfig & { id: string }> {
+    const r = id ? await this.row(id) : user ? await this.defaultFor(user) : await this.defaultRow();
+    if (id && r && !usable(r, user)) throw new Forbidden(`model ${JSON.stringify(id)} is restricted to other teams`);
+    if (!r) {
+      const none = user && (await this.defaultRow()) ? "no AI model available to your teams: ask an admin (Settings > AI Models)" : "no AI model configured: add one in Settings > AI Models";
+      throw new NotFound(id ? `no model ${JSON.stringify(id)}` : none);
+    }
     await egress(r.provider, r.base_url, r.options ? (JSON.parse(r.options) as ModelOptions) : {});
     return { id: r.id, ...this.config(r) };
   }

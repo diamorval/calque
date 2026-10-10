@@ -6,7 +6,8 @@ import type { User } from "./packs.ts";
 import type { App } from "./tools.ts";
 
 /** CALQUE_RETENTION_DAYS (off by default): decks untouched for that many days are deleted like a
-deck the owner deletes, and uploads older than that are removed. The audit log is kept. */
+deck the owner deletes (their agent conversation with them), and uploads, new-deck chat drafts
+untouched and usage rows older than that are removed. The audit log is kept. */
 export const RETENTION: User = { id: "retention", teams: [], local: true };
 
 export function retentionDays(env = process.env): number | undefined {
@@ -47,7 +48,9 @@ export async function purge(app: App, days: number, now = new Date()) {
       stray++;
     }
   }
-  const out = { decks: rows.length, files: files.rows.length + stray };
-  if (out.decks || out.files) await audit(app.db, RETENTION, "purge", "deck", null, { days, ...out });
+  const drafts = await app.db.query<{ id: string }>("delete from chats where deck_id is null and updated_at < $1 returning id", [cutoff.toISOString()]);
+  const usage = await app.db.query<{ id: string }>("delete from usage where at < $1 returning id", [cutoff.toISOString()]);
+  const out = { decks: rows.length, files: files.rows.length + stray, chats: drafts.rows.length, usage: usage.rows.length };
+  if (out.decks || out.files || out.chats || out.usage) await audit(app.db, RETENTION, "purge", "deck", null, { days, ...out });
   return out;
 }

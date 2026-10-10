@@ -16,7 +16,12 @@ import { bySeverity, type Finding, lintSummary } from "../lint.ts";
 import { navigate } from "../nav.ts";
 import { ago, Dialog, Spinner } from "../ui.tsx";
 
-type Deck = DeckView & { versions: { version: number; note: string; author: string; author_name: string | null; created_at: string }[] };
+type Deck = DeckView & {
+  versions: { version: number; note: string; author: string; author_name: string | null; created_at: string }[];
+  /** the deck's type, and the types its pack offers (approval may apply to some only) */
+  kind?: string | null;
+  kinds?: string[];
+};
 const APPROVAL = { draft: "Draft", in_review: "In review", approved: "Approved" } as const;
 
 const EDITS = ["Tighten every title to one line", "Add an agenda slide after the cover", "Review the deck against the brand pack"];
@@ -128,9 +133,33 @@ export function Editor({ id }: { id: string }) {
             <Button variant="outline" onClick={() => navigate(`/present/${id}`)}>
               <Play /> Present
             </Button>
+            {edits && !!deck.kinds?.length ? (
+              <select
+                className="cq-select"
+                aria-label="Deck type"
+                title="The deck's type: the brand pack may require approval for some types"
+                value={deck.kind ?? ""}
+                disabled={busy !== null}
+                onChange={(e) => void run("Setting the deck type", () => tool("set_deck_kind", { deck_id: id, kind: e.target.value || null }))}
+              >
+                <option value="">No type</option>
+                {deck.kinds.map((k) => (
+                  <option key={k} value={k}>
+                    {k}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              deck.kind && <Tag>{deck.kind}</Tag>
+            )}
             {approval && (
               <>
                 <Tag tone={approval.status === "approved" ? "success" : approval.status === "in_review" ? "warning" : "neutral"}>{APPROVAL[approval.status]}</Tag>
+                {approval.status === "in_review" && !!approval.blocking?.length && (
+                  <Tag tone="danger" title="Required comments block approval until they are resolved">
+                    {approval.blocking.length} required comment{approval.blocking.length > 1 ? "s" : ""} open
+                  </Tag>
+                )}
                 {approval.can_request && (
                   <Button variant="ghost" onClick={() => setApproval("in_review", "Requesting review")}>
                     <Send /> Request review
@@ -186,25 +215,23 @@ export function Editor({ id }: { id: string }) {
             )}
           </>
         }
+        // the deck's conversation: everyone with access reads it, editors continue it
         agent={
-          edits && (
-            <Chat
-              storageKey={`chat:${id}`}
-              deck_id={id}
-              pack_id={deck.pack_id}
-              placeholder="Ask for a change: reword, add a slide, review…"
-              suggestions={EDITS}
-              ask={ask}
-              empty={
-                <div className="cq-empty">
-                  <Sparkles />
-                  <strong>Edit with the agent</strong>
-                  <span>Ask for a change in your words. Comments on the slides go through the agent too.</span>
-                </div>
-              }
-              onDone={() => void reload()}
-            />
-          )
+          <Chat
+            deck_id={id}
+            pack_id={deck.pack_id}
+            placeholder="Ask for a change: reword, add a slide, review…"
+            suggestions={EDITS}
+            ask={ask}
+            empty={
+              <div className="cq-empty">
+                <Sparkles />
+                <strong>Edit with the agent</strong>
+                <span>Ask for a change in your words. Comments on the slides go through the agent too.</span>
+              </div>
+            }
+            onDone={() => void reload()}
+          />
         }
         tabs={[
           {

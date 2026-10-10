@@ -304,9 +304,19 @@
       "pattern": "^[a-z0-9][a-z0-9-]*$"
     },
     "approval": {
-      "description": "Opt-in review: decks on this pack get an approval status (draft, in review, approved), approved by the pack owner or an admin. Never blocks an export. Default off.",
-      "type": "boolean",
+      "description": "Opt-in review: decks on this pack get an approval status (draft, in review, approved), approved by the pack owner or an admin. true: every deck; a list of deck types (e.g. [external, marketing]): only the decks of those types. Never blocks an export. Default off.",
+      "oneOf": [
+        { "type": "boolean" },
+        { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" }, "uniqueItems": true }
+      ],
       "default": false
+    },
+    "deck_kinds": {
+      "description": "The deck types offered on this pack (a deck's type decides whether it goes through approval). Default: internal, external, marketing.",
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+      "uniqueItems": true,
+      "minItems": 1
     },
     "test": {
       "description": "A test fixture: the server seeds it only when CALQUE_TEST_PACKS=1, never in a client workspace. Default off.",

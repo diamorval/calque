@@ -170,7 +170,42 @@ create table if not exists deck_lint (
   at timestamptz not null default now(),
   primary key (deck_id, version)
 );
-alter table decks add column if not exists owner_teams jsonb not null default '[]';`;
+alter table decks add column if not exists owner_teams jsonb not null default '[]';
+-- review.ts: a deck's type (pack.yaml approval: [external, …] turns approval on per type), and a comment's:
+-- a required one blocks approval until resolved
+alter table decks add column if not exists kind text;
+alter table comments add column if not exists type text not null default 'suggestion' check (type in ('suggestion', 'required'));
+-- chats.ts: the web agent's conversation, one per deck (deck_id) or a user's new-deck draft (owner)
+create table if not exists chats (
+  id text primary key,
+  deck_id uuid references decks(id),
+  owner text not null,
+  messages jsonb not null default '[]',
+  files jsonb not null default '[]',
+  updated_at timestamptz not null default now()
+);
+-- models.ts: a model restricted to teams ([]: everyone), and a team's default model
+alter table models add column if not exists teams jsonb not null default '[]';
+create table if not exists model_team_defaults (
+  team text primary key,
+  model_id text not null references models(id) on delete cascade,
+  updated_by text not null,
+  updated_at timestamptz not null default now()
+);
+-- usage.ts: one row per agent run, kept like uploads (CALQUE_RETENTION_DAYS)
+create table if not exists usage (
+  id bigserial primary key,
+  at timestamptz not null default now(),
+  user_id text not null,
+  teams jsonb not null default '[]',
+  model_id text not null,
+  run text not null,
+  deck_id text,
+  input_tokens int not null default 0,
+  output_tokens int not null default 0,
+  duration_ms int not null default 0
+);
+create index if not exists usage_at on usage (at);`;
 
 /** Postgres when `url` is a postgres:// URL, else embedded PGlite (a data dir, or in memory). */
 export async function openDb(url = process.env.DATABASE_URL): Promise<Db> {

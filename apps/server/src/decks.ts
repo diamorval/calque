@@ -59,6 +59,8 @@ export interface Comment {
   /** The author's display name (the token's `name` claim), null for a guest or a nameless user. */
   author_name: string | null;
   status: "open" | "resolved";
+  /** A thread's weight: a suggestion, or required (blocks approval until resolved, review.ts). */
+  type: "suggestion" | "required";
   /** A reply's thread: the comment it answers (replies have no status of their own). */
   parent_id: number | null;
   created_at: string;
@@ -83,6 +85,8 @@ interface DeckRow {
   approval: "draft" | "in_review" | "approved";
   /** The pack release the deck was created on. */
   pack_version: number | null;
+  /** The deck's type (internal, external, marketing…): approval may apply to some types only (review.ts). */
+  kind: string | null;
 }
 
 /** What an import recognised: slides kept drawn, imported as clones, demoted (and why), and
@@ -229,10 +233,11 @@ export class Decks {
     const grants = await granted(this.db, user, rows.filter((r) => r.owner !== user.id).map((r) => r.id));
     return rows
       .filter((r) => seen.has(r.pack_id) && matches(r))
-      .map(({ id, pack_id, pack_version, owner, title, name, head, updated_at }) => ({
+      .map(({ id, pack_id, pack_version, owner, title, name, head, updated_at, kind }) => ({
         id,
         pack_id,
         pack_version,
+        kind,
         owner,
         title: name ?? title,
         head,
@@ -680,7 +685,7 @@ export class Decks {
     return { version: v, path: out };
   }
 
-  /** Erase deck `id`: its versions, comments, shares and every file under its folder (built PPTX,
+  /** Erase deck `id`: its versions, comments, shares, agent conversation and every file under its folder (built PPTX,
   renders, imported base). The owner, or a signed-in admin. The audit log keeps that it existed. */
   remove(user: User, id: string) {
     return this.serial(id, () => this.removeNow(user, id));
@@ -693,7 +698,7 @@ export class Decks {
     const admin = !user.anonymous && isAdmin(user);
     if (!row || (!role && !admin)) throw new NotFound(`no deck ${JSON.stringify(id)}`);
     if (role !== "owner" && !admin) throw new Forbidden(`owner access needed on deck ${id}`);
-    for (const t of ["comments", "deck_shares", "deck_lint", "deck_versions"]) await this.db.query(`delete from ${t} where deck_id = $1`, [id]);
+    for (const t of ["comments", "deck_shares", "deck_lint", "chats", "deck_versions"]) await this.db.query(`delete from ${t} where deck_id = $1`, [id]);
     await this.db.query("delete from decks where id = $1", [id]);
     await rm(this.dir(id), { recursive: true, force: true });
     for (const k of this.renders.keys()) if (k.startsWith(`${id}@`)) this.renders.delete(k);
@@ -701,8 +706,13 @@ export class Decks {
     return { deck_id: id, deleted: true };
   }
 
-  /** A comment on a slide (or one shape), or with `parent_id` a reply in that comment's thread. */
-  async addComment(user: User, id: string, c: { slide_id?: string | undefined; shape_id?: number | null | undefined; text: string; parent_id?: number | undefined }) {
+  /** A comment on a slide (or one shape), or with `parent_id` a reply in that comment's thread.
+  `type` "required" marks a thread that blocks approval until resolved (a reply is never required). */
+  async addComment(
+    user: User,
+    id: string,
+    c: { slide_id?: string | undefined; shape_id?: number | null | undefined; text: string; parent_id?: number | undefined; type?: Comment["type"] | undefined },
+  ) {
     const deck = await this.deck(user, id, "commenter");
     let anchor = { slide_id: c.slide_id, shape_id: c.shape_id ?? null };
     if (c.parent_id !== undefined) {
@@ -714,9 +724,9 @@ export class Decks {
     }
     if (!anchor.slide_id) throw new Error("a comment needs a slide_id (or a parent_id to reply)");
     const { rows } = await this.db.query<Comment>(
-      `insert into comments (deck_id, version, slide_id, shape_id, text, author, author_name, parent_id) values ($1, $2, $3, $4, $5, $6, $7, $8)
+      `insert into comments (deck_id, version, slide_id, shape_id, text, author, author_name, parent_id, type) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        returning *`,
-      [id, deck.head, anchor.slide_id, anchor.shape_id, c.text, user.anonymous ? "guest" : user.id, nameOf(user), c.parent_id ?? null],
+      [id, deck.head, anchor.slide_id, anchor.shape_id, c.text, user.anonymous ? "guest" : user.id, nameOf(user), c.parent_id ?? null, c.parent_id === undefined ? (c.type ?? "suggestion") : "suggestion"],
     );
     return rows[0] as Comment;
   }

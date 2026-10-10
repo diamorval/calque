@@ -107,6 +107,10 @@
 .cq-row-actions > * + * { margin-left: 8px; }
 .cq-form { display: grid; gap: 18px; padding: 20px; align-content: start; max-width: 560px; }
 .cq-columns { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+.cq-section { display: grid; gap: 10px; }
+.cq-section h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 16px; font-weight: 600; }
+.cq-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.cq-chat-readonly { padding: 12px 16px; border-top: 1px solid var(--cq-line); }
 .cq-columns .cq-form { max-width: none; }
 
 .cq-deck-grid { list-style: none; margin: 0; padding: 0; display: grid; gap: 20px; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }

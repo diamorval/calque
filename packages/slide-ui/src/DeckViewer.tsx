@@ -37,6 +37,8 @@ export function DeckViewer(props: {
   const [current, setCurrent] = useState(0);
   const [shape, setShape] = useState<number | null>(null);
   const [text, setText] = useState("");
+  // a required comment blocks the deck's approval until resolved
+  const [required, setRequired] = useState(false);
   const [busy, setBusy] = useState(false);
   const [outline, setOutline] = useState(false);
   // open comments win the first look: after a reload, Apply and the threads are where they were
@@ -73,8 +75,9 @@ export function DeckViewer(props: {
     if (!text.trim() || !slide || !props.onComment) return;
     setBusy(true);
     try {
-      await props.onComment({ slide_id: slide.id, ...(shape !== null ? { shape_id: shape } : {}), text: text.trim() });
+      await props.onComment({ slide_id: slide.id, ...(shape !== null ? { shape_id: shape } : {}), text: text.trim(), ...(required ? { type: "required" as const } : {}) });
       setText("");
+      setRequired(false);
       setTab("comments");
     } finally {
       setBusy(false);
@@ -189,6 +192,9 @@ export function DeckViewer(props: {
                     }
                   }}
                 />
+                <label className="cq-comment-type" title="A required comment blocks the deck's approval until it is resolved">
+                  <input type="checkbox" checked={required} onChange={(e) => setRequired(e.target.checked)} /> Required
+                </label>
                 <button type="submit" className="cq-btn" data-variant="primary" data-size="sm" disabled={busy || !text.trim()}>
                   Comment
                 </button>
@@ -308,6 +314,7 @@ function Comments(props: {
                     <button type="button" aria-current={slide.id === props.current && c.shape_id === props.selected && c.shape_id !== null} onClick={() => props.onPick(slide.id, c.shape_id)}>
                       <span className="cq-comment-meta">
                         <b>{who(c)}</b>
+                        {c.type === "required" && <span className="cq-required">Required</span>}
                         <span>·</span>
                         {s ? (
                           <span>

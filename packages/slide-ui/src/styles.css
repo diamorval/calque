@@ -323,6 +323,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .cq-resolved li { display: grid; gap: 2px; padding: 8px 10px; border: 1px solid var(--cq-line); border-left: 3px solid var(--cq-ok); border-radius: var(--cq-r-sm); color: var(--cq-muted); }
 .cq-resolved li .cq-btn { justify-self: start; }
 .cq-approval { font-weight: 600; }
+/* a required comment blocks approval; a suggestion never does */
+.cq-comment-type { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--cq-muted); cursor: pointer; white-space: nowrap; }
+.cq-required { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: var(--cq-danger); background: var(--cq-danger-soft); border-radius: 4px; padding: 0 5px; }
 .cq-approval[data-status="in_review"] { color: var(--cq-note); }
 .cq-approval[data-status="approved"] { color: var(--cq-ok); }
 .cq-empty { display: grid; justify-items: center; gap: 8px; padding: 40px 20px; text-align: center; color: var(--cq-muted); }

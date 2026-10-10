@@ -37,7 +37,7 @@ node apps/server/src/stdio.ts          # stdio, for a local MCP client (bridge t
 | `CALQUE_M365_CLIENT_SECRET` | unset: public client | its secret, for a confidential (Web) client |
 | `CALQUE_M365_TENANT` | `organizations` | tenant id or domain to sign in against (`organizations`: any work account) |
 | `CALQUE_M365_AUTHORITY` / `_GRAPH` | `https://login.microsoftonline.com` / `https://graph.microsoft.com/v1.0` | sign-in and Graph endpoints (national clouds, tests) |
-| `CALQUE_RETENTION_DAYS` | unset: keep everything | delete decks untouched for that many days and uploads older than that, at start and daily (the audit log is kept) |
+| `CALQUE_RETENTION_DAYS` | unset: keep everything | delete decks untouched for that many days (with their agent conversation), and uploads, new-deck chat drafts and usage rows older than that, at start and daily (the audit log is kept) |
 | `CALQUE_RATE_LIMIT` | on | `off` lifts the per-minute limits on `/auth/*` (30 per address), agent runs (30 per user) and model tests (10 per user) |
 | `CALQUE_TRUST_PROXY` | unset | `1`: rate-limit by the first `X-Forwarded-For` hop (behind your reverse proxy) instead of the socket address |
 | `CALQUE_MODEL_HOSTS` | unset: any host | allow-list of model endpoint hosts (`api.example.com,.openai.azure.com`); metadata addresses are always refused ([security](../../docs/security.md)) |
@@ -185,12 +185,19 @@ Every grant, revocation, general access change, link reset and transfer is logge
 - **Authors**: versions and comments keep the author's id (`author`, the token's `sub`) and store
   their display name (`author_name`, the `name` claim of the session or bearer token); the UIs show
   the name. Comments through an anonymous link stay `guest`.
-- **Approval** (opt-in, M9): only on packs whose `pack.yaml` sets `approval: true` (default off, so
-  consultants are never blocked). A deck is `draft`, `in_review` or `approved` (`set_approval`,
+- **Approval** (opt-in, M9): only on packs whose `pack.yaml` sets `approval: true` (every deck), or
+  `approval: [external, marketing]` (only the decks of those types; default off, so consultants are
+  never blocked). A deck's type is set by an editor with `set_deck_kind {deck_id, kind}` (the
+  Deck type menu in the editor), one of the pack's `deck_kinds` (default internal, external,
+  marketing; `open_deck` returns `kind` and `kinds`). A deck is `draft`, `in_review` or `approved` (`set_approval`,
   status and allowed moves in `open_deck`'s `approval`). An editor requests the review and may
   withdraw it; the approver is the pack's owner or an admin, with at least view access to the deck
   (share it with them), who approves or sends it back to draft. A new version of an approved deck
   is a draft again. Approval never gates an export. Each move is logged in the `audit` table.
+- **Comment types**: `add_comment {type}` starts a thread as a `suggestion` (default) or `required`
+  (the Required box in the comment form). An open required thread blocks approving the deck
+  (`approval.blocking` lists them, `can_approve` is false) until it is resolved; replies are never
+  required.
 - **Export gate** (soft, M18): `export_pptx` always exports. When the version has lint ERRORs it
   answers `lint_errors` (and a `warning` without `reason`) and logs `export_with_errors` (version,
   error count, `reason` or null) in the `audit` table. The web app asks for the reason before exporting.
@@ -213,7 +220,7 @@ Every grant, revocation, general access change, link reset and transfer is logge
 
 The `audit` table records who did what, never the content: deck `create`, `edit` (version, note),
 `export`, `rename`, `delete`, the sharing actions above; pack `publish`, `edit`, `visibility`, `default`; model `add`,
-`update`, `default`, `remove`; `sign_in`; retention `purge`. Rows outlive what they name. Admins
+`update`, `default`, `remove`, `restrict` (teams), `team_default`; deck `kind`; `sign_in`; retention `purge`. Rows outlive what they name. Admins
 read it at `GET /api/admin/audit?actor=&action=&target_type=&target_id=&since=&until=&limit=`
 (newest first, at most 1000).
 
@@ -354,10 +361,13 @@ prompts as Claude. Models go through `@calque/llm` only.
 
 | Route | |
 | --- | --- |
-| `GET /api/models` | provider catalog + configured models (never their keys) |
+| `GET /api/models` | provider catalog + the configured models the caller may run (never their keys), `your_default` marking the one the agent runs for them; admins see every model and `team_defaults` |
 | `POST /api/models` | `{id?, provider, model, label?, api_key?, base_url?, headers?, resource?, api_version?, managed_identity?, default?}`: tested with a 1-token call, refused (422) if the provider refuses. With `id`: edits that configuration (an unset key or `headers` keeps the stored ones). Without: id `provider:model`, `@<label>` if labelled; the same model on another endpoint gets `@2`, `@3`… instead of overwriting |
 | `POST /api/models/:id/default`, `DELETE /api/models/:id` | the default is read on every call: no restart; removing the default promotes the most recently configured model |
-| `POST /api/agent/chat` | `{messages, workflow?, pack_id?, deck_id?, model?, files?}` → `{model, text, messages}`; the client keeps the conversation. `files`: uploaded file ids; documents (txt, md, csv, docx, xlsx, pptx; not PDF yet) reach the model as text, images as `file:<id>` references. `Accept: application/x-ndjson` streams `{step: {text, tools: [{name, error?}]}}` lines, then `{done}` |
+| `POST /api/models/:id/teams` | `{teams}` (also `teams` in `POST /api/models`): restrict the model to these teams' members (and admins); `[]`: everyone. Team defaults on it for other teams are dropped |
+| `POST /api/models/team-defaults` | `{team, model_id}` (`null` clears): the team's default model. The agent runs the model asked for if the caller may use it (else 403), else their first team's default (in the order of their teams), else the workspace default |
+| `GET /api/admin/usage` | `?since=&until=` (ISO, default the last 30 days), admins: web agent runs, input and output tokens and time per user, team and model (`usage_report` tool). One row per run in `usage` |
+| `POST /api/agent/chat` | `{message, workflow?, pack_id?, deck_id?, model?, files?}` → `{model, text, messages, deck_id?}`: the server keeps the conversation, the deck's (editors continue it; `get_chat {deck_id}` reads it for anyone with access) or, without `deck_id`, the caller's new-deck draft, which moves to the deck the agent creates (`deck_id` in the answer). `clear_chat` starts it over. Capped at 1 MB (oldest turns dropped). Or `{messages, …}` instead of `message`: the client keeps the conversation, nothing is stored. `files`: uploaded file ids; documents (txt, md, csv, docx, xlsx, pptx; not PDF yet) reach the model as text, images as `file:<id>` references. `Accept: application/x-ndjson` streams `{step: {text, tools: [{name, error?}]}}` lines, then `{done}` |
 | `POST /api/agent/apply-comments` | `{deck_id, model?}`: the open comments become `patch_deck` calls |
 
 **Azure OpenAI.** The model is the deployment name. Give the resource name (or a base URL: an APIM

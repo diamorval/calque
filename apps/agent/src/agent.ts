@@ -2,7 +2,7 @@
 // It holds no business logic (rule 1) and no provider SDK (rule 2): knowledge comes from the server's
 // core:// and pack:// resources and prompts, every action is an MCP tool call.
 import type { Client } from "@modelcontextprotocol/client";
-import { runTools, type Message, type ModelConfig, type Step, type ToolDef } from "@calque/llm";
+import { runTools, type Message, type ModelConfig, type Step, type ToolDef, type Usage } from "@calque/llm";
 
 export type { Message } from "@calque/llm";
 
@@ -103,7 +103,7 @@ async function tools(client: Client): Promise<ToolDef[]> {
 }
 
 /** One user turn: runs until the model answers in text. Returns the new messages to append. */
-export async function chat(i: ChatInput): Promise<{ text: string; messages: Message[] }> {
+export async function chat(i: ChatInput): Promise<{ text: string; messages: Message[]; usage: Usage }> {
   return runTools({
     model: i.model,
     instructions: await instructions(i.client, i.workflow ?? (i.deck_id ? "edit-slides" : "build-presentation"), i.pack_id, i.deck_id, i.files),

@@ -306,6 +306,13 @@ export async function startDemo() {
         return { deck_id: b.deck_id, url: s.url };
       },
     ],
+    // the agent's conversation lives in the chat only (no server here), and nobody has used a model
+    [/^POST \/api\/tools\/get_chat$/, (_, b) => ({ deck_id: b.deck_id ?? null, messages: [], files: [], can_write: true })],
+    [/^POST \/api\/tools\/clear_chat$/, (_, b) => ({ deck_id: b.deck_id ?? null, cleared: true })],
+    [
+      /^GET \/api\/admin\/usage/,
+      () => ({ total: { runs: 0, input_tokens: 0, output_tokens: 0, duration_ms: 0 }, by_user: [], by_team: [], by_model: [] }),
+    ],
     // the slide library starts empty (adding to it is read-only here)
     [/^POST \/api\/tools\/library_list$/, () => ({ entries: [] })],
     // an imported file opens a deck the engine built earlier on that pack
