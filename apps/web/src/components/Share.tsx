@@ -11,7 +11,7 @@ import { Tag } from "diametral-ds/tag";
 import { Building2, Copy, Globe, Lock, RotateCcw, Trash2, User, UserPlus, Users } from "lucide-react";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { tool } from "../api.ts";
-import { t } from "../i18n.ts";
+import { longDay, t } from "../i18n.ts";
 import { Dialog, Field, Spinner } from "../ui.tsx";
 
 type Type = "user" | "team";
@@ -38,17 +38,16 @@ const ACCESS = { private: [Lock, "Private"], workspace: [Building2, "Workspace"]
 const EXPIRY = [
   [0, "Never expires"],
   [1, "Expires in 1 day"],
-  [7, "Expires in 7 days"],
-  [30, "Expires in 30 days"],
-  [90, "Expires in 90 days"],
+  [7, "Expires in {n} days"],
+  [30, "Expires in {n} days"],
+  [90, "Expires in {n} days"],
 ] as const;
 
 /** When the link stops opening for general access, in one line. */
 function expiry(at: string | null): string {
-  if (!at) return "The link does not expire.";
-  const d = new Date(at);
-  const when = d.toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" });
-  return d.getTime() <= Date.now() ? `The link expired on ${when}: only people with access can open it.` : `The link expires on ${when}.`;
+  if (!at) return t("The link does not expire.");
+  const when = longDay(at);
+  return new Date(at).getTime() <= Date.now() ? t("The link expired on {when}: only people with access can open it.", { when }) : t("The link expires on {when}.", { when });
 }
 
 /** Who the link opens for, in one line. */
@@ -211,16 +210,16 @@ export function ShareDeck({ deck_id, onClose }: { deck_id: string; onClose: () =
                 {data.general.access !== "private" && (
                   <select
                     className="cq-select"
-                    aria-label="Link expiry"
+                    aria-label={t("Link expiry")}
                     value=""
                     onChange={(e) => void general({ expires_in_days: Number(e.target.value) })}
                   >
                     <option value="" disabled>
-                      Change expiry…
+                      {t("Change expiry…")}
                     </option>
                     {EXPIRY.map(([d, l]) => (
                       <option key={d} value={d}>
-                        {l}
+                        {t(l, { n: d })}
                       </option>
                     ))}
                   </select>

@@ -12,7 +12,7 @@ import { ExportWithErrors } from "../components/ExportGate.tsx";
 import { AddToLibrary, LibraryPanel } from "../components/Library.tsx";
 import { SaveToM365, ShareToTeams, useM365 } from "../components/M365.tsx";
 import { ShareDeck } from "../components/Share.tsx";
-import { slideUiStrings, t } from "../i18n.ts";
+import { slideUiStrings, t, tn } from "../i18n.ts";
 import { bySeverity, type Finding, lintSummary } from "../lint.ts";
 import { navigate } from "../nav.ts";
 import { ago, Dialog, Spinner } from "../ui.tsx";
@@ -142,10 +142,10 @@ export function Editor({ id }: { id: string }) {
             {newRelease !== null && (
               <Button
                 variant="outline"
-                title={`The ${deck.pack_id} pack has a new release: rebuild this deck on it, as a new version (Restore goes back)`}
-                onClick={() => void run("Updating to the latest pack release", () => tool("update_pack_release", { deck_id: id }))}
+                title={t("The {pack} pack has a new release: rebuild this deck on it, as a new version (Restore goes back)", { pack: deck.pack_id })}
+                onClick={() => void run(t("Updating to the latest pack release"), () => tool("update_pack_release", { deck_id: id }))}
               >
-                <RefreshCw /> Update to pack release {newRelease}
+                <RefreshCw /> {t("Update to pack release {n}", { n: newRelease })}
               </Button>
             )}
             <Button variant="outline" onClick={() => navigate(`/present/${id}`)}>
@@ -154,13 +154,13 @@ export function Editor({ id }: { id: string }) {
             {edits && !!deck.kinds?.length ? (
               <select
                 className="cq-select"
-                aria-label="Deck type"
-                title="The deck's type: the brand pack may require approval for some types"
+                aria-label={t("Deck type")}
+                title={t("The deck's type: the brand pack may require approval for some types")}
                 value={deck.kind ?? ""}
                 disabled={busy !== null}
-                onChange={(e) => void run("Setting the deck type", () => tool("set_deck_kind", { deck_id: id, kind: e.target.value || null }))}
+                onChange={(e) => void run(t("Setting the deck type"), () => tool("set_deck_kind", { deck_id: id, kind: e.target.value || null }))}
               >
-                <option value="">No type</option>
+                <option value="">{t("No type")}</option>
                 {deck.kinds.map((k) => (
                   <option key={k} value={k}>
                     {k}
@@ -234,7 +234,7 @@ export function Editor({ id }: { id: string }) {
                   setDialog("teams");
                 }}
               >
-                <MessageSquareShare /> Share to Teams
+                <MessageSquareShare /> {t("Share to Teams")}
               </Button>
             )}
             {role === "owner" && (
@@ -361,7 +361,7 @@ export function Editor({ id }: { id: string }) {
                       {v.note}
                       <div className="cq-hint">
                         {ago(v.created_at)}
-                        {v.pack_version != null && ` · pack release ${v.pack_version}`}
+                        {v.pack_version != null && ` · ${t("pack release {n}", { n: v.pack_version })}`}
                       </div>
                     </TableCell>
                     <TableCell>{v.author_name || v.author}</TableCell>

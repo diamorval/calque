@@ -3,7 +3,7 @@ import { DeckViewer, type DeckView } from "@calque/slide-ui";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.tsx";
-import { ago, dateTime, getLang, setLang, slideUiStrings, t, tn } from "./i18n.ts";
+import { ago, dateTime, getLang, longDay, setLang, slideUiStrings, t, tn } from "./i18n.ts";
 
 const minutesAgo = (n: number) => new Date(Date.now() - n * 60_000).toISOString();
 
@@ -93,6 +93,15 @@ describe("i18n", () => {
     expect(screen.getByText("Aucun commentaire ouvert")).toBeTruthy();
     expect(screen.getByText("En relecture")).toBeTruthy();
     expect(screen.getByLabelText("Commenter la diapositive 1")).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: /Obligatoire/ })).toBeTruthy();
+  });
+
+  it("spells out days in the UI language", () => {
+    vi.spyOn(navigator, "language", "get").mockReturnValue("de-DE");
+    expect(longDay("2026-10-05T12:00:00Z")).toBe("October 5, 2026");
+    setLang("fr");
+    expect(longDay("2026-10-05T12:00:00Z")).toBe("5 octobre 2026");
+    expect(t("The link expires on {when}.", { when: longDay("2026-10-05T12:00:00Z") })).toBe("Le lien expire le 5 octobre 2026.");
   });
 
   it("switches the whole app to French from the sidebar, dates included", async () => {

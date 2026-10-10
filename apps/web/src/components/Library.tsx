@@ -194,7 +194,7 @@ function ImageLibrary(props: { pack_id: string; manages: boolean; me: string | n
     e.preventDefault();
     const f = file.current?.files?.[0];
     if (!f || !title.trim()) return;
-    void act("Uploading", async () => {
+    void act(t("Uploading"), async () => {
       const form = new FormData();
       form.append("file", f);
       const { file_id } = await upload<{ file_id: string }>("/api/files", form);
@@ -226,19 +226,21 @@ function ImageLibrary(props: { pack_id: string; manages: boolean; me: string | n
               size="sm"
               variant="outline"
               disabled={!!busy}
-              aria-label={`Place ${i.title}`}
-              onClick={() => props.onAsk?.({ text: `Place the library image "${i.title}" (${i.ref}) in the picture slot where it fits best, on the slide shown or the one it suits.` })}
+              aria-label={t("Place {title}", { title: i.title })}
+              onClick={() =>
+                props.onAsk?.({ text: t("Place the library image \"{title}\" ({ref}) in the picture slot where it fits best, on the slide shown or the one it suits.", { title: i.title, ref: i.ref }) })
+              }
             >
-              <Sparkles /> Place
+              <Sparkles /> {t("Place")}
             </Button>
           )}
           {i.status === "pending" && props.manages && (
-            <Button size="sm" variant="outline" disabled={!!busy} aria-label={`Approve ${i.title}`} onClick={() => void act("Approving", () => tool("image_library_review", { image_id: i.image_id, action: "approve" }))}>
-              <Check /> Approve
+            <Button size="sm" variant="outline" disabled={!!busy} aria-label={t("Approve {title}", { title: i.title })} onClick={() => void act(t("Approving"), () => tool("image_library_review", { image_id: i.image_id, action: "approve" }))}>
+              <Check /> {t("Approve")}
             </Button>
           )}
           {(props.manages || (i.status === "pending" && i.added_by === props.me)) && (
-            <Button size="icon-sm" variant="ghost" disabled={!!busy} aria-label={`Remove ${i.title}`} onClick={() => void act("Removing", () => tool("image_library_review", { image_id: i.image_id, action: "remove" }))}>
+            <Button size="icon-sm" variant="ghost" disabled={!!busy} aria-label={t("Remove {name}", { name: i.title })} onClick={() => void act(t("Removing"), () => tool("image_library_review", { image_id: i.image_id, action: "remove" }))}>
               <Trash2 />
             </Button>
           )}
@@ -248,11 +250,11 @@ function ImageLibrary(props: { pack_id: string; manages: boolean; me: string | n
   );
 
   return (
-    <section aria-label="Image library">
-      <h3 className="cq-lib-head">Images</h3>
+    <section aria-label={t("Image library")}>
+      <h3 className="cq-lib-head">{t("Images")}</h3>
       <form className="cq-m365-search" onSubmit={search}>
-        <Input aria-label="Search the images" value={query} placeholder="Office, team, client logo…" onChange={(e) => setQuery(e.target.value)} />
-        <Button type="submit" size="icon" variant="outline" aria-label="Search the images">
+        <Input aria-label={t("Search the images")} value={query} placeholder={t("Office, team, client logo…")} onChange={(e) => setQuery(e.target.value)} />
+        <Button type="submit" size="icon" variant="outline" aria-label={t("Search the images")}>
           <Search />
         </Button>
       </form>
@@ -262,46 +264,49 @@ function ImageLibrary(props: { pack_id: string; manages: boolean; me: string | n
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
-      {!images && !error && <Spinner label="Loading the images" />}
+      {!images && !error && <Spinner label={t("Loading the images")} />}
       {images && approved.length === 0 && (
         <div className="cq-empty">
           <Images />
-          <strong>{query ? "No approved image matches" : "No approved image yet"}</strong>
-          <span>Add the photos and logos people may use on this brand pack.</span>
+          <strong>{query ? t("No approved image matches") : t("No approved image yet")}</strong>
+          <span>{t("Add the photos and logos people may use on this brand pack.")}</span>
         </div>
       )}
       {approved.length > 0 && <ul className="cq-lib-list">{approved.map(card)}</ul>}
       {pending.length > 0 && (
         <>
-          <h3 className="cq-lib-head">{props.manages ? "Images to approve" : "Images waiting for approval"}</h3>
+          <h3 className="cq-lib-head">{props.manages ? t("Images to approve") : t("Images waiting for approval")}</h3>
           <ul className="cq-lib-list">{pending.map(card)}</ul>
         </>
       )}
       {adding ? (
         <form onSubmit={add}>
-          <Field label="Image" htmlFor="li-file">
+          <Field label={t("Image")} htmlFor="li-file">
             <input id="li-file" ref={file} type="file" required accept="image/png,image/jpeg,image/gif,image/bmp,image/tiff,image/webp,image/svg+xml" />
           </Field>
-          <Field label="Title" htmlFor="li-title">
-            <Input id="li-title" required maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Paris office, lobby" />
+          <Field label={t("Title")} htmlFor="li-title">
+            <Input id="li-title" required maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t("Paris office, lobby")} />
           </Field>
-          <Field label="Tags" htmlFor="li-tags" hint="Comma-separated: what it shows, the sector, the offer.">
-            <Input id="li-tags" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="photo, office, team" />
+          <Field label={t("Tags")} htmlFor="li-tags" hint={t("Comma-separated: what it shows, the sector, the offer.")}>
+            <Input id="li-tags" value={tags} onChange={(e) => setTags(e.target.value)} placeholder={t("photo, office, team")} />
           </Field>
-          <p className="cq-hint">{props.manages ? "You manage this brand pack: the image is approved at once." : "The brand pack's owner or an admin approves it before others can use it."} Only add images you have the rights to.</p>
+          <p className="cq-hint">
+            {props.manages ? t("You manage this brand pack: the image is approved at once.") : t("The brand pack's owner or an admin approves it before others can use it.")}{" "}
+            {t("Only add images you have the rights to.")}
+          </p>
           <span className="cq-lib-actions">
             <Button type="submit" size="sm" disabled={!!busy || !title.trim()}>
-              <ImagePlus /> Add image
+              <ImagePlus /> {t("Add image")}
             </Button>
             <Button type="button" size="sm" variant="ghost" onClick={() => setAdding(false)}>
-              Cancel
+              {t("Cancel")}
             </Button>
           </span>
         </form>
       ) : (
         props.me && (
           <Button variant="ghost" size="sm" onClick={() => setAdding(true)}>
-            <ImagePlus /> Add an image
+            <ImagePlus /> {t("Add an image")}
           </Button>
         )
       )}

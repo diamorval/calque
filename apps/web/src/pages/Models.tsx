@@ -13,7 +13,7 @@ import { Textarea } from "diametral-ds/textarea";
 import { KeyRound, Pencil, Server, Star, Trash2, Users } from "lucide-react";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { api, type Me } from "../api.ts";
-import { t } from "../i18n.ts";
+import { num, t } from "../i18n.ts";
 import { Dialog, Field, PageHead } from "../ui.tsx";
 
 interface Provider {
@@ -124,7 +124,7 @@ export function Models({ me }: { me: Me }) {
                       <span className="cq-mono">{m.model}</span> {m.label && <Tag>{m.label}</Tag>}
                     </TableCell>
                     <TableCell className="cq-muted">{m.base_url ?? m.resource ?? "—"}</TableCell>
-                    <TableCell>{m.teams?.length ? m.teams.map((t) => <Tag key={t}>{t}</Tag>) : <span className="cq-muted">Everyone</span>}</TableCell>
+                    <TableCell>{m.teams?.length ? m.teams.map((t) => <Tag key={t}>{t}</Tag>) : <span className="cq-muted">{t("Everyone")}</span>}</TableCell>
                     <TableCell>
                       {m.is_default ? (
                         <Tag>{t("Default")}</Tag>
@@ -324,8 +324,8 @@ function Configure(props: { provider: Provider; initial?: Model | undefined; onC
           >
             <Textarea id="m-headers" rows={2} value={headers} placeholder={t("Name: value")} onChange={(e) => setHeaders(e.target.value)} />
           </Field>
-          <Field label="Teams (optional)" htmlFor="m-teams" hint="Only these teams (and admins) may use it, e.g. a subsidiary's own contract. Empty: everyone.">
-            <Input id="m-teams" value={teams} placeholder="sales, emea" onChange={(e) => setTeams(e.target.value)} />
+          <Field label={t("Teams (optional)")} htmlFor="m-teams" hint={t("Only these teams (and admins) may use it, e.g. a subsidiary's own contract. Empty: everyone.")}>
+            <Input id="m-teams" value={teams} placeholder={t("sales, emea")} onChange={(e) => setTeams(e.target.value)} />
           </Field>
           <Label className="cq-check">
             <Checkbox checked={isDefault} onCheckedChange={setDefault} />
@@ -360,34 +360,34 @@ function TeamDefaults(props: { models: Model[]; defaults: Record<string, string>
   const [team, setTeam] = useState("");
   const [model, setModel] = useState("");
   // a model restricted to teams can only be those teams' default
-  const fits = (m: Model, t: string) => !m.teams?.length || m.teams.includes(t);
+  const fits = (m: Model, team: string) => !m.teams?.length || m.teams.includes(team);
   return (
-    <section className="cq-section" aria-label="Team defaults">
+    <section className="cq-section" aria-label={t("Team defaults")}>
       <h2>
-        <Users size={16} /> Team defaults
+        <Users size={16} /> {t("Team defaults")}
       </h2>
-      <p className="cq-hint">A team's members run its default model; others run the workspace default. A member of several teams gets the first one's.</p>
+      <p className="cq-hint">{t("A team's members run its default model; others run the workspace default. A member of several teams gets the first one's.")}</p>
       <Card className="cq-table-card">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Team</TableHead>
-              <TableHead>Default model</TableHead>
+              <TableHead>{t("Team")}</TableHead>
+              <TableHead>{t("Default model")}</TableHead>
               <TableHead />
             </TableRow>
           </TableHeader>
           <TableBody>
-            {Object.entries(props.defaults).map(([t, id]) => {
+            {Object.entries(props.defaults).map(([name, id]) => {
               const m = props.models.find((x) => x.id === id);
               return (
-                <TableRow key={t} data-team={t}>
-                  <TableCell>{t}</TableCell>
+                <TableRow key={name} data-team={name}>
+                  <TableCell>{name}</TableCell>
                   <TableCell>
                     <span className="cq-mono">{m ? modelName(m) : id}</span>
                   </TableCell>
                   <TableCell>
-                    <Button size="sm" variant="ghost" aria-label={`Clear ${t}'s default`} onClick={() => void props.onSet(t, null)}>
-                      <Trash2 /> Clear
+                    <Button size="sm" variant="ghost" aria-label={t("Clear {team}'s default", { team: name })} onClick={() => void props.onSet(name, null)}>
+                      <Trash2 /> {t("Clear")}
                     </Button>
                   </TableCell>
                 </TableRow>
@@ -395,12 +395,12 @@ function TeamDefaults(props: { models: Model[]; defaults: Record<string, string>
             })}
             <TableRow>
               <TableCell>
-                <Input aria-label="Team" value={team} placeholder="sales" onChange={(e) => setTeam(e.target.value)} />
+                <Input aria-label={t("Team")} value={team} placeholder={t("sales")} onChange={(e) => setTeam(e.target.value)} />
               </TableCell>
               <TableCell>
-                <select className="cq-select" aria-label="Team default model" value={model} onChange={(e) => setModel(e.target.value)}>
+                <select className="cq-select" aria-label={t("Team default model")} value={model} onChange={(e) => setModel(e.target.value)}>
                   <option value="" disabled>
-                    Choose a model
+                    {t("Choose a model")}
                   </option>
                   {props.models
                     .filter((m) => !team.trim() || fits(m, team.trim()))
@@ -420,7 +420,7 @@ function TeamDefaults(props: { models: Model[]; defaults: Record<string, string>
                     void props.onSet(team.trim(), model).then(() => (setTeam(""), setModel("")));
                   }}
                 >
-                  <Star /> Set default
+                  <Star /> {t("Set default")}
                 </Button>
               </TableCell>
             </TableRow>
@@ -444,7 +444,6 @@ interface Usage {
   by_model: (UsageRow & { model_id: string })[];
 }
 const PERIODS = { "7": "Last 7 days", "30": "Last 30 days", "90": "Last 90 days" } as const;
-const n = (x: number) => x.toLocaleString();
 
 /** Admins: the agent's runs and tokens per user, team or model over a period (usage metering). */
 function UsageTable() {
@@ -467,21 +466,21 @@ function UsageTable() {
         : usage.by_model.map((r) => ({ key: r.model_id, ...r }))
     : [];
   return (
-    <section className="cq-section" aria-label="Usage">
-      <h2>Usage</h2>
-      <p className="cq-hint">The web agent's runs and the tokens the providers counted. Kept as long as the retention policy keeps uploads.</p>
+    <section className="cq-section" aria-label={t("Usage")}>
+      <h2>{t("Usage")}</h2>
+      <p className="cq-hint">{t("The web agent's runs and the tokens the providers counted. Kept as long as the retention policy keeps uploads.")}</p>
       <div className="cq-row">
         <Tabs value={by} onValueChange={(v) => setBy(v as typeof by)}>
           <TabsList variant="line">
-            <TabsTrigger value="user">By user</TabsTrigger>
-            <TabsTrigger value="team">By team</TabsTrigger>
-            <TabsTrigger value="model">By model</TabsTrigger>
+            <TabsTrigger value="user">{t("By user")}</TabsTrigger>
+            <TabsTrigger value="team">{t("By team")}</TabsTrigger>
+            <TabsTrigger value="model">{t("By model")}</TabsTrigger>
           </TabsList>
         </Tabs>
-        <select className="cq-select" aria-label="Period" value={days} onChange={(e) => setDays(e.target.value as keyof typeof PERIODS)}>
+        <select className="cq-select" aria-label={t("Period")} value={days} onChange={(e) => setDays(e.target.value as keyof typeof PERIODS)}>
           {Object.entries(PERIODS).map(([d, label]) => (
             <option key={d} value={d}>
-              {label}
+              {t(label)}
             </option>
           ))}
         </select>
@@ -495,32 +494,32 @@ function UsageTable() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>{by === "user" ? "User" : by === "team" ? "Team" : "Model"}</TableHead>
-              <TableHead>Runs</TableHead>
-              <TableHead>Input tokens</TableHead>
-              <TableHead>Output tokens</TableHead>
-              <TableHead>Time</TableHead>
+              <TableHead>{by === "user" ? t("User") : by === "team" ? t("Team") : t("Model")}</TableHead>
+              <TableHead>{t("Runs")}</TableHead>
+              <TableHead>{t("Input tokens")}</TableHead>
+              <TableHead>{t("Output tokens")}</TableHead>
+              <TableHead>{t("Time")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.map((r) => (
               <TableRow key={r.key}>
                 <TableCell className="cq-mono">{r.key}</TableCell>
-                <TableCell>{n(r.runs)}</TableCell>
-                <TableCell>{n(r.input_tokens)}</TableCell>
-                <TableCell>{n(r.output_tokens)}</TableCell>
-                <TableCell>{n(Math.round(r.duration_ms / 1000))} s</TableCell>
+                <TableCell>{num(r.runs)}</TableCell>
+                <TableCell>{num(r.input_tokens)}</TableCell>
+                <TableCell>{num(r.output_tokens)}</TableCell>
+                <TableCell>{num(Math.round(r.duration_ms / 1000))} s</TableCell>
               </TableRow>
             ))}
             {usage && (
               <TableRow>
                 <TableCell>
-                  <strong>Total</strong>
+                  <strong>{t("Total")}</strong>
                 </TableCell>
-                <TableCell>{n(usage.total.runs)}</TableCell>
-                <TableCell>{n(usage.total.input_tokens)}</TableCell>
-                <TableCell>{n(usage.total.output_tokens)}</TableCell>
-                <TableCell>{n(Math.round(usage.total.duration_ms / 1000))} s</TableCell>
+                <TableCell>{num(usage.total.runs)}</TableCell>
+                <TableCell>{num(usage.total.input_tokens)}</TableCell>
+                <TableCell>{num(usage.total.output_tokens)}</TableCell>
+                <TableCell>{num(Math.round(usage.total.duration_ms / 1000))} s</TableCell>
               </TableRow>
             )}
           </TableBody>

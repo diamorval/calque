@@ -75,6 +75,9 @@ export const dateTime = (iso: string) => new Date(iso).toLocaleString(lang, { da
 /** A day in the UI language ("2026-10-05" -> "5 oct. 2026"). */
 export const day = (iso: string) => new Date(`${iso.slice(0, 10)}T00:00:00`).toLocaleDateString(lang, { dateStyle: "medium" });
 
+/** A day spelled out in the UI language ("October 5, 2026", "5 octobre 2026"), local time. */
+export const longDay = (iso: string) => new Date(iso).toLocaleDateString(lang, { day: "numeric", month: "long", year: "numeric" });
+
 /** "3 minutes ago", "yesterday", "il y a 3 minutes"… in the UI language. */
 export function ago(iso: string, now = Date.now()): string {
   const rtf = new Intl.RelativeTimeFormat(lang, { numeric: "auto" });
@@ -129,5 +132,7 @@ export function slideUiStrings(): SlideUiStrings {
     slides: t("Slides"),
     commentCount: (n) => tn(n, "{n} comment", "{n} comments"),
     shape: (id, role) => t("Shape {id} ({role})", { id, role }),
+    required: t("Required"),
+    requiredHint: t("A required comment blocks the deck's approval until it is resolved"),
   };
 }

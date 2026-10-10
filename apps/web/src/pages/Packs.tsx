@@ -10,7 +10,7 @@ import { Textarea } from "diametral-ds/textarea";
 import { Archive, ArchiveRestore, Eye, FileUp, GitBranch, Globe, History, Lock, Pencil, Plus, ShieldCheck, Star, Trash2, Upload, Users, X } from "lucide-react";
 import { Fragment, useCallback, useEffect, useState, type FormEvent } from "react";
 import { api, upload, type Me, type Pack } from "../api.ts";
-import { dateTime, t } from "../i18n.ts";
+import { dateTime, t, tn } from "../i18n.ts";
 import { go } from "../nav.ts";
 import { Dialog, Field, FileDrop, PageHead, Spinner } from "../ui.tsx";
 
@@ -154,7 +154,7 @@ export function Packs({ me }: { me: Me }) {
                   </TableCell>
                   <TableCell>
                     {p.owner ?? <span className="cq-muted">{t("Admins")}</span>}
-                    {p.managers?.length ? <div className="cq-hint">with {p.managers.join(", ")}</div> : null}
+                    {p.managers?.length ? <div className="cq-hint">{t("with {names}", { names: p.managers.join(", ") })}</div> : null}
                   </TableCell>
                   <TableCell>{p.languages.join(", ")}</TableCell>
                   <TableCell>
@@ -186,7 +186,7 @@ export function Packs({ me }: { me: Me }) {
                     )}
                     {(me.admin || (p.owner !== null && p.owner === me.id)) && (
                       <Button size="sm" variant="ghost" onClick={() => setManaging({ pack: p, managers: p.managers ?? [] })}>
-                        <Users /> Managers
+                        <Users /> {t("Managers")}
                       </Button>
                     )}
                     {p.editable && (
@@ -234,16 +234,20 @@ export function Packs({ me }: { me: Me }) {
         </Dialog>
       )}
       {managing && (
-        <Dialog title={`Who manages ${managing.pack.name}`} onClose={() => setManaging(null)}>
-          <p className="cq-hint">Besides its owner{managing.pack.owner ? ` (${managing.pack.owner})` : ""} and the admins: they edit it, restrict it to teams, archive it and roll it back.</p>
-          <TeamPicker options={[]} value={managing.managers} placeholder="A user id, then Enter" onChange={(managers) => setManaging({ ...managing, managers })} />
+        <Dialog title={t("Who manages {name}", { name: managing.pack.name })} onClose={() => setManaging(null)}>
+          <p className="cq-hint">
+            {managing.pack.owner
+              ? t("Besides its owner ({owner}) and the admins: they edit it, restrict it to teams, archive it and roll it back.", { owner: managing.pack.owner })
+              : t("Besides the admins: they edit it, restrict it to teams, archive it and roll it back.")}
+          </p>
+          <TeamPicker options={[]} value={managing.managers} label={t("A user id")} placeholder={t("A user id, then Enter")} onChange={(managers) => setManaging({ ...managing, managers })} />
           <Button
             onClick={() => {
               void saveManagers(managing.pack, managing.managers);
               setManaging(null);
             }}
           >
-            Save managers
+            {t("Save managers")}
           </Button>
         </Dialog>
       )}
@@ -297,7 +301,19 @@ export function Packs({ me }: { me: Me }) {
 
 /** Pick teams: the caller's (`options`), and any other by name (an admin restricts to teams they are not in).
 Also picks a pack's co-managers (user ids, no options). */
-function TeamPicker({ options, value, onChange, placeholder = "Another team, then Enter" }: { options: string[]; value: string[]; onChange: (teams: string[]) => void; placeholder?: string }) {
+function TeamPicker({
+  options,
+  value,
+  onChange,
+  label = t("Another team"),
+  placeholder = t("Another team, then Enter"),
+}: {
+  options: string[];
+  value: string[];
+  onChange: (teams: string[]) => void;
+  label?: string;
+  placeholder?: string;
+}) {
   const [other, setOther] = useState("");
   const add = () => {
     const t = other.trim();
@@ -313,7 +329,7 @@ function TeamPicker({ options, value, onChange, placeholder = "Another team, the
         </label>
       ))}
       <Input
-        aria-label={placeholder.replace(/, then Enter$/, "")}
+        aria-label={label}
         placeholder={placeholder}
         value={other}
         onChange={(e) => setOther(e.target.value)}
@@ -507,11 +523,11 @@ function Import({ me, editing, packs, onDone }: { me: Me; editing?: Draft | null
 
   /** The change on a sample deck (cover, content, closing) built on the draft, before publishing. */
   const previewSample = (d: Draft) =>
-    step("Building a sample deck on this draft", async () => {
+    step(t("Building a sample deck on this draft"), async () => {
       setPreview((await api<{ slides: { number: number; image_url: string }[] }>(`/api/packs/drafts/${d.draft_id}/preview`, { manifest: manifestOf(d) })).slides);
     });
   const addPages = (files: File[], d: Draft) =>
-    step("Uploading exemplar pages", async () => {
+    step(t("Uploading exemplar pages"), async () => {
       for (const f of files) {
         const form = new FormData();
         form.set("image", f);
@@ -519,11 +535,11 @@ function Import({ me, editing, packs, onDone }: { me: Me; editing?: Draft | null
       }
     });
   const removePage = (name: string, d: Draft) =>
-    step("Removing an exemplar page", async () => {
+    step(t("Removing an exemplar page"), async () => {
       setPages((await api<{ exemplar_images: string[] }>(`/api/packs/drafts/${d.draft_id}/exemplar/remove`, { name })).exemplar_images);
     });
   const swapLogo = (file: File, d: Draft) =>
-    step("Uploading the logo", async () => {
+    step(t("Uploading the logo"), async () => {
       const form = new FormData();
       form.set("logo", file);
       setLogo((await upload<{ logo: string }>(`/api/packs/drafts/${d.draft_id}/logo`, form)).logo);
@@ -537,8 +553,12 @@ function Import({ me, editing, packs, onDone }: { me: Me; editing?: Draft | null
         title={editing ? t("Edit {name}", { name: String(editing.manifest.name ?? editing.manifest.id) }) : t("Import a template")}
         description={
           editing
-            ? "Change the template, tokens, logo, slide roles, language, placeholders, lint rules, voice, exemplar, storyline or fonts. The pack must still lint clean and build a clean test deck before it becomes the next release; the current one is kept for rollback, and decks move to it only when their authors update them."
-            : draft ? "Check the role of each slide, then validate: the template must lint clean and a test deck must build clean." : "The company's official template.pptx."
+            ? t(
+                "Change the template, tokens, logo, slide roles, language, placeholders, lint rules, voice, exemplar, storyline or fonts. The pack must still lint clean and build a clean test deck before it becomes the next release; the current one is kept for rollback, and decks move to it only when their authors update them.",
+              )
+            : draft
+              ? t("Check the role of each slide, then validate: the template must lint clean and a test deck must build clean.")
+              : t("The company's official template.pptx.")
         }
       >
         <Button variant="ghost" onClick={() => void onDone()}>
@@ -703,8 +723,8 @@ function Import({ me, editing, packs, onDone }: { me: Me; editing?: Draft | null
               )}
               {!editing && !me.admin && (
                 <FieldSet>
-                  <FieldLegend variant="label">Visible to</FieldLegend>
-                  <p className="cq-hint">These teams; an admin can share it with the whole workspace later.</p>
+                  <FieldLegend variant="label">{t("Visible to")}</FieldLegend>
+                  <p className="cq-hint">{t("These teams; an admin can share it with the whole workspace later.")}</p>
                   <TeamPicker options={me.teams} value={teams} onChange={setTeams} />
                 </FieldSet>
               )}
@@ -745,10 +765,10 @@ function Import({ me, editing, packs, onDone }: { me: Me; editing?: Draft | null
               )}
               {editing && logo && (
                 <FileDrop
-                  label="Logo"
+                  label={t("Logo")}
                   accept=".png,.svg,.jpg,.jpeg"
-                  title={`Replace ${logo}`}
-                  hint="The pack's logo file. A logo drawn on the template's slides changes with a new template."
+                  title={t("Replace {name}", { name: logo })}
+                  hint={t("The pack's logo file. A logo drawn on the template's slides changes with a new template.")}
                   onFiles={(f) => f[0] && void swapLogo(f[0], draft)}
                 />
               )}
@@ -765,27 +785,29 @@ function Import({ me, editing, packs, onDone }: { me: Me; editing?: Draft | null
           </div>
           <div className="cq-card cq-form" data-rules>
             <FieldSet>
-              <FieldLegend variant="label">Lint rules</FieldLegend>
+              <FieldLegend variant="label">{t("Lint rules")}</FieldLegend>
               <p className="cq-hint">
-                What lint flags in every deck on this pack, besides the core rules: a regular expression (case ignored), its severity, the deck languages it applies to (any, en, fr…) and the message shown. Unlike the voice, these are enforced.
+                {t(
+                  "What lint flags in every deck on this pack, besides the core rules: a regular expression (case ignored), its severity, the deck languages it applies to (any, en, fr…) and the message shown. Unlike the voice, these are enforced.",
+                )}
               </p>
               {rules.map((r, i) => (
                 <div key={i} className="cq-rule">
-                  <select className="cq-select" aria-label={`Severity of rule ${i + 1}`} value={r.severity} onChange={(e) => setRule(i, { severity: e.target.value as Rule["severity"] })}>
+                  <select className="cq-select" aria-label={t("Severity of rule {n}", { n: i + 1 })} value={r.severity} onChange={(e) => setRule(i, { severity: e.target.value as Rule["severity"] })}>
                     <option value="ERROR">ERROR</option>
                     <option value="WARN">WARN</option>
                   </select>
-                  <Input aria-label={`Language of rule ${i + 1}`} value={r.lang} onChange={(e) => setRule(i, { lang: e.target.value })} placeholder="any" />
-                  <Input aria-label={`Pattern of rule ${i + 1}`} className="cq-mono" value={r.pattern} onChange={(e) => setRule(i, { pattern: e.target.value })} placeholder="\\bsynergy\\b" />
-                  <Input aria-label={`Message of rule ${i + 1}`} value={r.note} onChange={(e) => setRule(i, { note: e.target.value })} placeholder="What to write instead" />
-                  <Button variant="ghost" size="icon-sm" aria-label={`Remove rule ${i + 1}`} onClick={() => setRules(rules.filter((_, j) => j !== i))}>
+                  <Input aria-label={t("Language of rule {n}", { n: i + 1 })} value={r.lang} onChange={(e) => setRule(i, { lang: e.target.value })} placeholder="any" />
+                  <Input aria-label={t("Pattern of rule {n}", { n: i + 1 })} className="cq-mono" value={r.pattern} onChange={(e) => setRule(i, { pattern: e.target.value })} placeholder="\\bsynergy\\b" />
+                  <Input aria-label={t("Message of rule {n}", { n: i + 1 })} value={r.note} onChange={(e) => setRule(i, { note: e.target.value })} placeholder={t("What to write instead")} />
+                  <Button variant="ghost" size="icon-sm" aria-label={t("Remove rule {n}", { n: i + 1 })} onClick={() => setRules(rules.filter((_, j) => j !== i))}>
                     <Trash2 />
                   </Button>
                 </div>
               ))}
               <div>
                 <Button variant="outline" size="sm" onClick={() => setRules([...rules, { severity: "WARN", lang: "any", pattern: "", note: "" }])}>
-                  <Plus /> Add a rule
+                  <Plus /> {t("Add a rule")}
                 </Button>
               </div>
             </FieldSet>
@@ -793,15 +815,15 @@ function Import({ me, editing, packs, onDone }: { me: Me; editing?: Draft | null
           {editing && (
             <div className="cq-columns">
               <div className="cq-card cq-form">
-                <Field label="Exemplar" htmlFor="p-exemplar" hint="exemplar.md: what a good deck of this brand looks like. Empty: none (a subsidiary inherits its group's).">
+                <Field label={t("Exemplar")} htmlFor="p-exemplar" hint={t("exemplar.md: what a good deck of this brand looks like. Empty: none (a subsidiary inherits its group's).")}>
                   <Textarea id="p-exemplar" rows={8} value={exemplar} onChange={(e) => setExemplar(e.target.value)} />
                 </Field>
                 <FileDrop
-                  label="Exemplar pages"
+                  label={t("Exemplar pages")}
                   accept=".png,.jpg,.jpeg,.svg,.webp"
                   multiple
-                  title={pages.length ? `${pages.length} page(s)` : "Images of exemplary slides"}
-                  hint="Shown with the exemplar in the brand portal and to the agent."
+                  title={pages.length ? tn(pages.length, "{n} page", "{n} pages") : t("Images of exemplary slides")}
+                  hint={t("Shown with the exemplar in the brand portal and to the agent.")}
                   onFiles={(files) => void addPages(files, draft)}
                 />
                 {pages.length > 0 && (
@@ -809,7 +831,7 @@ function Import({ me, editing, packs, onDone }: { me: Me; editing?: Draft | null
                     {pages.map((name) => (
                       <li key={name}>
                         <span className="cq-mono">{name}</span>
-                        <Button variant="ghost" size="icon-sm" aria-label={`Remove ${name}`} onClick={() => void removePage(name, draft)}>
+                        <Button variant="ghost" size="icon-sm" aria-label={t("Remove {name}", { name })} onClick={() => void removePage(name, draft)}>
                           <X />
                         </Button>
                       </li>
@@ -818,7 +840,7 @@ function Import({ me, editing, packs, onDone }: { me: Me; editing?: Draft | null
                 )}
               </div>
               <div className="cq-card cq-form">
-                <Field label="Storyline" htmlFor="p-storyline" hint="storyline.md: the narrative arcs the agent proposes. Empty: none (a subsidiary inherits its group's).">
+                <Field label={t("Storyline")} htmlFor="p-storyline" hint={t("storyline.md: the narrative arcs the agent proposes. Empty: none (a subsidiary inherits its group's).")}>
                   <Textarea id="p-storyline" rows={8} value={storyline} onChange={(e) => setStoryline(e.target.value)} />
                 </Field>
               </div>
@@ -826,11 +848,11 @@ function Import({ me, editing, packs, onDone }: { me: Me; editing?: Draft | null
           )}
           {preview && (
             <div className="cq-card cq-form" data-preview>
-              <FieldLegend variant="label">Sample deck on this draft</FieldLegend>
+              <FieldLegend variant="label">{t("Sample deck on this draft")}</FieldLegend>
               <ul className="cq-template-grid">
                 {preview.map((s) => (
                   <li key={s.number} className="cq-template">
-                    <img src={s.image_url} alt={`Sample slide ${s.number}`} />
+                    <img src={s.image_url} alt={t("Sample slide {n}", { n: s.number })} />
                   </li>
                 ))}
               </ul>
@@ -838,7 +860,7 @@ function Import({ me, editing, packs, onDone }: { me: Me; editing?: Draft | null
           )}
           <div className="cq-row-actions">
             <Button size="lg" variant="outline" disabled={!!busy} onClick={() => void previewSample(draft)}>
-              <Eye /> Preview on a sample deck
+              <Eye /> {t("Preview on a sample deck")}
             </Button>
             <Button size="lg" disabled={!!busy} onClick={() => void publish()}>
               {editing ? t("Validate and save") : t("Validate and publish")}

@@ -260,7 +260,7 @@ export function SaveToM365(props: { status: M365Status; deck_id: string; errors:
             </Button>
             {saved.web_url && props.onShareTeams && (
               <Button variant="outline" onClick={() => props.onShareTeams?.(saved.web_url as string)}>
-                <MessageSquareShare /> Share to Teams
+                <MessageSquareShare /> {t("Share to Teams")}
               </Button>
             )}
             {saved.web_url && (
@@ -367,7 +367,7 @@ export function ShareToTeams(props: { status: M365Status; deck_id: string; file_
       {options ? (
         <select id={id} className="cq-select" value={value} onChange={(e) => set(e.target.value)}>
           <option value="" disabled>
-            {options.length ? "Choose…" : "None found"}
+            {options.length ? t("Choose…") : t("None found")}
           </option>
           {options.map((o) => (
             <option key={o.id} value={o.id}>
@@ -376,34 +376,34 @@ export function ShareToTeams(props: { status: M365Status; deck_id: string; file_
           ))}
         </select>
       ) : (
-        <Spinner label="Loading" />
+        <Spinner label={t("Loading")} />
       )}
     </Field>
   );
 
   if (!props.status.connected)
     return (
-      <Dialog title="Share to Teams" onClose={props.onClose}>
+      <Dialog title={t("Share to Teams")} onClose={props.onClose}>
         <div className="cq-dialog-body">
           <Connect />
         </div>
       </Dialog>
     );
   return (
-    <Dialog title="Share to Teams" onClose={props.onClose}>
+    <Dialog title={t("Share to Teams")} onClose={props.onClose}>
       {posted ? (
         <>
           <div className="cq-dialog-body">
-            <p>Posted.</p>
-            {posted.note && <p className="cq-hint">Only the people with access to the deck can open its link: share it with them first.</p>}
+            <p>{t("Posted.")}</p>
+            {posted.note && <p className="cq-hint">{t("Only the people with access to the deck can open its link: share it with them first.")}</p>}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={props.onClose}>
-              Close
+              {t("Close")}
             </Button>
             {posted.web_url && (
               <a className={buttonVariants()} href={posted.web_url} target="_blank" rel="noreferrer">
-                <ExternalLink /> Open in Teams
+                <ExternalLink /> {t("Open in Teams")}
               </a>
             )}
           </DialogFooter>
@@ -413,25 +413,25 @@ export function ShareToTeams(props: { status: M365Status; deck_id: string; file_
           <div className="cq-dialog-body">
             <div className="cq-m365-places">
               <Button type="button" size="sm" variant={kind === "channel" ? "default" : "outline"} onClick={() => setKind("channel")}>
-                Channel
+                {t("Channel")}
               </Button>
               <Button type="button" size="sm" variant={kind === "chat" ? "default" : "outline"} onClick={() => setKind("chat")}>
-                Chat
+                {t("Chat")}
               </Button>
             </div>
             {kind === "channel" ? (
               <>
-                {pick("t-team", "Team", teams, team, setTeam)}
-                {team && pick("t-channel", "Channel", channels, channel, setChannel)}
+                {pick("t-team", t("Team"), teams, team, setTeam)}
+                {team && pick("t-channel", t("Channel"), channels, channel, setChannel)}
               </>
             ) : (
-              pick("t-chat", "Chat", chats, chat, setChat)
+              pick("t-chat", t("Chat"), chats, chat, setChat)
             )}
-            <Field label="Message" htmlFor="t-message">
-              <Textarea id="t-message" rows={3} maxLength={4000} value={message} placeholder="Here is the deck for Thursday's review." onChange={(e) => setMessage(e.target.value)} />
+            <Field label={t("Message")} htmlFor="t-message">
+              <Textarea id="t-message" rows={3} maxLength={4000} value={message} placeholder={t("Here is the deck for Thursday's review.")} onChange={(e) => setMessage(e.target.value)} />
             </Field>
-            <p className="cq-hint">The message carries the deck's link{props.file_url ? " and the saved file's" : ""}, posted as you.</p>
-            {busy && <Spinner label="Posting" />}
+            <p className="cq-hint">{props.file_url ? t("The message carries the deck's link and the saved file's, posted as you.") : t("The message carries the deck's link, posted as you.")}</p>
+            {busy && <Spinner label={t("Posting")} />}
             {error && (
               <Alert variant="destructive">
                 <AlertDescription>{error}</AlertDescription>
@@ -440,10 +440,10 @@ export function ShareToTeams(props: { status: M365Status; deck_id: string; file_
           </div>
           <DialogFooter>
             <Button variant="outline" type="button" onClick={props.onClose}>
-              Cancel
+              {t("Cancel")}
             </Button>
             <Button type="submit" disabled={busy || !ready}>
-              <MessageSquareShare /> Post
+              <MessageSquareShare /> {t("Post")}
             </Button>
           </DialogFooter>
         </form>

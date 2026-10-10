@@ -195,8 +195,8 @@ export function DeckViewer(props: {
                     }
                   }}
                 />
-                <label className="cq-comment-type" title="A required comment blocks the deck's approval until it is resolved">
-                  <input type="checkbox" checked={required} onChange={(e) => setRequired(e.target.checked)} /> Required
+                <label className="cq-comment-type" title={s.requiredHint}>
+                  <input type="checkbox" checked={required} onChange={(e) => setRequired(e.target.checked)} /> {s.required}
                 </label>
                 <button type="submit" className="cq-btn" data-variant="primary" data-size="sm" disabled={busy || !text.trim()}>
                   {s.comment}
@@ -318,7 +318,7 @@ function Comments(props: {
                     <button type="button" aria-current={slide.id === props.current && c.shape_id === props.selected && c.shape_id !== null} onClick={() => props.onPick(slide.id, c.shape_id)}>
                       <span className="cq-comment-meta">
                         <b>{who(c)}</b>
-                        {c.type === "required" && <span className="cq-required">Required</span>}
+                        {c.type === "required" && <span className="cq-required">{s.required}</span>}
                         <span>·</span>
                         {sh ? (
                           <span>

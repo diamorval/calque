@@ -214,7 +214,7 @@ export function Chat(props: {
     e?.preventDefault();
     const typed = ask?.text ?? text.trim();
     if (!typed || steps || uploading || disabled) return;
-    const note = pending.length ? `\n\nAttached: ${pending.map((f) => f.name).join(", ")}` : "";
+    const note = pending.length ? `\n\n${t("Attached: {files}", { files: pending.map((f) => f.name).join(", ") })}` : "";
     const asked = [...messages, { role: "user" as const, content: typed + note }];
     const files = pending;
     const flow = ask ? ask.workflow : workflow;
@@ -319,12 +319,12 @@ export function Chat(props: {
         </div>
       )}
       {!writes ? (
-        <p className="cq-hint cq-chat-readonly">Only the deck's editors talk to the agent: you read the conversation.</p>
+        <p className="cq-hint cq-chat-readonly">{t("Only the deck's editors talk to the agent: you read the conversation.")}</p>
       ) : (
         <form className="cq-composer" onSubmit={send}>
           <textarea
             ref={input}
-            aria-label="Message"
+            aria-label={t("Message")}
             value={text}
             rows={2}
             placeholder={props.placeholder}
@@ -344,7 +344,7 @@ export function Chat(props: {
                   type="button"
                   variant="outline"
                   size="sm"
-                  aria-label={`Remove ${f.name}`}
+                  aria-label={t("Remove {name}", { name: f.name })}
                   onClick={() => setPending((p) => p.filter((x) => x !== f))}
                 >
                   {f.name} <X />
@@ -358,8 +358,8 @@ export function Chat(props: {
               type="button"
               variant="ghost"
               size="icon"
-              aria-label="Attach files"
-              title="Attach images, PPTX, PDF, Word, Excel, CSV, text or Markdown"
+              aria-label={t("Attach files")}
+              title={t("Attach images, PPTX, PDF, Word, Excel, CSV, text or Markdown")}
               disabled={uploading || !!steps || disabled}
               onClick={() => picker.current?.click()}
             >
@@ -370,8 +370,8 @@ export function Chat(props: {
                 type="button"
                 variant="ghost"
                 size="icon"
-                aria-label="From Microsoft 365"
-                title="Attach a file from OneDrive or SharePoint"
+                aria-label={t("From Microsoft 365")}
+                title={t("Attach a file from OneDrive or SharePoint")}
                 disabled={uploading || !!steps || disabled}
                 onClick={() => setPicking(true)}
               >
@@ -380,28 +380,31 @@ export function Chat(props: {
             )}
             {props.footer}
             {choice.models.length > 1 && (
-              <select className="cq-select cq-model-pick" aria-label="AI model" value={choice.picked} onChange={(e) => choice.pick(e.target.value)}>
-                <option value="">Default model{choice.mine ? ` (${choice.mine.model})` : ""}</option>
+              <select className="cq-select cq-model-pick" aria-label={t("AI model")} value={choice.picked} onChange={(e) => choice.pick(e.target.value)}>
+                <option value="">
+                  {t("Default model")}
+                  {choice.mine ? ` (${choice.mine.model})` : ""}
+                </option>
                 {choice.models.map((m) => (
                   <option key={m.id} value={m.id}>
                     {m.model}
                     {m.label ? ` (${m.label})` : ""}
-                    {m.is_default ? " · default" : ""}
+                    {m.is_default ? ` · ${t("default")}` : ""}
                   </option>
                 ))}
               </select>
             )}
-            {model && <span className="cq-hint">Model: {model}</span>}
+            {model && <span className="cq-hint">{t("Model: {model}", { model })}</span>}
             {messages.length > 0 && (
-              <Button type="button" variant="ghost" size="icon" aria-label="New conversation" title="Start the conversation over" disabled={!!steps || disabled} onClick={() => void restart()}>
+              <Button type="button" variant="ghost" size="icon" aria-label={t("New conversation")} title={t("Start the conversation over")} disabled={!!steps || disabled} onClick={() => void restart()}>
                 <MessageSquarePlus />
               </Button>
             )}
             <span className="cq-spacer" />
             <span className="cq-hint cq-keys">
-              <Kbd>↵</Kbd> send · <Kbd>⇧↵</Kbd> new line
+              <Kbd>↵</Kbd> {t("send")} · <Kbd>⇧↵</Kbd> {t("new line")}
             </span>
-            <Button type="submit" size="icon" aria-label="Send" disabled={!!steps || uploading || disabled || !text.trim()}>
+            <Button type="submit" size="icon" aria-label={t("Send")} disabled={!!steps || uploading || disabled || !text.trim()}>
               <ArrowUp />
             </Button>
           </div>
