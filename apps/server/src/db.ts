@@ -63,6 +63,10 @@ create table if not exists models (
   updated_by text not null,
   updated_at timestamptz not null default now()
 );
+-- label: tells two configs of one model apart; options: provider settings (JSON); headers: sealed JSON
+alter table models add column if not exists label text;
+alter table models add column if not exists options text;
+alter table models add column if not exists headers text;
 create table if not exists files (
   id uuid primary key,
   owner text not null,

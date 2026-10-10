@@ -36,7 +36,7 @@ describe("MCP server over Streamable HTTP", { timeout: ENGINE_TIMEOUT }, () => {
     const tools = (await client.listTools()).tools;
     expect(tools.map((t) => t.name).sort()).toEqual(
       [
-        "add_comment", "add_slides", "create_deck", "export_pptx", "import_pack", "import_pptx", "lint_deck",
+        "add_comment", "add_slides", "create_deck", "export_pdf", "export_pptx", "import_pack", "import_pptx", "lint_deck",
         "list_comments", "list_packs", "open_deck", "patch_deck", "restore_version", "review_deck", "upload_url",
         "list_decks", "share_deck", "unshare_deck", "list_shares", "set_general_access", "reset_link", "transfer_deck",
         "resolve_comments", "set_approval",
@@ -107,6 +107,13 @@ describe("MCP server over Streamable HTTP", { timeout: ENGINE_TIMEOUT }, () => {
     expect(exported.path).toMatch(/v4\.pptx$/);
     const res = await http.request(exported.download_url);
     expect(res.headers.get("content-type")).toContain("presentationml");
+
+    const pdf = await call("export_pdf", { deck_id: id });
+    expect(pdf).toMatchObject({ version: 4, path: expect.stringMatching(/v4\.pdf$/) });
+    const got = await http.request(pdf.download_url);
+    expect(got.headers.get("content-type")).toBe("application/pdf");
+    expect(got.headers.get("content-disposition")).toMatch(/v4\.pdf$/);
+    expect(Buffer.from(await got.arrayBuffer()).subarray(0, 4).toString()).toBe("%PDF");
 
     const imported = await call("import_pptx", {
       file: { base64: readFileSync(exported.path).toString("base64") },

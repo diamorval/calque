@@ -3,7 +3,7 @@ import { Button } from "diametral-ds/button";
 import { Kbd } from "diametral-ds/kbd";
 import { ArrowUp, Check, Paperclip, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { agent, upload, type ToolStep } from "../api.ts";
+import { agent, api, upload, type ToolStep } from "../api.ts";
 
 /** A file attached to the conversation, uploaded to /api/files. */
 interface Attached {
@@ -80,6 +80,41 @@ function lines(m: ChatMessage, failed: Map<string, string>): { text: string; too
   };
 }
 
+interface ModelChoice {
+  id: string;
+  model: string;
+  label: string | null;
+  is_default: boolean;
+}
+const PICKED = "calque:model";
+
+/** The configured models, and the one this viewer picked ("" = the workspace default). */
+function useModelChoice() {
+  const [models, setModels] = useState<ModelChoice[]>([]);
+  const [picked, setPicked] = useState(() => {
+    try {
+      return localStorage.getItem(PICKED) ?? "";
+    } catch {
+      return "";
+    }
+  });
+  useEffect(() => {
+    api<{ models: ModelChoice[] }>("/api/models")
+      .then((r) => setModels(r.models))
+      .catch(() => setModels([]));
+  }, []);
+  const pick = (id: string) => {
+    setPicked(id);
+    try {
+      localStorage.setItem(PICKED, id);
+    } catch {
+      // storage blocked: the choice lasts for this page only
+    }
+  };
+  // a removed model falls back to the default
+  return { models, picked: models.some((m) => m.id === picked) ? picked : "", pick };
+}
+
 /** The tools the agent called, one row each (a check, or a cross and why); the last one live while it runs. */
 function Trace({ tools, live }: { tools: ToolStep[]; live?: boolean }) {
   return (
@@ -127,6 +162,7 @@ export function Chat(props: {
   const [steps, setSteps] = useState<ToolStep[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [model, setModel] = useState<string | null>(null);
+  const choice = useModelChoice();
   const [workflow, setWorkflow] = useState<Ask["workflow"]>();
   // sent with every turn, so the agent keeps them as context; `pending` go with the next message
   const [files, setFiles] = useState<Attached[]>(() => load<Attached>(`${props.storageKey}:files`));
@@ -178,7 +214,7 @@ export function Chat(props: {
     try {
       const r = await agent<AgentResult>(
         "/api/agent/chat",
-        { messages: asked, pack_id: props.pack_id, deck_id: props.deck_id, workflow: flow, ...(all.length ? { files: all.map((f) => f.file_id) } : {}) },
+        { messages: asked, pack_id: props.pack_id, deck_id: props.deck_id, workflow: flow, ...(choice.picked ? { model: choice.picked } : {}), ...(all.length ? { files: all.map((f) => f.file_id) } : {}) },
         (tools) => setSteps((s) => [...(s ?? []), ...tools]),
       );
       const conversation = [...asked, ...r.messages];
@@ -307,6 +343,18 @@ export function Chat(props: {
             {uploading ? <span className="cq-spinner" /> : <Paperclip />}
           </Button>
           {props.footer}
+          {choice.models.length > 1 && (
+            <select className="cq-select cq-model-pick" aria-label="AI model" value={choice.picked} onChange={(e) => choice.pick(e.target.value)}>
+              <option value="">Default model</option>
+              {choice.models.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.model}
+                  {m.label ? ` (${m.label})` : ""}
+                  {m.is_default ? " · default" : ""}
+                </option>
+              ))}
+            </select>
+          )}
           {model && <span className="cq-hint">Model: {model}</span>}
           <span className="cq-spacer" />
           <span className="cq-hint cq-keys">

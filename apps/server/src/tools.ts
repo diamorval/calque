@@ -339,6 +339,22 @@ export const TOOLS = {
     run: (app, user, a) => setApproval(app.decks, user, a.deck_id, a.status, a.note),
   }),
 
+  export_pdf: tool({
+    title: "Export PDF",
+    description: "Download link for the deck as a PDF, one page per slide, rendered like the previews (and its local path on a stdio server).",
+    input: z.object({ deck_id: deckId, version }),
+    readOnly: true,
+    role: "viewer",
+    run: async (app, user, a) => {
+      const r = await app.decks.exportPdf(user, a.deck_id, a.version);
+      return {
+        version: r.version,
+        download_url: `${app.publicUrl}/decks/${a.deck_id}/deck.pdf?v=${r.version}&${token(app, user, a.deck_id)}`,
+        ...(user.local ? { path: r.path } : {}),
+      };
+    },
+  }),
+
   list_decks: tool({
     title: "List decks",
     description: "Your decks and the decks shared with you, newest change first: id, title, pack, owner, version and your role (owner, editor, commenter, viewer).",

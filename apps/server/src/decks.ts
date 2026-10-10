@@ -1,5 +1,5 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import type { DeckSpec, PatchOp } from "@calque/deckspec";
@@ -430,6 +430,15 @@ export class Decks {
   async exportPath(user: User, id: string, version?: number): Promise<{ version: number; path: string }> {
     const { version: v, report } = await this.report(user, id, version);
     return { version: v, path: report.path };
+  }
+
+  /** The version as a PDF, rendered by LibreOffice as the previews are; redone when the PPTX is newer. */
+  async exportPdf(user: User, id: string, version?: number): Promise<{ version: number; path: string }> {
+    const { deck, version: v, report } = await this.report(user, id, version);
+    const out = join(this.dir(id), `v${v}.pdf`);
+    if (!existsSync(out) || statSync(out).mtimeMs < statSync(report.path).mtimeMs)
+      await engine("pdf", { pack: deck.packDir, pptx: report.path, out });
+    return { version: v, path: out };
   }
 
   /** A comment on a slide (or one shape), or with `parent_id` a reply in that comment's thread. */

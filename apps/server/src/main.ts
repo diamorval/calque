@@ -4,15 +4,18 @@ import { createApp } from "./app.ts";
 import type { AuthConfig } from "./auth.ts";
 import { createHttp } from "./http.ts";
 import { sessions } from "./session.ts";
+import { teamsConfig } from "./teams.ts";
 
 const app = await createApp();
 const issuer = process.env.CALQUE_OIDC_ISSUER;
+const { claim, ...teams } = teamsConfig();
 const auth: AuthConfig | undefined = issuer
   ? {
       issuer,
       audience: process.env.CALQUE_OIDC_AUDIENCE ?? "calque",
       resource: new URL("/mcp", app.publicUrl),
-      teamsClaim: process.env.CALQUE_TEAMS_CLAIM ?? "groups",
+      teamsClaim: claim,
+      teams,
     }
   : undefined;
 // the web app signs in against the same issuer (CALQUE_OIDC_CLIENT_ID: its client, default the audience)
@@ -23,6 +26,7 @@ const web = auth
       clientSecret: process.env.CALQUE_OIDC_CLIENT_SECRET,
       publicUrl: app.publicUrl,
       teamsClaim: auth.teamsClaim,
+      teams: auth.teams,
       secret: app.secret,
     })
   : undefined;

@@ -3,7 +3,7 @@ import { Alert, AlertDescription } from "diametral-ds/alert";
 import { Button } from "diametral-ds/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "diametral-ds/table";
 import { Tag } from "diametral-ds/tag";
-import { BadgeCheck, CircleCheck, Download, History, ListChecks, ListPlus, Play, Send, Share2, Sparkles, TriangleAlert, Undo2, X } from "lucide-react";
+import { BadgeCheck, CircleCheck, Download, FileText, History, ListChecks, ListPlus, Play, Send, Share2, Sparkles, TriangleAlert, Undo2, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { agent, tool } from "../api.ts";
 import { Chat, type Ask } from "../components/Chat.tsx";
@@ -140,6 +140,23 @@ export function Editor({ id }: { id: string }) {
                 )}
               </>
             )}
+            <Button
+              variant="outline"
+              disabled={busy !== null}
+              onClick={async () => {
+                setBusy("Exporting PDF");
+                setError(null);
+                try {
+                  location.assign((await tool<{ download_url: string }>("export_pdf", { deck_id: id })).download_url);
+                } catch (e) {
+                  setError((e as Error).message);
+                } finally {
+                  setBusy(null);
+                }
+              }}
+            >
+              <FileText /> Export PDF
+            </Button>
             {/* the soft gate: lint ERRORs ask for a reason, recorded with the export, never a block */}
             <Button onClick={() => (errors.length ? setDialog("export") : void exportPptx().catch((e: Error) => setError(e.message)))}>
               <Download /> Export PPTX
