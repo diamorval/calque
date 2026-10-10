@@ -41,8 +41,8 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with: { node-version: 24 }
-      # the full report; fails on critical only (a high with no patched version sits in UI tooling)
-      - run: pnpm audit --prod --audit-level critical
+      # the full report; fails on high and critical advisories
+      - run: pnpm audit --prod --audit-level high
       - uses: astral-sh/setup-uv@v5
       - run: uv export --frozen --no-dev --no-emit-project --format requirements-txt > requirements.txt
         working-directory: engine
