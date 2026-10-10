@@ -24,7 +24,7 @@ node apps/server/src/stdio.ts          # stdio, for a local MCP client (bridge t
 | `CALQUE_OIDC_CLIENT_ID` | the audience | the web app's OIDC client (authorization code + PKCE) |
 | `CALQUE_OIDC_CLIENT_SECRET` | unset: public client | its secret, for a confidential client |
 | `CALQUE_SECRET` | random, in `$CALQUE_DATA/secret` | seals model API keys at rest (AES-256-GCM): set it in production |
-| `CALQUE_ADMIN_TEAM` | `calque-admins` | team allowed to configure AI models and, on any deck, see who has access, make it private, reset its link and transfer it (never to read it) |
+| `CALQUE_ADMIN_TEAM` | `calque-admins` | team allowed to configure AI models, to manage every brand pack (seeded ones included) and, on any deck, see who has access, make it private, reset its link and transfer it (never to read it) |
 | `CALQUE_LLM_MODEL` | unset | preconfigured gateway, saved as model `env`, default unless another is set |
 | `CALQUE_LLM_PROVIDER` / `_BASE_URL` / `_API_KEY` | `openai-compatible` / – / – | the gateway's provider, endpoint and key |
 | `CALQUE_LLM_HEADERS` | unset | JSON object of extra request headers (e.g. `{"Ocp-Apim-Subscription-Key": "…"}`), sealed at rest |
@@ -199,8 +199,15 @@ no server-side session: a user removed from Entra keeps access until the 8-hour 
 | `POST /api/files` | multipart `file` (50 MB max, else 413) → `{file_id, name, size, type}`, owned by the caller; `?ticket=` from `upload_url` instead of credentials |
 | `POST /api/packs/drafts` | multipart `template` (.pptx or .potx), `id`, `name`, optional `tokens` (tokens.json): extracted draft (manifest with guessed roles and the fonts/colours the slides use, resolved colours and fonts to review, archetype names, one PNG per template slide) |
 | `POST /api/packs/drafts/:id/fonts` | multipart `font` (.ttf, .otf): its family is allowed by lint (`lint.extra_fonts`) on publish |
-| `POST /api/packs/drafts/:id/publish` | `{manifest, voice?, visibility, teams?}`: validated (template lint, test deck), then published |
-| `POST /api/packs/:id/visibility` | `{visibility, teams?}`, owner only |
+| `POST /api/packs/drafts/:id/template` | multipart `template`: a new template.pptx; the map and template-bound manifest fields are re-extracted |
+| `POST /api/packs/drafts/:id/tokens` | multipart `tokens`: a new tokens.json (DTCG), checked at publish |
+| `POST /api/packs/drafts/:id/publish` | `{manifest, voice?, note?, visibility, teams?}`: validated (template lint, test deck), DESIGN.md regenerated, then published as the pack's next release |
+| `GET /api/packs` | the Brand packs page: packs the user sees or manages, archived ones included, with `owner`, `pack_version`, `archived`, `editable` |
+| `POST /api/packs/:id/edit` | an edit draft of the current release, owner or admin |
+| `POST /api/packs/:id/visibility` | `{visibility, teams?}`, owner or admin |
+| `POST /api/packs/:id/archive` | `{archived}`: hidden from pickers and new decks, its decks still open; owner or admin |
+| `GET /api/packs/:id/versions` | the pack's releases (changelog), newest first; owner or admin |
+| `POST /api/packs/:id/restore` | `{version, note?}`: that release becomes current again, as a new release; owner or admin |
 
 ## Web agent (API door)
 

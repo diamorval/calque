@@ -224,6 +224,9 @@ importers:
       '@calque/deckspec':
         specifier: workspace:*
         version: link:../../packages/deckspec
+      '@calque/design':
+        specifier: workspace:*
+        version: link:../../packages/design
       '@calque/llm':
         specifier: workspace:*
         version: link:../../packages/llm

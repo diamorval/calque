@@ -11,6 +11,7 @@
   "dependencies": {
     "@calque/agent": "workspace:*",
     "@calque/deckspec": "workspace:*",
+    "@calque/design": "workspace:*",
     "@calque/llm": "workspace:*",
     "@calque/slide-ui": "workspace:*",
     "@electric-sql/pglite": "0.5.8",

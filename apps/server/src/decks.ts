@@ -75,6 +75,8 @@ interface DeckRow {
   general_role: "viewer" | "commenter";
   link_key: string;
   approval: "draft" | "in_review" | "approved";
+  /** The pack release the deck was created on. */
+  pack_version: number | null;
 }
 
 export class Conflict extends Error {}
@@ -199,13 +201,14 @@ export class Decks {
        order by v.created_at desc`,
       [user.id, user.teams],
     );
-    const seen = new Set((await listPacks(this.db, user)).map((p) => p.id));
+    const seen = new Set((await listPacks(this.db, user, { archived: true })).map((p) => p.id));
     const grants = await granted(this.db, user, rows.filter((r) => r.owner !== user.id).map((r) => r.id));
     return rows
       .filter((r) => seen.has(r.pack_id))
-      .map(({ id, pack_id, owner, title, head, updated_at }) => ({
+      .map(({ id, pack_id, pack_version, owner, title, head, updated_at }) => ({
         id,
         pack_id,
+        pack_version,
         owner,
         title,
         head,
@@ -234,14 +237,16 @@ export class Decks {
   /** New deck: builds before anything is stored, so a deck that does not build is never saved. */
   async create(user: User, spec: DeckSpec, note: string, id: string = randomUUID()) {
     const pack = await getPack(this.db, user, spec.pack_id);
+    if (pack.archived) throw new Error(`pack ${spec.pack_id} is archived: no new decks on it`);
     await this.ownFiles(user, spec);
     await mkdir(this.dir(id), { recursive: true });
     const report = await this.build(pack.dir, id, spec, 1);
-    await this.db.query("insert into decks (id, pack_id, owner, title, head) values ($1, $2, $3, $4, 1)", [
+    await this.db.query("insert into decks (id, pack_id, owner, title, head, pack_version) values ($1, $2, $3, $4, 1, $5)", [
       id,
       spec.pack_id,
       user.id,
       spec.title,
+      pack.version,
     ]);
     await this.db.query(
       "insert into deck_versions (deck_id, version, spec, note, author, author_name) values ($1, 1, $2, $3, $4, $5)",

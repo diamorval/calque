@@ -16,7 +16,23 @@ import { EngineError, REPO } from "./engine.ts";
 import { attachment, MAX_UPLOAD, saveFile, ticketUser, TooLarge } from "./files.ts";
 import { buildServer, UI_HTML } from "./mcp.ts";
 import { InvalidModel, isAdmin } from "./models.ts";
-import { addFont, draftDir, draftPack, editPack, Forbidden, NotFound, publishDraft, setVisibility, type User } from "./packs.ts";
+import {
+  addFont,
+  archivePack,
+  draftDir,
+  draftPack,
+  editPack,
+  Forbidden,
+  listPacks,
+  NotFound,
+  packVersions,
+  publishDraft,
+  replaceTemplate,
+  replaceTokens,
+  restorePack,
+  setVisibility,
+  type User,
+} from "./packs.ts";
 import { tokenUser } from "./preview.ts";
 import type { Sessions } from "./session.ts";
 import { resetLink, setGeneralAccess, shares, transfer } from "./shares.ts";
@@ -241,7 +257,7 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
   http.post(
     "/api/packs/drafts/:id/publish",
     route(async (c, user) => {
-      const b = Visibility.extend({ manifest: z.record(z.string(), z.unknown()), voice: z.string().optional() }).parse(await body(c));
+      const b = Visibility.extend({ manifest: z.record(z.string(), z.unknown()), voice: z.string().optional(), note: z.string().optional() }).parse(await body(c));
       return publishDraft(app.db, user, app.data, param(c, "id"), b);
     }),
   );
@@ -251,6 +267,28 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
     route(async (c, user) => {
       const b = Visibility.parse(await body(c));
       return setVisibility(app.db, user, param(c, "id"), b.visibility, b.teams ?? user.teams);
+    }),
+  );
+  // Pack governance: every pack one manages (archived too), template/tokens swaps, archive, releases.
+  http.get("/api/packs", route(async (_, user) => ({ packs: await listPacks(app.db, user, { manage: true }) })));
+  http.post(
+    "/api/packs/drafts/:id/template",
+    route(async (c, user) => replaceTemplate(user, app.data, param(c, "id"), (await upload(c, "template")).bytes)),
+  );
+  http.post(
+    "/api/packs/drafts/:id/tokens",
+    route(async (c, user) => replaceTokens(user, app.data, param(c, "id"), (await upload(c, "tokens")).bytes)),
+  );
+  http.post(
+    "/api/packs/:id/archive",
+    route(async (c, user) => archivePack(app.db, user, param(c, "id"), z.object({ archived: z.boolean() }).parse(await body(c)).archived)),
+  );
+  http.get("/api/packs/:id/versions", route((c, user) => packVersions(app.db, user, param(c, "id"))));
+  http.post(
+    "/api/packs/:id/restore",
+    route(async (c, user) => {
+      const b = z.object({ version: z.number().int().positive(), note: z.string().optional() }).parse(await body(c));
+      return restorePack(app.db, user, param(c, "id"), b.version, b.note);
     }),
   );
 

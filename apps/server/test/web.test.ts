@@ -125,7 +125,7 @@ describe("web app routes", { timeout: ENGINE_TIMEOUT }, () => {
     const published = await json(`/api/packs/drafts/${draft.draft_id}/publish`, { manifest: archetyped, voice: "# Voice\n\nPlain words.", visibility: "team" });
     expect(published.body).toMatchObject({ status: "published", id: "newco", visibility: "team", teams: ["sales", "calque-admins"] });
     // the uploaded font's family is now a pack font
-    const yaml = parse(readFileSync(join(app.data, "packs/newco/pack.yaml"), "utf8"));
+    const yaml = parse(readFileSync(join(app.data, "pack-versions/newco/1/pack.yaml"), "utf8"));
     expect(yaml.lint.extra_fonts).toContain("Brand Sans");
     expect(yaml.roles.archetypes).toEqual({ cards: [3] });
 
@@ -143,8 +143,8 @@ describe("web app routes", { timeout: ENGINE_TIMEOUT }, () => {
     expect(await packs({ bearer: await idp.token("bob") })).toContain("newco");
   });
 
-  it("edits a published pack through a draft, owner only", async () => {
-    expect((await json("/api/packs/acme-test/edit", {})).status).toBe(403);
+  it("edits a published pack through a draft, owner or admin only", async () => {
+    expect((await json("/api/packs/acme-test/edit", {}, { bearer: await idp.token("bob") })).status).toBe(403);
     expect((await json("/api/packs/newco/edit", {}, { bearer: await idp.token("bob") })).status).toBe(403);
 
     const draft = (await json("/api/packs/newco/edit", {})).body;
@@ -159,7 +159,7 @@ describe("web app routes", { timeout: ENGINE_TIMEOUT }, () => {
     expect((await json(`/api/packs/drafts/${draft.draft_id}/publish`, { manifest: broken, visibility: "team" })).status).toBe(422);
 
     const saved = await json(`/api/packs/drafts/${draft.draft_id}/publish`, { manifest: { ...draft.manifest, name: "NewCo Renamed" }, voice: "Short.", visibility: "team" });
-    expect(saved.body).toEqual({ status: "published", id: "newco" });
+    expect(saved.body).toEqual({ status: "published", id: "newco", version: 2 });
     const pack = (await json("/api/tools/list_packs", {})).body.packs.find((p: Json) => p.id === "newco");
     expect(pack).toMatchObject({ name: "NewCo Renamed", visibility: "workspace" });
   });
