@@ -224,7 +224,9 @@ export function Editor({ id }: { id: string }) {
             id: "library",
             label: "Library",
             icon: <BookMarked />,
-            content: <LibraryPanel key={library} pack_id={deck.pack_id} deck_id={id} canEdit={edits} manages={manages} me={me?.id ?? null} onInserted={() => void reload()} />,
+            content: (
+              <LibraryPanel key={library} pack_id={deck.pack_id} deck_id={id} canEdit={edits} manages={manages} me={me?.id ?? null} onInserted={() => void reload()} onAsk={setAsk} />
+            ),
           },
         ]}
         {...(edits

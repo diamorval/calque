@@ -8,6 +8,7 @@ import { recordLint } from "./compliance.ts";
 import type { Db } from "./db.ts";
 import { engine } from "./engine.ts";
 import { copyFile, FILE_REF, getFile, saveFile, uploadPath } from "./files.ts";
+import { libraryImages } from "./images.ts";
 import { isAdmin } from "./models.ts";
 import { Forbidden, getPack, listPacks, NotFound, visible, type PackRow, type User } from "./packs.ts";
 
@@ -320,6 +321,7 @@ export class Decks {
   async create(user: User, spec: DeckSpec, note: string, id: string = randomUUID()) {
     const pack = await getPack(this.db, user, spec.pack_id);
     if (pack.archived) throw new Error(`pack ${spec.pack_id} is archived: no new decks on it`);
+    spec = await this.adoptLibraryImages(user, spec);
     await this.ownFiles(user, spec);
     await mkdir(this.dir(id), { recursive: true });
     const report = await this.build(pack.dir, id, spec, 1);
@@ -352,6 +354,7 @@ export class Decks {
     const deck = await this.deck(user, id, "editor");
     // a version on another pack is a re-brand (or a restore across one): the caller must see it
     const packDir = spec.pack_id === deck.pack_id ? deck.packDir : (await getPack(this.db, user, spec.pack_id)).dir;
+    spec = await this.adoptLibraryImages(user, spec);
     await this.ownFiles(user, spec);
     const next = from + 1;
     const report = await this.build(packDir, id, spec, next);
@@ -406,6 +409,16 @@ export class Decks {
     if (!rows[0]) throw new NotFound(`deck ${id} has no version ${target}`);
     // undoing the restore walks on back from the restored version
     return this.commit(user, id, deck.head, await this.spec(id, target), `restore v${target}`, rows[0].undo_to);
+  }
+
+  /** `spec` with the approved library images it places (images.ts, `file:<id>`) copied to `user`'s
+  uploads: the deck keeps its own copy, whatever happens to the library. */
+  private async adoptLibraryImages(user: User, spec: DeckSpec): Promise<DeckSpec> {
+    const ids = new Set<string>();
+    mapFileRefs(spec, (fid) => (ids.add(fid), fid));
+    const copies = new Map<string, string>();
+    for (const fid of await libraryImages({ db: this.db }, user, [...ids])) copies.set(fid, (await copyFile(this.db, this.data, user, fid)).file_id);
+    return copies.size ? mapFileRefs(spec, (fid) => `${FILE_REF}${copies.get(fid) ?? fid}`) : spec;
   }
 
   /** A DeckSpec may only place the uploaded files of the user writing it. */

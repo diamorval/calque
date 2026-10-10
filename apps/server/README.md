@@ -136,6 +136,19 @@ and imported slide copied with it), so editing or deleting the source deck leave
 `CALQUE_RETENTION_DAYS` keeps it. `GET /api/library/:id/slide.png` is its thumbnail. The workflows
 (core/workflows) look there for proof points before naming a gap.
 
+### Image library
+
+Next to it, each pack has a library of approved images (photography, client logos, product
+shots). `image_library_add` takes an image the caller uploaded (`file_id`: `upload_url`,
+`POST /api/files`, `m365_import`) with a title and tags, copied into the library (a file owned by
+`library:<pack id>`, kept by `CALQUE_RETENTION_DAYS`); the pack's owner or an admin approves it
+(`image_library_review`), their own additions approved at once. Everyone who sees the pack searches
+the approved images (`image_library_list`: words of the title or tags, `tags`) and places one in a
+picture slot as its `ref` (`"image": "file:<file_id>"`). On save the deck gets its own copy, so a
+pending image is never placed and removing an image (`image_library_review` `remove`, which deletes
+its file) never breaks a deck. `GET /api/library/images/:id` serves the image (sandboxed). In the
+web app: the *Images* section of the editor's Library tab.
+
 ### Sharing
 
 Artifact style: people with access, and one share link per deck. Roles, each including the ones
@@ -349,6 +362,7 @@ access before their 8-hour cookie expires, provision the enterprise application 
 | `GET /api/branding` | `{name, logo}` for the web chrome (`CALQUE_APP_NAME`, `CALQUE_APP_LOGO`), no sign-in needed |
 | `POST /api/files` | multipart `file` (50 MB max, else 413) → `{file_id, name, size, type}`, owned by the caller; `?ticket=` from `upload_url` instead of credentials |
 | `GET /api/library/:id/slide.png` | a slide library entry's image, for whoever may see the entry |
+| `GET /api/library/images/:id` | an image library image, for whoever may see it (sandboxed CSP) |
 | `POST /api/packs/drafts` | multipart `template` (.pptx or .potx), `id`, `name`, optional `tokens` (tokens.json): extracted draft (manifest with guessed roles and the fonts/colours the slides use, resolved colours and fonts to review, archetype names, one PNG per template slide) |
 | `POST /api/packs/drafts/:id/fonts` | multipart `font` (.ttf, .otf): its family is allowed by lint (`lint.extra_fonts`) on publish |
 | `POST /api/packs/drafts/:id/template` | multipart `template`: a new template.pptx; the map and template-bound manifest fields are re-extracted |

@@ -147,6 +147,18 @@ create table if not exists library (
   source_slide text,
   created_at timestamptz not null default now()
 );
+-- images.ts: a pack's approved images, each a file owned by 'library:<pack_id>'
+create table if not exists library_images (
+  id uuid primary key,
+  pack_id text not null references packs(id),
+  file_id uuid not null,
+  title text not null,
+  tags jsonb not null default '[]',
+  status text not null default 'pending' check (status in ('pending', 'approved')),
+  added_by text not null,
+  approved_by text,
+  created_at timestamptz not null default now()
+);
 -- m365.ts: each user's Microsoft 365 connection, the refresh token sealed
 create table if not exists m365_tokens (
   user_id text primary key,

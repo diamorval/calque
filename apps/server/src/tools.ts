@@ -10,6 +10,7 @@ import type { Db } from "./db.ts";
 import { linkExpired, type Decks, type Finding, type Role } from "./decks.ts";
 import { REPO } from "./engine.ts";
 import { getFile, MAX_UPLOAD, TooLarge, uploadTicket } from "./files.ts";
+import { imageAdd, imageApprove, imageList, imageRemove } from "./images.ts";
 import { libraryAdd, libraryApprove, libraryInsert, libraryList, libraryRemove } from "./library.ts";
 import { fileName, teamsMessage, type M365 } from "./m365.ts";
 import type { Models } from "./models.ts";
@@ -626,6 +627,40 @@ export const TOOLS = {
     description: "The pack's owner or an admin: approve a pending library entry, or remove an entry (rejecting a proposal). Its author may also withdraw a pending one (remove).",
     input: z.object({ entry_id: z.string(), action: z.enum(["approve", "remove"]) }),
     run: (app, user, a) => (a.action === "approve" ? libraryApprove(app, user, a.entry_id) : libraryRemove(app, user, a.entry_id)),
+  }),
+
+  image_library_list: tool({
+    title: "List image library",
+    description:
+      "The approved images of a brand pack's library (photography, client logos, product shots), newest first: image_id, title, tags, `ref` and an image_url. Place one in a picture slot of a clone value as `\"image\": \"<ref>\"` (create_deck, patch_deck, add_slides): the deck keeps its own copy. Search with `query` (words of the title or tags) and `tags`; look here before asking the user for a photo. Pack managers pass status 'pending' to see the proposals to review.",
+    input: z.object({
+      pack_id: z.string().optional().describe("Default: every pack you see."),
+      query: z.string().optional(),
+      tags: z.array(z.string()).optional().describe("Images carrying every one of these tags."),
+      status: z.enum(["approved", "pending", "all"]).default("approved"),
+    }),
+    readOnly: true,
+    run: (app, user, a) => imageList(app, user, a),
+  }),
+
+  image_library_add: tool({
+    title: "Add to image library",
+    description:
+      "Propose an image you uploaded (`file_id` from upload_url, POST /api/files or m365_import) for a brand pack's image library, with a title and tags (e.g. photo, team, office, client-logo, the sector). The pack's owner or an admin approves it; their own additions are approved at once. Only add an image the user asked to share and has the rights to: everyone who sees the pack will reuse it.",
+    input: z.object({
+      pack_id: z.string(),
+      file_id: z.string(),
+      title: z.string().min(1).max(200),
+      tags: z.array(z.string().max(40)).max(20).optional(),
+    }),
+    run: (app, user, a) => imageAdd(app, user, a),
+  }),
+
+  image_library_review: tool({
+    title: "Review library image",
+    description: "The pack's owner or an admin: approve a pending library image, or remove one (rejecting a proposal). Its author may also withdraw a pending one (remove). Decks that placed it keep their copy.",
+    input: z.object({ image_id: z.string(), action: z.enum(["approve", "remove"]) }),
+    run: (app, user, a) => (a.action === "approve" ? imageApprove(app, user, a.image_id) : imageRemove(app, user, a.image_id)),
   }),
 
   m365_list: tool({

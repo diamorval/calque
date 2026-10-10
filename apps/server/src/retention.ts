@@ -26,9 +26,10 @@ export async function purge(app: App, days: number, now = new Date()) {
     [cutoff.toISOString()],
   );
   for (const { id } of rows) await app.decks.remove(RETENTION, id);
-  // an old upload still placed by a deck that stays (`file:<id>` in its current version) is kept
+  // an old upload still placed by a deck that stays (`file:<id>` in its current version) is kept,
+  // and so are the image library's (images.ts)
   const files = await app.db.query<{ id: string }>(
-    `delete from files f where f.created_at < $1 and not exists (select 1 from decks d
+    `delete from files f where f.created_at < $1 and f.owner not like 'library:%' and not exists (select 1 from decks d
        join deck_versions v on v.deck_id = d.id and v.version = d.head where strpos(v.spec::text, 'file:' || f.id::text) > 0)
      returning id`,
     [cutoff.toISOString()],

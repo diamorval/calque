@@ -311,6 +311,7 @@ export async function startDemo() {
     ],
     // the slide library starts empty (adding to it is read-only here)
     [/^POST \/api\/tools\/library_list$/, () => ({ entries: [] })],
+    [/^POST \/api\/tools\/image_library_list$/, () => ({ images: [] })],
     // an imported file opens a deck the engine built earlier on that pack
     [
       /^POST \/api\/tools\/import_pptx$/,
