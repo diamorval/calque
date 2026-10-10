@@ -41,7 +41,9 @@ export function engine<T = Record<string, unknown>>(op: string, args: Record<str
       try {
         res = JSON.parse(out);
       } catch {
-        return reject(new EngineError("engine_crash", err.trim() || out.trim() || "no output"));
+        // the traceback stays in the server log; the caller only learns that the engine failed
+        console.error(`engine ${op} crashed:\n${err.trim() || out.trim() || "no output"}`);
+        return reject(new EngineError("engine_crash", `the engine failed on ${op}; details are in the server log`));
       }
       if (!res.ok) return reject(new EngineError(res.error ?? "engine", res.message ?? "", res.issues));
       resolve(res);

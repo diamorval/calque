@@ -12,6 +12,12 @@ export interface User {
   name?: string;
   teams: string[];
   local?: boolean;
+  /** Not signed in: someone who opened a deck's "Anyone with the link" share link. */
+  anonymous?: boolean;
+  /** The deck share link key this request presented (`?k=`, src/shares.ts). */
+  key?: string;
+  /** The per-user URL token this request came with (`?t=`, src/preview.ts), passed on as is. */
+  token?: string;
 }
 
 export interface PackRow {
@@ -94,30 +100,32 @@ Without a manifest, returns the extractor's drafts (template map, tokens) for re
 assigns roles in a pack.yaml and calls again. Publishing needs: the pack loads, the template lints
 clean, and a cover/content/closing test deck builds and lints clean. */
 export async function importPack(db: Db, user: User, data: string, input: ImportPackInput) {
-  const draft = await engine<Draft>("extract", { template: input.template });
-  if (!input.manifest) {
-    return { status: "draft" as const, manifest: draft.manifest, template_map: draft.template_map, tokens: draft.tokens };
-  }
-  const id = String(input.manifest.id ?? "");
-  const { rows } = await db.query<PackRow>("select * from packs where id = $1", [id]);
-  if (rows[0] && rows[0].owner !== user.id && !user.local) throw new Error(`pack id ${JSON.stringify(id)} is taken`);
-
-  const stage = join(data, "packs", `.stage-${id}-${Date.now()}`);
+  const stage = join(data, "packs", `.stage-${randomUUID()}`);
   await mkdir(stage, { recursive: true });
   try {
+    // extract on the staged copy: the engine rewrites a .potx in place as a .pptx
     await cp(input.template, join(stage, "template.pptx"));
-    await writeFile(join(stage, "pack.yaml"), stringify(input.manifest));
-    await writeFile(join(stage, "tokens.json"), JSON.stringify(input.tokens ?? draft.tokens, null, 2) + "\n");
+    const draft = await engine<Draft>("extract", { template: join(stage, "template.pptx"), tokens: input.tokens });
+    if (!input.manifest) {
+      return { status: "draft" as const, manifest: draft.manifest, template_map: draft.template_map, tokens: draft.tokens, review: draft.review };
+    }
+    const id = String(input.manifest.id ?? "");
+    // checked before it names a folder (the engine checks the manifest only after staging)
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) throw new Error(`pack id ${JSON.stringify(id)}: lowercase letters, digits and dashes`);
+    const { rows } = await db.query<PackRow>("select * from packs where id = $1", [id]);
+    if (rows[0] && rows[0].owner !== user.id && !user.local) throw new Error(`pack id ${JSON.stringify(id)} is taken`);
+
+    let manifest = input.manifest;
+    await writeFile(join(stage, "tokens.json"), JSON.stringify(draft.tokens, null, 2) + "\n");
     await writeFile(join(stage, "template-map.yaml"), stringify(input.template_map ?? draft.template_map));
     if (input.voice) await writeFile(join(stage, "voice.md"), input.voice);
     if (input.fonts && existsSync(input.fonts)) {
       await cp(input.fonts, join(stage, "fonts"), { recursive: true });
-      const files = (await readdir(input.fonts)).sort();
-      const m = { ...input.manifest, fonts: { ...(input.manifest.fonts as object), files } };
-      await writeFile(join(stage, "pack.yaml"), stringify(m));
+      manifest = await withFonts(manifest, input.fonts);
     }
+    await writeFile(join(stage, "pack.yaml"), stringify(manifest));
     await engine("validate_pack", { pack: stage });
-    const problems = await validateStaged(stage, input.manifest);
+    const problems = await validateStaged(stage, manifest);
     if (problems.length) return { status: "invalid" as const, problems };
 
     const dir = join(data, "packs", id);
@@ -159,20 +167,73 @@ async function validateStaged(dir: string, manifest: Record<string, unknown>): P
   return [...problems, ...errors(test.findings).map((p) => `test deck ${p}`)];
 }
 
-type Draft = { manifest: Record<string, unknown>; template_map: { slides: { number: number; layout: string; shapes: { kind: string; text?: string }[] }[] }; tokens: Record<string, unknown> };
+type Draft = {
+  manifest: Record<string, unknown>;
+  template_map: { slides: { number: number; layout: string; shapes: { kind: string; text?: string }[] }[] };
+  tokens: Record<string, unknown>;
+  /** Resolved token values (path -> hex colour or font family), for a person to review. */
+  review: { colors: Record<string, string>; fonts: Record<string, string> };
+};
 
 const FONT = /^[\w .-]+\.(ttf|otf)$/i;
+const ROLE_NAMES = new Set(["cover", "summary", "divider", "subsection", "content", "closing", "appendix", "imported"]);
 
-/** Web import, step 1: stage the template as a draft pack (extracted map, tokens, manifest) with
-one PNG per template slide, for the reviewer to assign roles on. Only its creator sees it. */
-export async function draftPack(user: User, data: string, template: Buffer, id: string, name: string) {
+/** Archetype names a pack may declare under roles.archetypes: the cloned forms of core/forms.yaml. */
+async function archetypes(): Promise<string[]> {
+  const { forms } = parse(await readFile(join(REPO, "core/forms.yaml"), "utf8")) as { forms: Record<string, string> };
+  return Object.keys(forms).filter((f) => forms[f] === "clone" && !ROLE_NAMES.has(f));
+}
+
+/** A font file's family (OpenType `name` table, id 1): the name PowerPoint writes on a run. */
+export function fontFamily(b: Buffer): string | null {
+  try {
+    for (let i = 0; i < b.readUInt16BE(4); i++) {
+      const rec = 12 + i * 16;
+      if (b.toString("latin1", rec, rec + 4) !== "name") continue;
+      const at = b.readUInt32BE(rec + 8);
+      const strings = at + b.readUInt16BE(at + 4);
+      let found: [number, string] | null = null; // [preference, name]
+      for (let j = 0; j < b.readUInt16BE(at + 2); j++) {
+        const r = at + 6 + j * 12;
+        const [platform, , language, nameId, length = 0, offset = 0] = [0, 2, 4, 6, 8, 10].map((o) => b.readUInt16BE(r + o));
+        if (nameId !== 1) continue;
+        const raw = Buffer.from(b.subarray(strings + offset, strings + offset + length));
+        // Windows US English first, then any Unicode (UTF-16BE) record, then Mac Roman
+        const pref = platform === 3 && language === 0x409 ? 0 : platform === 0 || platform === 3 ? 1 : 2;
+        if (!found || pref < found[0]) found = [pref, pref < 2 ? raw.swap16().toString("utf16le") : raw.toString("latin1")];
+      }
+      return found?.[1].trim() || null;
+    }
+  } catch {
+    // not an OpenType file
+  }
+  return null;
+}
+
+/** The manifest with the pack's font files listed and their families allowed by lint. */
+async function withFonts(manifest: Record<string, unknown>, fontsDir: string): Promise<Record<string, unknown>> {
+  const files = (await readdir(fontsDir)).sort();
+  if (!files.length) return manifest;
+  const families = (await Promise.all(files.map(async (f) => fontFamily(await readFile(join(fontsDir, f)))))).filter((f): f is string => !!f);
+  const lint = (manifest.lint ?? {}) as { extra_fonts?: string[] };
+  return {
+    ...manifest,
+    fonts: { ...(manifest.fonts as object), files },
+    lint: { ...lint, extra_fonts: [...new Set([...(lint.extra_fonts ?? []), ...families])] },
+  };
+}
+
+/** Web import, step 1: stage the template (.pptx or .potx) as a draft pack (extracted map,
+tokens, manifest) with one PNG per template slide, for the reviewer to assign roles on. `tokens`:
+the company's tokens.json, used instead of the drafted one. Only its creator sees the draft. */
+export async function draftPack(user: User, data: string, template: Buffer, id: string, name: string, tokens?: Record<string, unknown>) {
   if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) throw new Error("pack id: lowercase letters, digits and dashes");
   const draftId = randomUUID();
   const dir = join(data, "pack-drafts", draftId);
   await mkdir(join(dir, "fonts"), { recursive: true });
   await writeFile(join(dir, "template.pptx"), template);
   await writeFile(join(dir, "owner"), user.id);
-  const d = await engine<Draft>("extract", { template: join(dir, "template.pptx"), pack_id: id, name });
+  const d = await engine<Draft>("extract", { template: join(dir, "template.pptx"), pack_id: id, name, tokens });
   await writeFile(join(dir, "pack.yaml"), stringify(d.manifest));
   await writeFile(join(dir, "tokens.json"), JSON.stringify(d.tokens, null, 2));
   await writeFile(join(dir, "template-map.yaml"), stringify(d.template_map));
@@ -180,6 +241,8 @@ export async function draftPack(user: User, data: string, template: Buffer, id: 
   return {
     draft_id: draftId,
     manifest: d.manifest,
+    review: d.review,
+    archetypes: await archetypes(),
     slides: d.template_map.slides.map((s) => ({
       number: s.number,
       layout: s.layout,
@@ -197,11 +260,14 @@ export async function draftDir(user: User, data: string, draftId: string): Promi
   return dir;
 }
 
+/** Add a font file to a draft. Its family is allowed by lint when the draft is published. */
 export async function addFont(user: User, data: string, draftId: string, name: string, bytes: Buffer) {
   if (!FONT.test(name)) throw new Error("fonts: .ttf or .otf files");
+  const family = fontFamily(bytes);
+  if (!family) throw new Error(`fonts: ${name} has no readable family name`);
   const dir = await draftDir(user, data, draftId);
   await writeFile(join(dir, "fonts", name), bytes);
-  return { fonts: (await readdir(join(dir, "fonts"))).sort() };
+  return { fonts: (await readdir(join(dir, "fonts"))).sort(), family };
 }
 
 /** Edit a published pack, step 1: copy it whole (exemplars, icons, notes included) into a draft
@@ -222,6 +288,7 @@ export async function editPack(db: Db, user: User, data: string, id: string) {
     manifest: parse(await readFile(join(dir, "pack.yaml"), "utf8")) as Record<string, unknown>,
     voice: existsSync(join(dir, "voice.md")) ? await readFile(join(dir, "voice.md"), "utf8") : "",
     fonts: (await readdir(join(dir, "fonts"))).sort(),
+    archetypes: await archetypes(),
     slides: tmap.slides.map((s) => ({
       number: s.number,
       layout: s.layout,
@@ -234,8 +301,7 @@ export async function editPack(db: Db, user: User, data: string, id: string) {
 /** Edit, step 2: the reviewed manifest and voice over the copy; validated like an import, then
 replaces the pack (same id, same visibility). */
 async function publishEdit(db: Db, data: string, dir: string, id: string, input: { manifest: Record<string, unknown>; voice?: string | undefined }) {
-  const fonts = (await readdir(join(dir, "fonts"))).sort();
-  const manifest = { ...input.manifest, id, ...(fonts.length ? { fonts: { ...(input.manifest.fonts as object), files: fonts } } : {}) };
+  const manifest = await withFonts({ ...input.manifest, id }, join(dir, "fonts"));
   await writeFile(join(dir, "pack.yaml"), stringify(manifest));
   if (input.voice !== undefined) await writeFile(join(dir, "voice.md"), input.voice);
   await engine("validate_pack", { pack: dir });

@@ -134,8 +134,17 @@ export function Packs({ me }: { me: Me }) {
 
 interface Draft {
   draft_id: string;
-  manifest: Record<string, unknown> & { roles: Record<string, number[]>; never_clone: number[]; default_language: string | null; lint: { placeholders?: string[] } };
+  manifest: Record<string, unknown> & {
+    roles: Record<string, number[]> & { archetypes?: Record<string, number[]> };
+    never_clone: number[];
+    default_language: string | null;
+    lint: { placeholders?: string[]; extra_fonts?: string[]; extra_colors?: string[] };
+  };
   slides: { number: number; layout: string; texts: string[]; image_url: string }[];
+  /** Archetype names a slide may be declared as (core/forms.yaml). */
+  archetypes: string[];
+  /** Resolved token values, on import: token path -> hex colour or font family. */
+  review?: { colors: Record<string, string>; fonts: Record<string, string> };
   /** Set when the draft edits a published pack. */
   voice?: string;
   fonts?: string[];
@@ -145,11 +154,18 @@ const ROLES = ["cover", "summary", "divider", "subsection", "content", "closing"
 const NONE = "none";
 const NEVER = "never";
 
-/** Role per slide from the draft manifest (the first role wins; archetypes stay as drafted). */
+/** Role per slide from the draft manifest (the first role wins). */
 function rolesOf(d: Draft): Record<number, string> {
   const out: Record<number, string> = {};
   for (const s of d.slides) out[s.number] = d.manifest.never_clone.includes(s.number) ? NEVER : NONE;
   for (const r of ROLES) for (const n of d.manifest.roles[r] ?? []) if (out[n] === NONE) out[n] = r;
+  return out;
+}
+
+/** Archetype per slide from the draft manifest (the first archetype wins). */
+function archetypesOf(d: Draft): Record<number, string> {
+  const out: Record<number, string> = {};
+  for (const [a, ns] of Object.entries(d.manifest.roles.archetypes ?? {})) for (const n of ns) out[n] ??= a;
   return out;
 }
 
@@ -158,8 +174,11 @@ function Import({ me, editing, onDone }: { me: Me; editing?: Draft | null; onDon
   const [id, setId] = useState("");
   const [name, setName] = useState(editing ? String(editing.manifest.name ?? "") : "");
   const [template, setTemplate] = useState<File | null>(null);
+  const [tokens, setTokens] = useState<File | null>(null);
   const [draft, setDraft] = useState<Draft | null>(editing ?? null);
   const [roles, setRoles] = useState<Record<number, string>>(editing ? rolesOf(editing) : {});
+  const [archetypes, setArchetypes] = useState<Record<number, string>>(editing ? archetypesOf(editing) : {});
+  const [families, setFamilies] = useState<string[]>(editing?.manifest.lint.extra_fonts ?? []);
   const [language, setLanguage] = useState(editing ? (editing.manifest.default_language ?? "") : "en");
   const [placeholders, setPlaceholders] = useState((editing?.manifest.lint.placeholders ?? []).join("\n"));
   const [voice, setVoice] = useState(editing?.voice ?? "");
@@ -188,9 +207,12 @@ function Import({ me, editing, onDone }: { me: Me; editing?: Draft | null; onDon
       form.set("id", id);
       form.set("name", name || id);
       form.set("template", template);
+      if (tokens) form.set("tokens", tokens);
       const d = await upload<Draft>("/api/packs/drafts", form);
       setDraft(d);
       setRoles(rolesOf(d));
+      setArchetypes(archetypesOf(d));
+      setFamilies(d.manifest.lint.extra_fonts ?? []);
       setLanguage(d.manifest.default_language ?? "en");
       setPlaceholders((d.manifest.lint.placeholders ?? []).join("\n"));
     });
@@ -200,6 +222,8 @@ function Import({ me, editing, onDone }: { me: Me; editing?: Draft | null; onDon
     if (!draft) return;
     await step("Validating: template lint and a test deck", async () => {
       const assigned = Object.entries(roles);
+      const declared: Record<string, number[]> = {};
+      for (const [n, a] of Object.entries(archetypes)) if (a !== NONE) (declared[a] ??= []).push(Number(n));
       const manifest = {
         ...draft.manifest,
         ...(editing ? { name: name || draft.manifest.name } : {}),
@@ -208,10 +232,10 @@ function Import({ me, editing, onDone }: { me: Me; editing?: Draft | null; onDon
           ...Object.fromEntries(
             ROLES.map((r) => [r, assigned.filter(([, v]) => v === r).map(([n]) => Number(n))]).filter(([, ns]) => (ns as number[]).length),
           ),
-          ...(draft.manifest.roles.archetypes ? { archetypes: draft.manifest.roles.archetypes } : {}),
+          ...(Object.keys(declared).length ? { archetypes: declared } : {}),
         },
         never_clone: assigned.filter(([, v]) => v === NEVER).map(([n]) => Number(n)),
-        lint: { ...draft.manifest.lint, placeholders: placeholders.split("\n").map((l) => l.trim()).filter(Boolean) },
+        lint: { ...draft.manifest.lint, extra_fonts: families.map((f) => f.trim()).filter(Boolean), placeholders: placeholders.split("\n").map((l) => l.trim()).filter(Boolean) },
       };
       const r = await api<{ status: string; problems?: string[] }>(`/api/packs/drafts/${draft.draft_id}/publish`, {
         manifest,
@@ -274,10 +298,17 @@ function Import({ me, editing, onDone }: { me: Me; editing?: Draft | null; onDon
           </Field>
           <FileDrop
             label="Template file"
-            accept=".pptx"
-            title={template ? template.name : "Drop the template.pptx here"}
+            accept=".pptx,.potx"
+            title={template ? template.name : "Drop the template (.pptx or .potx) here"}
             hint="or click to choose it"
             onFiles={(f) => setTemplate(f[0] ?? null)}
+          />
+          <FileDrop
+            label="Tokens file"
+            accept=".json"
+            title={tokens ? tokens.name : "Optional: the company's tokens.json"}
+            hint="Design tokens (DTCG). Without it, colours and fonts are drafted from the template."
+            onFiles={(f) => setTokens(f[0] ?? null)}
           />
           <Button type="submit" disabled={!template || !id || !!busy}>
             <FileUp /> Read the template
@@ -302,9 +333,50 @@ function Import({ me, editing, onDone }: { me: Me; editing?: Draft | null; onDon
                   ))}
                   <option value={NEVER}>Never clone</option>
                 </select>
+                <select
+                  className="cq-select"
+                  aria-label={`Archetype of slide ${s.number}`}
+                  value={archetypes[s.number] ?? NONE}
+                  onChange={(e) => setArchetypes({ ...archetypes, [s.number]: e.target.value })}
+                >
+                  <option value={NONE}>No archetype</option>
+                  {draft.archetypes.map((a) => (
+                    <option key={a} value={a}>
+                      {a.replace(/_/g, " ")}
+                    </option>
+                  ))}
+                </select>
               </li>
             ))}
           </ul>
+          {draft.review && (
+            <div className="cq-card cq-form">
+              <FieldSet>
+                <FieldLegend variant="label">Colours</FieldLegend>
+                <ul className="cq-swatches">
+                  {Object.entries(draft.review.colors).map(([path, hex]) => (
+                    <li key={path} title={path}>
+                      <svg className="cq-swatch" viewBox="0 0 1 1" aria-hidden>
+                        <rect width="1" height="1" fill={`#${hex}`} />
+                      </svg>
+                      <span className="cq-mono">{path.replace(/^(theme|role\.color)\./, "")}</span>
+                      <span className="cq-mono cq-muted">#{hex}</span>
+                    </li>
+                  ))}
+                </ul>
+              </FieldSet>
+              <FieldSet>
+                <FieldLegend variant="label">Fonts</FieldLegend>
+                <ul className="cq-swatches">
+                  {Object.entries(draft.review.fonts).map(([path, family]) => (
+                    <li key={path}>
+                      <span className="cq-mono">{path.replace(/^(theme|role)\.font\./, "")}</span> {family}
+                    </li>
+                  ))}
+                </ul>
+              </FieldSet>
+            </div>
+          )}
           <div className="cq-columns">
             <div className="cq-card cq-form">
               {editing && (
@@ -347,11 +419,16 @@ function Import({ me, editing, onDone }: { me: Me; editing?: Draft | null; onDon
                     for (const f of files) {
                       const form = new FormData();
                       form.set("font", f);
-                      setFonts((await upload<{ fonts: string[] }>(`/api/packs/drafts/${draft.draft_id}/fonts`, form)).fonts);
+                      const r = await upload<{ fonts: string[]; family: string }>(`/api/packs/drafts/${draft.draft_id}/fonts`, form);
+                      setFonts(r.fonts);
+                      setFamilies((fs) => (fs.includes(r.family) ? fs : [...fs, r.family]));
                     }
                   })
                 }
               />
+              <Field label="Allowed fonts" htmlFor="p-fonts" hint="Faces used on the template's slides and in the uploaded font files, besides the theme's. Lint flags any other.">
+                <Textarea id="p-fonts" rows={3} value={families.join("\n")} onChange={(e) => setFamilies(e.target.value.split("\n"))} />
+              </Field>
             </div>
           </div>
           <div>

@@ -67,7 +67,9 @@ export function sessions(cfg: SessionConfig): Sessions {
       const verifier = oidc.randomPKCECodeVerifier();
       const state = oidc.randomState();
       const back = c.req.query("return") ?? "/";
-      setCookie(c, LOGIN, await seal({ verifier, state, back: back.startsWith("/") ? back : "/" }, "10m"), { ...cookie, maxAge: 600 });
+      // a path on this site only: "//host" and "/\host" are other sites to a browser, which also drops tabs and newlines
+      const local = /^\/(?![/\\])\P{Cc}*$/u.test(back);
+      setCookie(c, LOGIN, await seal({ verifier, state, back: local ? back : "/" }, "10m"), { ...cookie, maxAge: 600 });
       const url = oidc.buildAuthorizationUrl(await discover(), {
         redirect_uri: redirect,
         scope: "openid profile email",

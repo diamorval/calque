@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import io
+from collections.abc import Sequence
 from copy import deepcopy
+from pathlib import Path
 from typing import Any
 
 from pptx.dml.color import RGBColor
@@ -285,13 +287,13 @@ def fill_table(shape, rows: list[list[str]]) -> None:
                 cell.text = val
 
 
-def apply_value(shape, value: Any, style) -> None:
-    """Write one DeckSpec ShapeValue (not null) into a shape."""
+def apply_value(shape, value: Any, style, image_roots: Sequence[str | Path] = ()) -> None:
+    """Write one DeckSpec ShapeValue (not null) into a shape. Images are read from `image_roots`."""
     if isinstance(value, (str, list)):
         set_text(shape, value)
         return
     if "image" in value:
-        replace_image(shape, _read_image(value["image"]))
+        replace_image(shape, read_image(value["image"], image_roots))
     if "table" in value:
         fill_table(shape, value["table"])
     if "text" in value:
@@ -313,6 +315,15 @@ def apply_value(shape, value: Any, style) -> None:
         shape.width = int(shape.width * value["width_frac"])
 
 
-def _read_image(ref: str) -> bytes:
-    with open(ref, "rb") as f:
-        return f.read()
+def read_image(ref: str, roots: Sequence[str | Path]) -> bytes:
+    """An image ref is a path relative to one of `roots`, the first that has it. Absolute paths,
+    `..` and symlinks leaving the root are refused: a DeckSpec never reads elsewhere on disk."""
+    rel = Path(ref)
+    if rel.is_absolute() or ".." in rel.parts or "\\" in ref:
+        raise ValueError(f"image {ref!r}: give a relative path, without '..'")
+    for root in roots:
+        top = Path(root).resolve()
+        f = (top / rel).resolve()
+        if f.is_relative_to(top) and f.is_file():
+            return f.read_bytes()
+    raise FileNotFoundError(f"image {ref!r} not found among the deck's images")

@@ -60,6 +60,20 @@ export async function startDemo() {
       },
     ];
 
+  const shares = new Map<string, Json>();
+  const link = (id: string) =>
+    `${location.origin}${BASE}/decks/${id}?k=${Math.random().toString(36).slice(2)}`;
+  const sharing = (id: string): Json => {
+    if (!shares.has(id))
+      shares.set(id, {
+        owner: "local",
+        people: [],
+        general: { access: "private", role: "viewer" },
+        url: link(id),
+      });
+    return shares.get(id) as Json;
+  };
+
   // method + path pattern -> answer; the request body is parsed JSON, or the FormData of an upload
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const routes: [RegExp, (m: string[], b: any) => unknown][] = [
@@ -145,6 +159,13 @@ export async function startDemo() {
       },
     ],
     [
+      /^POST \/api\/files$/,
+      (_, f: FormData) => {
+        const file = f.get("file") as File;
+        return { file_id: `demo-${Date.now()}`, name: file.name, size: file.size, type: file.type };
+      },
+    ],
+    [
       /^POST \/api\/packs\/drafts\/[^/]+\/fonts$/,
       (_, f: FormData) => {
         const font = f.get("font");
@@ -195,6 +216,74 @@ export async function startDemo() {
         return { comment };
       },
     ],
+    // sharing, in memory: people, general access and the share link of each deck
+    [/^POST \/api\/tools\/list_shares$/, (_, b) => sharing(b.deck_id)],
+    [
+      /^POST \/api\/tools\/share_deck$/,
+      (_, b) => {
+        const s = sharing(b.deck_id);
+        s.people = s.people.filter((p: Json) => p.principal !== b.principal);
+        s.people.push({ principal_type: b.principal_type, principal: b.principal, role: b.role });
+        return { principal_type: b.principal_type, principal: b.principal, role: b.role };
+      },
+    ],
+    [
+      /^POST \/api\/tools\/unshare_deck$/,
+      (_, b) => {
+        const s = sharing(b.deck_id);
+        s.people = s.people.filter((p: Json) => p.principal !== b.principal);
+        return { principal_type: b.principal_type, principal: b.principal };
+      },
+    ],
+    [
+      /^POST \/api\/tools\/set_general_access$/,
+      (_, b) => {
+        sharing(b.deck_id).general = { access: b.access, role: b.role ?? "viewer" };
+        return sharing(b.deck_id).general;
+      },
+    ],
+    [
+      /^POST \/api\/tools\/reset_link$/,
+      (_, b) => {
+        const s = sharing(b.deck_id);
+        s.url = link(b.deck_id);
+        return { deck_id: b.deck_id, url: s.url };
+      },
+    ],
+    // an imported file opens a deck the engine built earlier on that pack
+    [
+      /^POST \/api\/tools\/import_pptx$/,
+      (_, b) => ({
+        deck_id: (decks.find((d) => d.pack_id === b.pack_id) ?? decks[0])?.id,
+      }),
+    ],
+    // the review report, from the saved lint: a generated deck has no safe fixes to apply
+    [
+      /^POST \/api\/tools\/review_deck$/,
+      (_, b) => {
+        if (b.apply_safe_fixes)
+          return Response.json(READ_ONLY, { status: 403 });
+        const lint: Json =
+          api[
+            `POST /api/tools/lint_deck ${JSON.stringify({ deck_id: b.deck_id })}`
+          ] ?? { version: 1, findings: [] };
+        const of = (s: string) =>
+          lint.findings.filter((f: Json) => f.severity === s);
+        return {
+          report: {
+            version: lint.version,
+            ERROR: of("ERROR"),
+            WARN: of("WARN"),
+            NOTE: of("NOTE"),
+            safe_fixes: [],
+            judgment_calls: lint.findings.filter(
+              (f: Json) => f.severity !== "NOTE",
+            ),
+          },
+          applied: [],
+        };
+      },
+    ],
   ];
 
   const real = globalThis.fetch;
@@ -216,7 +305,7 @@ export async function startDemo() {
       const b = JSON.parse(String(init?.body));
       if (b.deck_id)
         return stream([
-          { step: { tools: ["open_deck"] } },
+          { step: { tools: [{ name: "open_deck" }] } },
           {
             done: {
               model: "demo",
@@ -246,22 +335,21 @@ export async function startDemo() {
         { role: "assistant", content: text },
       ];
       return stream([
-        { step: { tools: ["list_packs"] } },
-        { step: { tools: ["create_deck"] } },
+        { step: { tools: [{ name: "list_packs" }] } },
+        { step: { tools: [{ name: "create_deck" }] } },
         { done: { model: "demo", text, messages } },
       ]);
     }
     for (const [re, answer] of routes) {
       const m = req.match(re);
-      if (m)
-        return Response.json(
-          answer(
-            m,
-            init?.body instanceof FormData
-              ? init.body
-              : JSON.parse((init?.body as string) || "{}"),
-          ),
-        );
+      if (!m) continue;
+      const out = answer(
+        m,
+        init?.body instanceof FormData
+          ? init.body
+          : JSON.parse((init?.body as string) || "{}"),
+      );
+      return out instanceof Response ? out : Response.json(out);
     }
     return Response.json(READ_ONLY, { status: 403 });
   };
