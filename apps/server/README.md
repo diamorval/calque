@@ -23,12 +23,15 @@ node apps/server/src/stdio.ts          # stdio, for a local MCP client (bridge t
 | `CALQUE_TEAMS_MAP_ONLY` | unset | `1`: drop the groups the map does not name |
 | `CALQUE_OIDC_CLIENT_ID` | the audience | the web app's OIDC client (authorization code + PKCE) |
 | `CALQUE_OIDC_CLIENT_SECRET` | unset: public client | its secret, for a confidential client |
-| `CALQUE_SECRET` | random, in `$CALQUE_DATA/secret` | seals model API keys at rest (AES-256-GCM): set it in production |
+| `CALQUE_SECRET` | random, in `$CALQUE_DATA/secret` | seals model API keys at rest (AES-256-GCM) and sessions: required when `CALQUE_OIDC_ISSUER` is set (the server refuses to start without it) |
 | `CALQUE_ADMIN_TEAM` | `calque-admins` | team allowed to configure AI models, to manage every brand pack (seeded ones included) and, on any deck, see who has access, make it private, reset its link and transfer it (never to read it) |
 | `CALQUE_LLM_MODEL` | unset | preconfigured gateway, saved as model `env`, default unless another is set |
 | `CALQUE_LLM_PROVIDER` / `_BASE_URL` / `_API_KEY` | `openai-compatible` / – / – | the gateway's provider, endpoint and key |
 | `CALQUE_LLM_HEADERS` | unset | JSON object of extra request headers (e.g. `{"Ocp-Apim-Subscription-Key": "…"}`), sealed at rest |
 | `CALQUE_LLM_AZURE_RESOURCE` / `_API_VERSION` / `_MANAGED_IDENTITY` | – / `v1` / – | Azure OpenAI (`CALQUE_LLM_PROVIDER=azure`, the model is the deployment): resource name, `api-version`, `1` to sign in with the managed identity |
+| `CALQUE_RETENTION_DAYS` | unset: keep everything | delete decks untouched for that many days and uploads older than that, at start and daily (the audit log is kept) |
+| `CALQUE_RATE_LIMIT` | on | `off` lifts the per-minute limits on `/auth/*` (30 per address), agent runs (30 per user) and model tests (10 per user) |
+| `CALQUE_TRUST_PROXY` | unset | `1`: rate-limit by the first `X-Forwarded-For` hop (behind your reverse proxy) instead of the socket address |
 
 ## Deploy
 
@@ -111,7 +114,7 @@ more than their role answers 403. The caller's role is the best of the ones belo
   `GET /api/admin/decks/:id/access`, `POST /api/admin/decks/:id/private`,
   `POST /api/admin/decks/:id/reset-link`, `POST /api/admin/decks/:id/transfer` `{to}`.
 
-Every grant, revocation, general access change, link reset and transfer is logged in `deck_audit`
+Every grant, revocation, general access change, link reset and transfer is logged in the `audit` table
 (deck, actor, action, detail).
 
 ### Review
@@ -131,10 +134,23 @@ Every grant, revocation, general access change, link reset and transfer is logge
   status and allowed moves in `open_deck`'s `approval`). An editor requests the review and may
   withdraw it; the approver is the pack's owner or an admin, with at least view access to the deck
   (share it with them), who approves or sends it back to draft. A new version of an approved deck
-  is a draft again. Approval never gates an export. Each move is logged in `deck_audit`.
+  is a draft again. Approval never gates an export. Each move is logged in the `audit` table.
 - **Export gate** (soft, M18): `export_pptx` always exports. When the version has lint ERRORs it
   answers `lint_errors` (and a `warning` without `reason`) and logs `export_with_errors` (version,
-  error count, `reason` or null) in `deck_audit`. The web app asks for the reason before exporting.
+  error count, `reason` or null) in the `audit` table. The web app asks for the reason before exporting.
+
+### Audit log and deletion
+
+The `audit` table records who did what, never the content: deck `create`, `edit` (version, note),
+`export`, `delete`, the sharing actions above; pack `publish`, `edit`, `visibility`; model `add`,
+`update`, `default`, `remove`; `sign_in`; retention `purge`. Rows outlive what they name. Admins
+read it at `GET /api/admin/audit?actor=&action=&target_type=&target_id=&since=&until=&limit=`
+(newest first, at most 1000).
+
+`delete_deck` (or `DELETE /api/decks/:id`, the Delete action on the Decks page): the owner, or an
+admin, erases a deck with its versions, comments, shares and its folder under `$CALQUE_DATA/decks`
+(built PPTX, renders, imported base). Uploads are the uploader's: `CALQUE_RETENTION_DAYS` removes
+them by age. See [docs/security.md](../../docs/security.md).
 
 ### Files in
 

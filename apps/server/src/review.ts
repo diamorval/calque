@@ -16,7 +16,7 @@ back ("changes requested", back to draft) is theirs. A new version of an approve
 to draft (Decks.commit). Approval never gates an export. Packs without the flag: no status at all.
 
 Export gate (M18): export_pptx always exports; on a version with lint ERRORs it records who
-exported it, the error count and the reason they gave (deck_audit "export_with_errors"). The web
+exported it, the error count and the reason they gave (audit "export_with_errors"). The web
 asks for that reason before exporting; the MCP tool description asks the model to. */
 
 export type Approval = "draft" | "in_review" | "approved";

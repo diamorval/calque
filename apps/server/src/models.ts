@@ -1,5 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { PROVIDERS, testModel, type ModelConfig, type ModelOptions, type ProviderId } from "@calque/llm";
+import { audit } from "./audit.ts";
 import type { Db } from "./db.ts";
 import { ADMIN_TEAM, Forbidden, isAdmin, NotFound, type User } from "./packs.ts";
 
@@ -152,6 +153,7 @@ export class Models {
       throw new InvalidModel(`${PROVIDERS[input.provider].label} refused the configuration: ${(e as Error).message}`);
     }
     await this.save(id, { ...row, label }, user.id);
+    await audit(this.db, user, prev ? "update" : "add", "model", id, { provider: input.provider, model: input.model, base_url: input.base_url ?? null, new_key: !!input.api_key });
     if (input.default || !(await this.defaultRow())) await this.setDefault(user, id);
     return (await this.list()).find((m) => m.id === id);
   }
@@ -175,11 +177,13 @@ export class Models {
     if (!rows[0]) throw new NotFound(`no model ${JSON.stringify(id)}`);
     await this.db.query("update models set is_default = false where is_default and id <> $1", [id]);
     await this.db.query("update models set is_default = true where id = $1", [id]);
+    await audit(this.db, user, "default", "model", id);
   }
 
   async remove(user: User, id: string) {
     if (!isAdmin(user)) throw new Forbidden(`only ${ADMIN_TEAM} configure models`);
     const { rows } = await this.db.query<{ is_default: boolean }>("delete from models where id = $1 returning is_default", [id]);
+    if (rows[0]) await audit(this.db, user, "remove", "model", id);
     // the default gone, the most recently configured model takes over: the agent keeps a model
     if (rows[0]?.is_default)
       await this.db.query("update models set is_default = true where id = (select id from models order by updated_at desc, id limit 1)");

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { designMd, readPack } from "@calque/design";
 import { parse, stringify } from "yaml";
 import { engine, REPO } from "./engine.ts";
+import { audit } from "./audit.ts";
 import type { Db } from "./db.ts";
 
 /** Who is calling. `local`: stdio or auth disabled, sees every pack and may pass file paths. */
@@ -180,6 +181,7 @@ export async function importPack(db: Db, user: User, data: string, input: Import
       [id, dir, input.visibility, JSON.stringify(input.teams ?? user.teams), user.id],
     );
     const version = await release(db, id, dir, input.note || (rows[0] ? "re-import" : "import"), user.id);
+    await audit(db, user, "publish", "pack", id, { version, visibility: input.visibility, teams: input.teams ?? user.teams });
     return { status: "published" as const, id, version, visibility: input.visibility, teams: input.teams ?? user.teams };
   } finally {
     await rm(stage, { recursive: true, force: true });
@@ -437,7 +439,11 @@ export async function publishDraft(
   },
 ) {
   const dir = await draftDir(user, data, draftId);
-  if (existsSync(join(dir, "edits"))) return publishEdit(db, user, data, dir, await readFile(join(dir, "edits"), "utf8"), input);
+  if (existsSync(join(dir, "edits"))) {
+    const r = await publishEdit(db, user, data, dir, await readFile(join(dir, "edits"), "utf8"), input);
+    if (r.status === "published") await audit(db, user, "edit", "pack", r.id);
+    return r;
+  }
   const r = await importPack(db, user, data, {
     ...input,
     template: join(dir, "template.pptx"),
@@ -453,6 +459,7 @@ export async function publishDraft(
 export async function setVisibility(db: Db, user: User, id: string, visibility: "workspace" | "team", teams: string[]) {
   await managedPack(db, user, id, "change its visibility");
   await db.query("update packs set visibility = $2, teams = $3 where id = $1", [id, visibility, JSON.stringify(teams)]);
+  await audit(db, user, "visibility", "pack", id, { visibility, teams });
   return { id, visibility, teams };
 }
 

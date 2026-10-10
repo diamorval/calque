@@ -94,6 +94,10 @@
 .cq-deck-info { display: grid; gap: 2px; padding: 12px 14px; }
 .cq-deck-info strong { font-family: var(--ds-font-title); font-weight: 400; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cq-deck-info span { color: var(--cq-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; font-variant-numeric: tabular-nums; }
+.cq-deck-item { position: relative; }
+.cq-deck-delete { position: absolute; top: 8px; right: 8px; opacity: 0; transition: opacity 0.15s; background: var(--cq-surface); }
+.cq-deck-item:hover .cq-deck-delete, .cq-deck-delete:focus-visible { opacity: 1; }
+@media (hover: none) { .cq-deck-delete { opacity: 1; } }
 .cq-deck-new { place-items: center; align-content: center; gap: 8px; min-height: 180px; border-style: dashed; background: transparent; box-shadow: none; color: var(--cq-muted); font-weight: 500; }
 .cq-deck-new svg { width: 22px; height: 22px; }
 .cq-deck-new:hover { color: var(--cq-fg); border-color: var(--cq-fg); }

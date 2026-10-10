@@ -21,6 +21,7 @@ describe("web agent", { timeout: ENGINE_TIMEOUT }, () => {
   beforeAll(async () => {
     fake = await fakeModel((b) => script(b));
     vi.stubEnv("CALQUE_LLM_BASE_URL", fake.url);
+    vi.stubEnv("CALQUE_RATE_LIMIT", "off"); // more than 10 model saves a minute here; compliance.test.ts covers the limit
     vi.stubEnv("CALQUE_LLM_API_KEY", "good-key");
     vi.stubEnv("CALQUE_LLM_MODEL", "gateway-model");
     app = await testApp();

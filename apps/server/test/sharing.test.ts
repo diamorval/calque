@@ -248,7 +248,7 @@ describe("deck sharing", { timeout: ENGINE_TIMEOUT }, () => {
     await expect(open(root)).rejects.toThrow(/no deck/);
     expect((await post(`/api/admin/decks/${id}/transfer`, admin, { to: "erin" })).body).toMatchObject({ owner: "erin", previous_owner: "dave" });
 
-    const { rows } = await app.db.query<{ actor: string; action: string }>("select actor, action from deck_audit where deck_id = $1 order by id", [id]);
+    const { rows } = await app.db.query<{ actor: string; action: string }>("select actor, action from audit where target_type = 'deck' and target_id = $1 order by id", [id]);
     expect(rows.map((r) => r.action)).toEqual(expect.arrayContaining(["share", "unshare", "access", "reset_link", "transfer"]));
     expect(rows.filter((r) => r.action === "transfer").map((r) => r.actor)).toEqual(["root", "root"]);
     expect(rows.filter((r) => r.action === "reset_link").map((r) => r.actor)).toEqual(["alice", "root", "root"]);
