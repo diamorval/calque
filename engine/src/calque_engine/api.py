@@ -1,7 +1,8 @@
 """The engine's one interface for the server: JSON in, JSON out (`python -m calque_engine call`).
 
 Request: {"op": <name>, ...args}. Response: {"ok": true, ...result} or
-{"ok": false, "error": <kind>, "message": str, "issues": [...]}. Packs are passed as directories.
+{"ok": false, "error": <kind>, "message": str, "issues": [...]}. Packs are passed as directories;
+`packs` (pack id -> directory) resolves the packs they `extend`.
 """
 
 from __future__ import annotations
@@ -10,7 +11,7 @@ from dataclasses import asdict
 from typing import Any
 
 from .deckspec import DeckSpecError, Issue, validate
-from .pack import PackError, load_pack
+from .pack import PACK_DIRS, PackError, describe, load_pack
 from .patch import PatchError
 
 
@@ -21,6 +22,11 @@ def _issues(issues: list[Issue]) -> list[dict[str, Any]]:
 def op_validate_pack(pack: str) -> dict[str, Any]:
     p = load_pack(pack)
     return {"id": p.id, "version": p.manifest["version"]}
+
+
+def op_describe_pack(pack: str) -> dict[str, Any]:
+    """The pack merged with the pack it extends: manifest, docs and exemplar images in effect."""
+    return describe(load_pack(pack))
 
 
 def op_validate(pack: str, deck: dict[str, Any]) -> dict[str, Any]:
@@ -191,6 +197,7 @@ def op_text(path: str, name: str, limit: int = 100_000) -> dict[str, Any]:
 
 OPS = {
     "validate_pack": op_validate_pack,
+    "describe_pack": op_describe_pack,
     "validate": op_validate,
     "build": op_build,
     "patch": op_patch,
@@ -209,6 +216,7 @@ OPS = {
 def call(request: dict[str, Any]) -> dict[str, Any]:
     args = dict(request)
     op = args.pop("op", None)
+    packs = args.pop("packs", None) or {}
     fn = OPS.get(op)
     if fn is None:
         return {
@@ -217,6 +225,7 @@ def call(request: dict[str, Any]) -> dict[str, Any]:
             "message": f"unknown op {op!r}",
             "ops": sorted(OPS),
         }
+    dirs = PACK_DIRS.set(packs)
     try:
         return {"ok": True, **fn(**args)}
     except DeckSpecError as e:
@@ -234,3 +243,5 @@ def call(request: dict[str, Any]) -> dict[str, Any]:
         return {"ok": False, "error": "bad_request", "message": str(e)}
     except (KeyError, ValueError, FileNotFoundError, NotImplementedError) as e:
         return {"ok": False, "error": type(e).__name__, "message": str(e)}
+    finally:
+        PACK_DIRS.reset(dirs)

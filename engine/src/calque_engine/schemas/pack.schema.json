@@ -277,6 +277,11 @@
         }
       }
     },
+    "extends": {
+      "description": "A parent pack id (group -> subsidiary). The pack inherits the parent's voice, storyline, exemplar and lint.slop_rules unless it declares its own; its template and tokens stay its own.",
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
     "approval": {
       "description": "Opt-in review: decks on this pack get an approval status (draft, in review, approved), approved by the pack owner or an admin. Never blocks an export. Default off.",
       "type": "boolean",
