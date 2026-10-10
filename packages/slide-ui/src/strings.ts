@@ -46,6 +46,8 @@ export interface SlideUiStrings {
   /** A comment that blocks approval: the box when commenting, the badge on its thread. */
   required: string;
   requiredHint: string;
+  /** On a phone: the button that opens the host's actions. */
+  moreActions: string;
 }
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -92,4 +94,5 @@ export const EN_STRINGS: SlideUiStrings = {
   shape: (id, role) => `Shape ${id} (${role})`,
   required: "Required",
   requiredHint: "A required comment blocks the deck's approval until it is resolved",
+  moreActions: "More actions",
 };

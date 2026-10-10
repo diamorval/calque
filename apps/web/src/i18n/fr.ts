@@ -20,6 +20,7 @@ const raw = {
   "Switch to {name}": "Passer en {name}",
   "Signed in as {name}": "Connecté en tant que {name}",
   "Sign out": "Se déconnecter",
+  Account: "Compte",
   "The agent stopped without an answer.": "L'agent s'est arrêté sans répondre.",
 
   // sign-in
@@ -189,6 +190,7 @@ const raw = {
   "Shape {id} ({role})": "Forme {id} ({role})",
   Required: "Obligatoire",
   "A required comment blocks the deck's approval until it is resolved": "Un commentaire obligatoire bloque l'approbation de la présentation tant qu'il n'est pas résolu",
+  "More actions": "Plus d'actions",
 
   // the chat
   done: "terminé",

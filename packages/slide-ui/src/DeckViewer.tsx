@@ -1,5 +1,5 @@
-import { Check, ChevronLeft, ChevronRight, MessageSquare, MessageSquarePlus, Reply, RotateCcw, Sparkles, SquareDashed, X } from "lucide-react";
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { Check, ChevronLeft, ChevronRight, Ellipsis, Images, MessageSquare, MessageSquarePlus, Reply, RotateCcw, Sparkles, SquareDashed, X } from "lucide-react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode, type TouchEvent } from "react";
 import { shapeLabel, SlideCanvas } from "./SlideCanvas.tsx";
 import { Thumbnails } from "./Thumbnails.tsx";
 import { EN_STRINGS, type SlideUiStrings } from "./strings.ts";
@@ -21,8 +21,11 @@ export function DeckViewer(props: {
   onReply?: (r: NewReply) => Promise<void>;
   /** Resolve or reopen comment threads one by one, without the agent. */
   onResolve?: (ids: number[], status: "open" | "resolved") => Promise<void>;
-  /** The host's own actions, right of the title (web: lint, history, present, export). */
+  /** The host's own actions, right of the title (web: lint, history, present, export); behind a
+  button on a phone. */
   actions?: ReactNode;
+  /** The host's way back, left of the title on a phone (web: to the deck list). */
+  back?: ReactNode;
   /** The host's agent chat, shown in a tab next to Comments (web app only). */
   agent?: ReactNode;
   /** The host's other side-panel tabs, after Comments (web: the slide library). */
@@ -45,6 +48,11 @@ export function DeckViewer(props: {
   const [outline, setOutline] = useState(false);
   // open comments win the first look: after a reload, Apply and the threads are where they were
   const [tab, setTab] = useState<string>(props.agent && !deck.open_comments.length ? "agent" : "comments");
+  // on a phone: the actions folded or not, and one view at a time, the slides or the side panel
+  const [more, setMore] = useState(false);
+  const [view, setView] = useState<"slides" | "panel">("slides");
+  // a swipe on the slide turns it, as in a photo viewer; not while the page is pinch-zoomed
+  const swipe = useRef<{ x: number; y: number } | null>(null);
   const last = deck.slides.length - 1;
   const index = Math.min(current, last);
   const slide = deck.slides[index];
@@ -86,6 +94,19 @@ export function DeckViewer(props: {
     }
   }
 
+  const swipeStart = (e: TouchEvent) => {
+    const t = e.touches[0];
+    swipe.current = e.touches.length === 1 && t && (window.visualViewport?.scale ?? 1) <= 1 ? { x: t.clientX, y: t.clientY } : null;
+  };
+  const swipeEnd = (e: TouchEvent) => {
+    const from = swipe.current;
+    const t = e.changedTouches[0];
+    swipe.current = null;
+    if (!from || !t) return;
+    const dx = t.clientX - from.x;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > 2 * Math.abs(t.clientY - from.y)) go(index + (dx < 0 ? 1 : -1));
+  };
+
   const comments = (
     <Comments
       deck={deck}
@@ -95,6 +116,7 @@ export function DeckViewer(props: {
       onPick={(slideId, shapeId) => {
         setCurrent(deck.slides.findIndex((s) => s.id === slideId));
         setShape(shapeId);
+        setView("slides");
       }}
       {...(props.onApply ? { onApply: props.onApply } : {})}
       {...(props.onReply ? { onReply: props.onReply } : {})}
@@ -103,8 +125,9 @@ export function DeckViewer(props: {
   );
 
   return (
-    <div className="cq-workspace">
+    <div className="cq-workspace" data-view={view}>
       <header className="cq-bar">
+        {props.back}
         <div className="cq-bar-title">
           <h1>{deck.title}</h1>
           <span>
@@ -119,7 +142,14 @@ export function DeckViewer(props: {
             )}
           </span>
         </div>
-        <div className="cq-bar-actions">{props.actions}</div>
+        {props.actions && (
+          <button type="button" className="cq-btn cq-bar-more" data-variant="ghost" data-icon aria-label={s.moreActions} aria-expanded={more} onClick={() => setMore((m) => !m)}>
+            <Ellipsis />
+          </button>
+        )}
+        <div className="cq-bar-actions" data-open={more || undefined}>
+          {props.actions}
+        </div>
       </header>
 
       <Thumbnails strings={s} slides={deck.slides} current={index} comments={deck.open_comments} onSelect={go} />
@@ -150,7 +180,7 @@ export function DeckViewer(props: {
             <SquareDashed /> {s.shapes}
           </button>
         </div>
-        <div className="cq-stage-view">
+        <div className="cq-stage-view" onTouchStart={swipeStart} onTouchEnd={swipeEnd}>
           <SlideCanvas strings={s} slide={slide} selected={shape} comments={here} outline={outline} onSelect={setShape} />
           {props.working && (
             <div className="cq-working" role="status">
@@ -241,6 +271,16 @@ export function DeckViewer(props: {
           ))}
         </div>
       </aside>
+
+      <div className="cq-switch">
+        <button type="button" aria-pressed={view === "slides"} onClick={() => setView("slides")}>
+          <Images /> {s.slides}
+        </button>
+        <button type="button" aria-pressed={view === "panel"} onClick={() => setView("panel")}>
+          {props.agent ? <Sparkles /> : <MessageSquare />} {props.agent ? s.agent : s.comments}
+          {open > 0 && <span className="cq-count">{open}</span>}
+        </button>
+      </div>
     </div>
   );
 }

@@ -3,7 +3,7 @@ import { Alert, AlertDescription } from "diametral-ds/alert";
 import { Button } from "diametral-ds/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "diametral-ds/table";
 import { Tag } from "diametral-ds/tag";
-import { BadgeCheck, BookMarked, CircleCheck, Cloud, Download, FileText, History, ListChecks, ListPlus, MessageSquareShare, Play, RefreshCw, Send, Share2, Sparkles, TriangleAlert, Undo2, X } from "lucide-react";
+import { BadgeCheck, BookMarked, ChevronLeft, CircleCheck, Cloud, Download, FileText, History, ListChecks, ListPlus, MessageSquareShare, Play, RefreshCw, Send, Share2, Sparkles, TriangleAlert, Undo2, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { agent, api, tool, type Me, type Pack } from "../api.ts";
 import { Chat, type Ask } from "../components/Chat.tsx";
@@ -14,7 +14,7 @@ import { SaveToM365, ShareToTeams, useM365 } from "../components/M365.tsx";
 import { ShareDeck } from "../components/Share.tsx";
 import { slideUiStrings, t, tn } from "../i18n.ts";
 import { bySeverity, type Finding, lintSummary } from "../lint.ts";
-import { navigate } from "../nav.ts";
+import { go, navigate } from "../nav.ts";
 import { ago, Dialog, Spinner } from "../ui.tsx";
 
 type Deck = DeckView & {
@@ -110,6 +110,11 @@ export function Editor({ id }: { id: string }) {
         deck={deck}
         strings={slideUiStrings()}
         working={busy}
+        back={
+          <a className="cq-btn cq-bar-back" data-variant="ghost" data-icon href="/" aria-label={t("Decks")} onClick={(e) => go(e, "/")}>
+            <ChevronLeft />
+          </a>
+        }
         actions={
           <>
             {summary &&

@@ -3,7 +3,7 @@ import { Button } from "diametral-ds/button";
 import { Kbd } from "diametral-ds/kbd";
 import { Tag } from "diametral-ds/tag";
 import { Clock, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type MouseEvent } from "react";
 import { tool } from "../api.ts";
 import { t } from "../i18n.ts";
 import { navigate } from "../nav.ts";
@@ -14,7 +14,8 @@ type Deck = DeckView & { spec: { slides: { id: string; notes?: string }[] } };
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
 /** Full-screen slides. → / Space next, ← previous, P presenter view (next slide, notes, timer),
-F full screen, Esc back to the editor. */
+F full screen, Esc back to the editor. By touch or click: the slide's left third goes back, the rest
+forward, and a button goes back to the editor. */
 export function Presenter({ id }: { id: string }) {
   const [deck, setDeck] = useState<Deck | null>(null);
   const [i, setI] = useState(0);
@@ -55,8 +56,29 @@ export function Presenter({ id }: { id: string }) {
   if (!slide) return null;
   const notes = deck.spec.slides.find((s) => s.id === slide.id)?.notes;
   const current = <img className="cq-present-slide" src={slide.image_url} alt={t("Slide {n}", { n: slide.number })} />;
+  const tap = (e: MouseEvent<HTMLElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const step = e.clientX - r.left < r.width / 3 ? -1 : 1;
+    setI((n) => Math.max(0, Math.min(n + step, deck.slides.length - 1)));
+  };
 
-  if (!presenter) return <main className="cq-present">{current}</main>;
+  if (!presenter)
+    return (
+      <main className="cq-present" onClick={tap}>
+        {current}
+        <button
+          type="button"
+          className="cq-present-exit"
+          aria-label={t("Exit")}
+          onClick={(e) => {
+            e.stopPropagation();
+            navigate(`/d/${id}`);
+          }}
+        >
+          <X />
+        </button>
+      </main>
+    );
   return (
     <main className="cq-presenter dark" aria-label={t("Presenter view")}>
       <header>
@@ -73,7 +95,9 @@ export function Presenter({ id }: { id: string }) {
           <X /> {t("Exit")}
         </Button>
       </header>
-      <div className="cq-presenter-now">{current}</div>
+      <div className="cq-presenter-now" onClick={tap}>
+        {current}
+      </div>
       <aside>
         <h2>{t("Next")}</h2>
         {next ? <img src={next.image_url} alt={t("Next: slide {n}", { n: next.number })} /> : <p className="cq-hint">{t("End of deck")}</p>}
