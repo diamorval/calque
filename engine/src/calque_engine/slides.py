@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import io
+from collections.abc import Sequence
 from copy import deepcopy
+from pathlib import Path
 from typing import Any
 
 from pptx.dml.color import RGBColor
@@ -40,9 +42,53 @@ def _copy_part(part, package):
     return new
 
 
+# relationships a copied slide never follows into another package
+_SKIP_FOREIGN = {RT.SLIDE_LAYOUT, RT.NOTES_SLIDE, RT.SLIDE, RT.SLIDE_MASTER, RT.NOTES_MASTER}
+
+
+def _copy_tree(part, package, memo: dict):
+    """Deep copy of a part of another package and everything it relates to (images, charts,
+    workbooks, tags), each under a fresh partname of `package`."""
+    if id(part) in memo:
+        return memo[id(part)]
+    stem, ext = str(part.partname).rsplit(".", 1)
+    new = type(part).load(
+        package.next_partname(f"{stem.rstrip('0123456789')}%d.{ext}"),
+        part.content_type,
+        package,
+        part.blob,
+    )
+    memo[id(part)] = new
+    for rId, rel in part.rels.items():
+        if rel.is_external:
+            new.rels.get_or_add_ext_rel(rel.reltype, rel.target_ref)
+        elif rel.reltype not in _SKIP_FOREIGN:
+            target = _copy_tree(rel.target_part, package, memo)
+            new.rels._rels[rId] = type(rel)(
+                new.rels._base_uri, rId, rel.reltype, rel._target_mode, target
+            )
+    return new
+
+
+def layout_named(prs, name: str):
+    """The first slide layout of `prs` called `name`."""
+    for master in prs.slide_masters:
+        for layout in master.slide_layouts:
+            if layout.name == name:
+                return layout
+    raise ValueError(
+        f"this deck has no slide layout named {name!r}: the slide's template layouts are missing"
+    )
+
+
 def duplicate_slide(prs, src):
-    """Append a copy of `src` (same layout, shapes, background, images, charts)."""
-    new = prs.slides.add_slide(src.slide_layout)
+    """Append a copy of `src` (same layout, shapes, background, images, charts). `src` may belong
+    to another presentation: its layout is then matched by name in `prs`, and the parts it uses
+    are copied over."""
+    foreign = src.part.package is not prs.part.package
+    new = prs.slides.add_slide(
+        layout_named(prs, src.slide_layout.name) if foreign else src.slide_layout
+    )
     sld = new._element
     # python-pptx caches the spTree element behind `slide.shapes`: refill it, don't replace it.
     tree = sld.cSld.spTree
@@ -67,20 +113,27 @@ def duplicate_slide(prs, src):
         sld.set(k, v)
 
     remap: dict[str, str] = {}
+    memo: dict = {}
     for rId, rel in src.part.rels.items():
         if rel.reltype in (RT.SLIDE_LAYOUT, RT.NOTES_SLIDE):
             continue
         if rel.is_external:
             remap[rId] = new.part.rels.get_or_add_ext_rel(rel.reltype, rel.target_ref)
             continue
+        if foreign and rel.reltype in _SKIP_FOREIGN:
+            continue  # e.g. a jump to another slide of the source deck
         target = rel.target_part
-        if rel.reltype == RT.CHART:
+        if foreign:
+            target = _copy_tree(target, new.part.package, memo)
+        elif rel.reltype == RT.CHART:
             target = _copy_part(target, new.part.package)
         remap[rId] = new.part.rels.get_or_add(rel.reltype, target)
     for el in sld.iter():
         for k, v in el.attrib.items():
             if k.startswith(f"{{{R_NS}}}") and v in remap:
                 el.set(k, remap[v])
+    if foreign and src.has_notes_slide:
+        new.notes_slide.notes_text_frame.text = src.notes_slide.notes_text_frame.text
     return new
 
 
@@ -285,13 +338,13 @@ def fill_table(shape, rows: list[list[str]]) -> None:
                 cell.text = val
 
 
-def apply_value(shape, value: Any, style) -> None:
-    """Write one DeckSpec ShapeValue (not null) into a shape."""
+def apply_value(shape, value: Any, style, image_roots: Sequence[str | Path] = ()) -> None:
+    """Write one DeckSpec ShapeValue (not null) into a shape. Images are read from `image_roots`."""
     if isinstance(value, (str, list)):
         set_text(shape, value)
         return
     if "image" in value:
-        replace_image(shape, _read_image(value["image"]))
+        replace_image(shape, read_image(value["image"], image_roots))
     if "table" in value:
         fill_table(shape, value["table"])
     if "text" in value:
@@ -313,6 +366,15 @@ def apply_value(shape, value: Any, style) -> None:
         shape.width = int(shape.width * value["width_frac"])
 
 
-def _read_image(ref: str) -> bytes:
-    with open(ref, "rb") as f:
-        return f.read()
+def read_image(ref: str, roots: Sequence[str | Path]) -> bytes:
+    """An image ref is a path relative to one of `roots`, the first that has it. Absolute paths,
+    `..` and symlinks leaving the root are refused: a DeckSpec never reads elsewhere on disk."""
+    rel = Path(ref)
+    if rel.is_absolute() or ".." in rel.parts or "\\" in ref:
+        raise ValueError(f"image {ref!r}: give a relative path, without '..'")
+    for root in roots:
+        top = Path(root).resolve()
+        f = (top / rel).resolve()
+        if f.is_relative_to(top) and f.is_file():
+            return f.read_bytes()
+    raise FileNotFoundError(f"image {ref!r} not found among the deck's images")

@@ -90,8 +90,10 @@ for (const name of DECKS) {
   const { download_url } = await call("POST", "/api/tools/export_pptx", {
     deck_id,
   });
+  const pdf = await call("POST", "/api/tools/export_pdf", { deck_id });
   for (const s of opened.slides) await save(s.image_url);
   await save(download_url);
+  await save(pdf.download_url);
   console.log(`${name}: ${opened.slides.length} slides`);
 }
 await call("GET", "/api/decks");

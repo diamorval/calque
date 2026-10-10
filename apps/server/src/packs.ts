@@ -2,8 +2,10 @@ import { randomUUID } from "node:crypto";
 import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { designMd, readPack } from "@calque/design";
 import { parse, stringify } from "yaml";
 import { engine, REPO } from "./engine.ts";
+import { audit } from "./audit.ts";
 import type { Db } from "./db.ts";
 
 /** Who is calling. `local`: stdio or auth disabled, sees every pack and may pass file paths. */
@@ -12,6 +14,12 @@ export interface User {
   name?: string;
   teams: string[];
   local?: boolean;
+  /** Not signed in: someone who opened a deck's "Anyone with the link" share link. */
+  anonymous?: boolean;
+  /** The deck share link key this request presented (`?k=`, src/shares.ts). */
+  key?: string;
+  /** The per-user URL token this request came with (`?t=`, src/preview.ts), passed on as is. */
+  token?: string;
 }
 
 export interface PackRow {
@@ -20,10 +28,20 @@ export interface PackRow {
   visibility: "workspace" | "team";
   teams: string[];
   owner: string | null;
+  /** The current release: every publish, edit or restore adds one (pack_versions). */
+  version: number;
+  /** Hidden from pickers; decks already on it still open. */
+  archived: boolean;
 }
 
 export class NotFound extends Error {}
 export class Forbidden extends Error {}
+
+export const ADMIN_TEAM = process.env.CALQUE_ADMIN_TEAM ?? "calque-admins";
+export const isAdmin = (u: User) => u.local === true || u.teams.includes(ADMIN_TEAM);
+
+/** Edit, share, archive and restore a pack: its owner, or an admin (seeded packs have no owner). */
+const manages = (p: PackRow, user: User) => isAdmin(user) || p.owner === user.id;
 
 export function visible(p: PackRow, user: User): boolean {
   return (
@@ -43,7 +61,33 @@ export async function seedPacks(db: Db, dir = process.env.CALQUE_PACKS ?? join(R
       [id, join(dir, id)],
     );
   }
+  // every pack has its first release on record (seeded, or published before versions existed)
+  await db.query(
+    "insert into pack_versions (pack_id, version, dir, note) select id, version, dir, 'initial version' from packs on conflict do nothing",
+  );
 }
+
+/** A pack `user` manages; 404 if they cannot see it, 403 if they see it but do not manage it. */
+async function managedPack(db: Db, user: User, id: string, what: string): Promise<PackRow> {
+  const { rows } = await db.query<PackRow>("select * from packs where id = $1", [id]);
+  const row = rows[0];
+  if (row && manages(row, user)) return row;
+  if (!row || !visible(row, user)) throw new NotFound(`no pack ${JSON.stringify(id)}`);
+  throw new Forbidden(`only the owner of ${id} or ${ADMIN_TEAM} ${what}`);
+}
+
+/** Record a new release of pack `id` living in `dir`, and make it current. Returns its number. */
+async function release(db: Db, id: string, dir: string, note: string, author: string): Promise<number> {
+  const version = await nextVersion(db, id);
+  await db.query("update packs set dir = $2, version = $3 where id = $1", [id, dir, version]);
+  await db.query("insert into pack_versions (pack_id, version, dir, note, author) values ($1, $2, $3, $4, $5)", [id, version, dir, note, author]);
+  return version;
+}
+
+/** Where release `version` of pack `id` is kept: a release is never overwritten, so it can be restored. */
+const releaseDir = (data: string, id: string, version: number) => join(data, "pack-versions", id, String(version));
+const nextVersion = async (db: Db, id: string) =>
+  Number((await db.query<{ next: number }>("select coalesce(max(version), 0) + 1 as next from pack_versions where pack_id = $1", [id])).rows[0]?.next ?? 1);
 
 export async function getPack(db: Db, user: User, id: string): Promise<PackRow> {
   const { rows } = await db.query<PackRow>("select * from packs where id = $1", [id]);
@@ -53,11 +97,13 @@ export async function getPack(db: Db, user: User, id: string): Promise<PackRow> 
   return row;
 }
 
-export async function listPacks(db: Db, user: User) {
+/** The packs `user` sees, archived ones left out. `archived`: keep them (decks on them still open).
+`manage`: the Brand packs page, also every pack an admin manages. */
+export async function listPacks(db: Db, user: User, opts: { archived?: boolean; manage?: boolean } = {}) {
   const { rows } = await db.query<PackRow>("select * from packs order by id");
   return Promise.all(
     rows
-      .filter((r) => visible(r, user))
+      .filter((r) => (visible(r, user) || (opts.manage && manages(r, user))) && (opts.archived || opts.manage || !r.archived))
       .map(async (r) => {
         const m = parse(await readFile(join(r.dir, "pack.yaml"), "utf8"));
         return {
@@ -69,7 +115,9 @@ export async function listPacks(db: Db, user: User) {
           visibility: r.visibility,
           teams: r.teams,
           owner: r.owner,
-          editable: user.local === true || r.owner === user.id,
+          pack_version: r.version,
+          archived: r.archived,
+          editable: manages(r, user),
         };
       }),
   );
@@ -84,6 +132,7 @@ export interface ImportPackInput {
   teams?: string[] | undefined;
   voice?: string | undefined; // voice.md
   fonts?: string | undefined; // a directory of font files
+  note?: string | undefined; // the changelog line of this release
 }
 
 type Finding = { severity: string; slide: number | null; shape_id: number | null; check: string; message: string };
@@ -94,44 +143,54 @@ Without a manifest, returns the extractor's drafts (template map, tokens) for re
 assigns roles in a pack.yaml and calls again. Publishing needs: the pack loads, the template lints
 clean, and a cover/content/closing test deck builds and lints clean. */
 export async function importPack(db: Db, user: User, data: string, input: ImportPackInput) {
-  const draft = await engine<Draft>("extract", { template: input.template });
-  if (!input.manifest) {
-    return { status: "draft" as const, manifest: draft.manifest, template_map: draft.template_map, tokens: draft.tokens };
-  }
-  const id = String(input.manifest.id ?? "");
-  const { rows } = await db.query<PackRow>("select * from packs where id = $1", [id]);
-  if (rows[0] && rows[0].owner !== user.id && !user.local) throw new Error(`pack id ${JSON.stringify(id)} is taken`);
-
-  const stage = join(data, "packs", `.stage-${id}-${Date.now()}`);
+  const stage = join(data, "packs", `.stage-${randomUUID()}`);
   await mkdir(stage, { recursive: true });
   try {
+    // extract on the staged copy: the engine rewrites a .potx in place as a .pptx
     await cp(input.template, join(stage, "template.pptx"));
-    await writeFile(join(stage, "pack.yaml"), stringify(input.manifest));
-    await writeFile(join(stage, "tokens.json"), JSON.stringify(input.tokens ?? draft.tokens, null, 2) + "\n");
+    const draft = await engine<Draft>("extract", { template: join(stage, "template.pptx"), tokens: input.tokens });
+    if (!input.manifest) {
+      return { status: "draft" as const, manifest: draft.manifest, template_map: draft.template_map, tokens: draft.tokens, review: draft.review };
+    }
+    const id = String(input.manifest.id ?? "");
+    // checked before it names a folder (the engine checks the manifest only after staging)
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) throw new Error(`pack id ${JSON.stringify(id)}: lowercase letters, digits and dashes`);
+    const { rows } = await db.query<PackRow>("select * from packs where id = $1", [id]);
+    if (rows[0] && !manages(rows[0], user)) throw new Error(`pack id ${JSON.stringify(id)} is taken`);
+
+    let manifest = input.manifest;
+    await writeFile(join(stage, "tokens.json"), JSON.stringify(draft.tokens, null, 2) + "\n");
     await writeFile(join(stage, "template-map.yaml"), stringify(input.template_map ?? draft.template_map));
     if (input.voice) await writeFile(join(stage, "voice.md"), input.voice);
     if (input.fonts && existsSync(input.fonts)) {
       await cp(input.fonts, join(stage, "fonts"), { recursive: true });
-      const files = (await readdir(input.fonts)).sort();
-      const m = { ...input.manifest, fonts: { ...(input.manifest.fonts as object), files } };
-      await writeFile(join(stage, "pack.yaml"), stringify(m));
+      manifest = await withFonts(manifest, input.fonts);
     }
+    await writeFile(join(stage, "pack.yaml"), stringify(manifest));
     await engine("validate_pack", { pack: stage });
-    const problems = await validateStaged(stage, input.manifest);
+    const problems = await validateStaged(stage, manifest);
     if (problems.length) return { status: "invalid" as const, problems };
+    await writeDesign(stage);
 
-    const dir = join(data, "packs", id);
+    const dir = releaseDir(data, id, await nextVersion(db, id));
     await rm(dir, { recursive: true, force: true });
     await cp(stage, dir, { recursive: true });
     await db.query(
       `insert into packs (id, dir, visibility, teams, owner) values ($1, $2, $3, $4, $5)
-       on conflict (id) do update set dir = $2, visibility = $3, teams = $4`,
+       on conflict (id) do update set visibility = $3, teams = $4, archived = false`,
       [id, dir, input.visibility, JSON.stringify(input.teams ?? user.teams), user.id],
     );
-    return { status: "published" as const, id, visibility: input.visibility, teams: input.teams ?? user.teams };
+    const version = await release(db, id, dir, input.note || (rows[0] ? "re-import" : "import"), user.id);
+    await audit(db, user, "publish", "pack", id, { version, visibility: input.visibility, teams: input.teams ?? user.teams });
+    return { status: "published" as const, id, version, visibility: input.visibility, teams: input.teams ?? user.teams };
   } finally {
     await rm(stage, { recursive: true, force: true });
   }
+}
+
+/** DESIGN.md is generated from tokens.json and the template map: regenerate it with every release. */
+async function writeDesign(dir: string) {
+  await writeFile(join(dir, "DESIGN.md"), designMd(readPack(dir)));
 }
 
 async function validateStaged(dir: string, manifest: Record<string, unknown>): Promise<string[]> {
@@ -159,20 +218,73 @@ async function validateStaged(dir: string, manifest: Record<string, unknown>): P
   return [...problems, ...errors(test.findings).map((p) => `test deck ${p}`)];
 }
 
-type Draft = { manifest: Record<string, unknown>; template_map: { slides: { number: number; layout: string; shapes: { kind: string; text?: string }[] }[] }; tokens: Record<string, unknown> };
+type Draft = {
+  manifest: Record<string, unknown>;
+  template_map: { slides: { number: number; layout: string; shapes: { kind: string; text?: string }[] }[] };
+  tokens: Record<string, unknown>;
+  /** Resolved token values (path -> hex colour or font family), for a person to review. */
+  review: { colors: Record<string, string>; fonts: Record<string, string> };
+};
 
 const FONT = /^[\w .-]+\.(ttf|otf)$/i;
+const ROLE_NAMES = new Set(["cover", "summary", "divider", "subsection", "content", "closing", "appendix", "imported"]);
 
-/** Web import, step 1: stage the template as a draft pack (extracted map, tokens, manifest) with
-one PNG per template slide, for the reviewer to assign roles on. Only its creator sees it. */
-export async function draftPack(user: User, data: string, template: Buffer, id: string, name: string) {
+/** Archetype names a pack may declare under roles.archetypes: the cloned forms of core/forms.yaml. */
+async function archetypes(): Promise<string[]> {
+  const { forms } = parse(await readFile(join(REPO, "core/forms.yaml"), "utf8")) as { forms: Record<string, string> };
+  return Object.keys(forms).filter((f) => forms[f] === "clone" && !ROLE_NAMES.has(f));
+}
+
+/** A font file's family (OpenType `name` table, id 1): the name PowerPoint writes on a run. */
+export function fontFamily(b: Buffer): string | null {
+  try {
+    for (let i = 0; i < b.readUInt16BE(4); i++) {
+      const rec = 12 + i * 16;
+      if (b.toString("latin1", rec, rec + 4) !== "name") continue;
+      const at = b.readUInt32BE(rec + 8);
+      const strings = at + b.readUInt16BE(at + 4);
+      let found: [number, string] | null = null; // [preference, name]
+      for (let j = 0; j < b.readUInt16BE(at + 2); j++) {
+        const r = at + 6 + j * 12;
+        const [platform, , language, nameId, length = 0, offset = 0] = [0, 2, 4, 6, 8, 10].map((o) => b.readUInt16BE(r + o));
+        if (nameId !== 1) continue;
+        const raw = Buffer.from(b.subarray(strings + offset, strings + offset + length));
+        // Windows US English first, then any Unicode (UTF-16BE) record, then Mac Roman
+        const pref = platform === 3 && language === 0x409 ? 0 : platform === 0 || platform === 3 ? 1 : 2;
+        if (!found || pref < found[0]) found = [pref, pref < 2 ? raw.swap16().toString("utf16le") : raw.toString("latin1")];
+      }
+      return found?.[1].trim() || null;
+    }
+  } catch {
+    // not an OpenType file
+  }
+  return null;
+}
+
+/** The manifest with the pack's font files listed and their families allowed by lint. */
+async function withFonts(manifest: Record<string, unknown>, fontsDir: string): Promise<Record<string, unknown>> {
+  const files = (await readdir(fontsDir)).sort();
+  if (!files.length) return manifest;
+  const families = (await Promise.all(files.map(async (f) => fontFamily(await readFile(join(fontsDir, f)))))).filter((f): f is string => !!f);
+  const lint = (manifest.lint ?? {}) as { extra_fonts?: string[] };
+  return {
+    ...manifest,
+    fonts: { ...(manifest.fonts as object), files },
+    lint: { ...lint, extra_fonts: [...new Set([...(lint.extra_fonts ?? []), ...families])] },
+  };
+}
+
+/** Web import, step 1: stage the template (.pptx or .potx) as a draft pack (extracted map,
+tokens, manifest) with one PNG per template slide, for the reviewer to assign roles on. `tokens`:
+the company's tokens.json, used instead of the drafted one. Only its creator sees the draft. */
+export async function draftPack(user: User, data: string, template: Buffer, id: string, name: string, tokens?: Record<string, unknown>) {
   if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) throw new Error("pack id: lowercase letters, digits and dashes");
   const draftId = randomUUID();
   const dir = join(data, "pack-drafts", draftId);
   await mkdir(join(dir, "fonts"), { recursive: true });
   await writeFile(join(dir, "template.pptx"), template);
   await writeFile(join(dir, "owner"), user.id);
-  const d = await engine<Draft>("extract", { template: join(dir, "template.pptx"), pack_id: id, name });
+  const d = await engine<Draft>("extract", { template: join(dir, "template.pptx"), pack_id: id, name, tokens });
   await writeFile(join(dir, "pack.yaml"), stringify(d.manifest));
   await writeFile(join(dir, "tokens.json"), JSON.stringify(d.tokens, null, 2));
   await writeFile(join(dir, "template-map.yaml"), stringify(d.template_map));
@@ -180,6 +292,8 @@ export async function draftPack(user: User, data: string, template: Buffer, id: 
   return {
     draft_id: draftId,
     manifest: d.manifest,
+    review: d.review,
+    archetypes: await archetypes(),
     slides: d.template_map.slides.map((s) => ({
       number: s.number,
       layout: s.layout,
@@ -197,24 +311,32 @@ export async function draftDir(user: User, data: string, draftId: string): Promi
   return dir;
 }
 
+/** Add a font file to a draft. Its family is allowed by lint when the draft is published. */
 export async function addFont(user: User, data: string, draftId: string, name: string, bytes: Buffer) {
   if (!FONT.test(name)) throw new Error("fonts: .ttf or .otf files");
+  const family = fontFamily(bytes);
+  if (!family) throw new Error(`fonts: ${name} has no readable family name`);
   const dir = await draftDir(user, data, draftId);
   await writeFile(join(dir, "fonts", name), bytes);
-  return { fonts: (await readdir(join(dir, "fonts"))).sort() };
+  return { fonts: (await readdir(join(dir, "fonts"))).sort(), family };
 }
 
 /** Edit a published pack, step 1: copy it whole (exemplars, icons, notes included) into a draft
-with one PNG per template slide, for the same review as an import. Owner only. */
+with one PNG per template slide, for the same review as an import. Owner or admin. */
 export async function editPack(db: Db, user: User, data: string, id: string) {
-  const pack = await getPack(db, user, id);
-  if (!user.local && pack.owner !== user.id) throw new Forbidden(`only the owner of ${id} edits it`);
+  const pack = await managedPack(db, user, id, "edit it");
   const draftId = randomUUID();
   const dir = join(data, "pack-drafts", draftId);
   await cp(pack.dir, dir, { recursive: true });
   await mkdir(join(dir, "fonts"), { recursive: true });
   await writeFile(join(dir, "owner"), user.id);
   await writeFile(join(dir, "edits"), id);
+  return draftView(dir, draftId);
+}
+
+/** A draft for review: its manifest, voice, fonts and one PNG per template slide (rendered now). */
+async function draftView(dir: string, draftId: string) {
+  await rm(join(dir, "render"), { recursive: true, force: true });
   await engine("render", { pack: dir, pptx: join(dir, "template.pptx"), out_dir: join(dir, "render") });
   const tmap = parse(await readFile(join(dir, "template-map.yaml"), "utf8")) as Draft["template_map"];
   return {
@@ -222,6 +344,7 @@ export async function editPack(db: Db, user: User, data: string, id: string) {
     manifest: parse(await readFile(join(dir, "pack.yaml"), "utf8")) as Record<string, unknown>,
     voice: existsSync(join(dir, "voice.md")) ? await readFile(join(dir, "voice.md"), "utf8") : "",
     fonts: (await readdir(join(dir, "fonts"))).sort(),
+    archetypes: await archetypes(),
     slides: tmap.slides.map((s) => ({
       number: s.number,
       layout: s.layout,
@@ -231,24 +354,74 @@ export async function editPack(db: Db, user: User, data: string, id: string) {
   };
 }
 
+/** Swap a draft's template.pptx (a new version of the company template). The extractor re-drafts the
+template map and the template-bound parts of the manifest (roles, never_clone, grid, placeholders,
+fonts its slides use); the rest (name, languages, fonts, lint rules) and tokens.json are kept. Review again, then publish:
+the new template must lint clean against the pack's tokens. */
+export async function replaceTemplate(user: User, data: string, draftId: string, template: Buffer) {
+  const dir = await draftDir(user, data, draftId);
+  const current = parse(await readFile(join(dir, "pack.yaml"), "utf8")) as Record<string, unknown> & { lint?: object };
+  const tokens = JSON.parse(await readFile(join(dir, "tokens.json"), "utf8")) as Record<string, unknown>;
+  await writeFile(join(dir, "template.pptx"), template); // a .potx is rewritten in place by the extractor
+  const d = await engine<Draft>("extract", { template: join(dir, "template.pptx"), pack_id: current.id, name: current.name, tokens });
+  const m = d.manifest as Record<string, unknown> & { lint?: { placeholders?: string[]; extra_fonts?: string[] } };
+  const lint = (current.lint ?? {}) as { extra_fonts?: string[] };
+  const extra_fonts = [...new Set([...(lint.extra_fonts ?? []), ...(m.lint?.extra_fonts ?? [])])];
+  const manifest = {
+    ...current,
+    roles: m.roles,
+    never_clone: m.never_clone,
+    grid: m.grid,
+    lint: { ...lint, placeholders: m.lint?.placeholders ?? [], ...(extra_fonts.length ? { extra_fonts } : {}) },
+  };
+  await writeFile(join(dir, "pack.yaml"), stringify(manifest));
+  await writeFile(join(dir, "template-map.yaml"), stringify(d.template_map));
+  return draftView(dir, draftId);
+}
+
+/** Swap a draft's tokens.json (DTCG, the pack's source of truth), the way an import takes the
+company's tokens.json: through the extractor, which returns the resolved colours and fonts to review.
+The template must still lint clean against them when the draft is published. */
+export async function replaceTokens(user: User, data: string, draftId: string, bytes: Buffer) {
+  const dir = await draftDir(user, data, draftId);
+  let tokens: unknown;
+  try {
+    tokens = JSON.parse(bytes.toString("utf8"));
+  } catch {
+    throw new Error("tokens.json: not valid JSON");
+  }
+  if (!tokens || typeof tokens !== "object" || Array.isArray(tokens)) throw new Error("tokens.json: a DTCG token tree (a JSON object)");
+  const d = await engine<Draft>("extract", { template: join(dir, "template.pptx"), tokens });
+  await writeFile(join(dir, "tokens.json"), JSON.stringify(d.tokens, null, 2) + "\n");
+  return { tokens: Object.keys(d.tokens).sort(), review: d.review };
+}
+
 /** Edit, step 2: the reviewed manifest and voice over the copy; validated like an import, then
-replaces the pack (same id, same visibility). */
-async function publishEdit(db: Db, data: string, dir: string, id: string, input: { manifest: Record<string, unknown>; voice?: string | undefined }) {
-  const fonts = (await readdir(join(dir, "fonts"))).sort();
-  const manifest = { ...input.manifest, id, ...(fonts.length ? { fonts: { ...(input.manifest.fonts as object), files: fonts } } : {}) };
+published as the pack's next release (same id, same visibility). The previous release is kept. */
+async function publishEdit(
+  db: Db,
+  user: User,
+  data: string,
+  dir: string,
+  id: string,
+  input: { manifest: Record<string, unknown>; voice?: string | undefined; note?: string | undefined },
+) {
+  const manifest = await withFonts({ ...input.manifest, id }, join(dir, "fonts"));
   await writeFile(join(dir, "pack.yaml"), stringify(manifest));
   if (input.voice !== undefined) await writeFile(join(dir, "voice.md"), input.voice);
   await engine("validate_pack", { pack: dir });
   const problems = await validateStaged(dir, manifest);
   if (problems.length) return { status: "invalid" as const, problems };
+  await writeDesign(dir);
 
-  const out = join(data, "packs", id);
+  await managedPack(db, user, id, "edit it"); // still theirs to change
+  const out = releaseDir(data, id, await nextVersion(db, id));
   const skip = new Set(["owner", "edits", "render"].map((f) => join(dir, f)));
   await rm(out, { recursive: true, force: true });
   await cp(dir, out, { recursive: true, filter: (src) => !skip.has(src) });
-  await db.query("update packs set dir = $2 where id = $1", [id, out]);
+  const version = await release(db, id, out, input.note || "edit", user.id);
   await rm(dir, { recursive: true, force: true });
-  return { status: "published" as const, id };
+  return { status: "published" as const, id, version };
 }
 
 /** Web import, step 2: the reviewed manifest and voice; validated, then published (importPack). */
@@ -257,10 +430,20 @@ export async function publishDraft(
   user: User,
   data: string,
   draftId: string,
-  input: { manifest: Record<string, unknown>; voice?: string | undefined; visibility: "workspace" | "team"; teams?: string[] | undefined },
+  input: {
+    manifest: Record<string, unknown>;
+    voice?: string | undefined;
+    note?: string | undefined;
+    visibility: "workspace" | "team";
+    teams?: string[] | undefined;
+  },
 ) {
   const dir = await draftDir(user, data, draftId);
-  if (existsSync(join(dir, "edits"))) return publishEdit(db, data, dir, await readFile(join(dir, "edits"), "utf8"), input);
+  if (existsSync(join(dir, "edits"))) {
+    const r = await publishEdit(db, user, data, dir, await readFile(join(dir, "edits"), "utf8"), input);
+    if (r.status === "published") await audit(db, user, "edit", "pack", r.id);
+    return r;
+  }
   const r = await importPack(db, user, data, {
     ...input,
     template: join(dir, "template.pptx"),
@@ -272,10 +455,37 @@ export async function publishDraft(
   return r;
 }
 
-/** Who sees a pack: the whole workspace, or the listed teams (and its owner). Owner only. */
+/** Who sees a pack: the whole workspace, or the listed teams (and its owner). Owner or admin. */
 export async function setVisibility(db: Db, user: User, id: string, visibility: "workspace" | "team", teams: string[]) {
-  const pack = await getPack(db, user, id);
-  if (!user.local && pack.owner !== user.id) throw new Forbidden(`only the owner of ${id} changes its visibility`);
+  await managedPack(db, user, id, "change its visibility");
   await db.query("update packs set visibility = $2, teams = $3 where id = $1", [id, visibility, JSON.stringify(teams)]);
+  await audit(db, user, "visibility", "pack", id, { visibility, teams });
   return { id, visibility, teams };
+}
+
+/** Archive a pack (a finished client engagement): gone from pickers and new decks, while decks
+already on it still open, build and export. Owner or admin; `archived: false` brings it back. */
+export async function archivePack(db: Db, user: User, id: string, archived: boolean) {
+  await managedPack(db, user, id, "archive it");
+  await db.query("update packs set archived = $2 where id = $1", [id, archived]);
+  return { id, archived };
+}
+
+/** A pack's releases, newest first: the changelog, and what `restorePack` can go back to. */
+export async function packVersions(db: Db, user: User, id: string) {
+  const pack = await managedPack(db, user, id, "see its history");
+  const { rows } = await db.query<{ version: number; note: string; author: string | null; created_at: string }>(
+    "select version, note, author, created_at from pack_versions where pack_id = $1 order by version desc",
+    [id],
+  );
+  return { id, current: pack.version, versions: rows };
+}
+
+/** Roll back: release `version` becomes current again, recorded as a new release (history only grows). */
+export async function restorePack(db: Db, user: User, id: string, version: number, note?: string) {
+  await managedPack(db, user, id, "restore it");
+  const { rows } = await db.query<{ dir: string }>("select dir from pack_versions where pack_id = $1 and version = $2", [id, version]);
+  const dir = rows[0]?.dir;
+  if (!dir || !existsSync(join(dir, "pack.yaml"))) throw new NotFound(`pack ${id} has no version ${version}`);
+  return { id, version: await release(db, id, dir, note || `restore v${version}`, user.id) };
 }

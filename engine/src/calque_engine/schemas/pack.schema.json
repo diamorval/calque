@@ -298,6 +298,11 @@
         }
       }
     },
+    "approval": {
+      "description": "Opt-in review: decks on this pack get an approval status (draft, in review, approved), approved by the pack owner or an admin. Never blocks an export. Default off.",
+      "type": "boolean",
+      "default": false
+    },
     "reconciliation": {
       "description": "Arbitrated gaps between the template theme and tokens.json.",
       "type": "array",

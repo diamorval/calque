@@ -35,7 +35,7 @@ describe("review_deck", { timeout: ENGINE_TIMEOUT }, () => {
     expect(r.applied).toEqual([]);
     expect(r.visual_checklist).toContain("overflow or clipping");
     expect(r.slides[0].image_url).toMatch(/slides\/1\.png/);
-    expect((await app.decks.deck(LOCAL, id)).head).toBe(1);
+    expect((await app.decks.deck(LOCAL, id, "viewer")).head).toBe(1);
   });
 
   it("applies them on approval: a new version with 0 lint errors", async () => {

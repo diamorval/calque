@@ -92,6 +92,7 @@ Rules:
 - **Respect capacities.** Each slot in `template-map.yaml` carries an estimated capacity; the
   title box carries `grid.title.max_chars`. Write the copy to fit before building: tightening
   copy is cheaper than a QA loop. Overflow is failure #1. Never enlarge a box to rescue copy.
+  Lint warns (`capacity`) on a slot over its capacity and on a fit label grown into other text.
 - **Narrow labels fit to content** and keep their grid edge; judge them across slides (four
   dividers must not end up with four different label positions).
 - **Text in blocks, not fragments.** One text frame per idea group (a label paragraph, then its

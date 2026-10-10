@@ -1,31 +1,40 @@
-import { DeckViewer, type DeckView } from "@calque/slide-ui";
+import { DeckViewer, type DeckView, type NewComment, type NewReply } from "@calque/slide-ui";
 import { Alert, AlertDescription } from "diametral-ds/alert";
 import { Button } from "diametral-ds/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "diametral-ds/table";
 import { Tag } from "diametral-ds/tag";
-import { CircleCheck, Download, History, Play, Sparkles, TriangleAlert, X } from "lucide-react";
+import { BadgeCheck, CircleCheck, Download, FileText, History, ListChecks, ListPlus, Play, Send, Share2, Sparkles, TriangleAlert, Undo2, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { agent, tool } from "../api.ts";
-import { Chat } from "../components/Chat.tsx";
+import { Chat, type Ask } from "../components/Chat.tsx";
+import { AddSlides, ReviewDeck } from "../components/DeckActions.tsx";
+import { ExportWithErrors } from "../components/ExportGate.tsx";
+import { ShareDeck } from "../components/Share.tsx";
+import { bySeverity, type Finding, lintSummary } from "../lint.ts";
 import { navigate } from "../nav.ts";
 import { ago, Dialog, Spinner } from "../ui.tsx";
 
-type Deck = DeckView & { versions: { version: number; note: string; author: string; created_at: string }[] };
+type Deck = DeckView & { versions: { version: number; note: string; author: string; author_name: string | null; created_at: string }[] };
+const APPROVAL = { draft: "Draft", in_review: "In review", approved: "Approved" } as const;
 
 const EDITS = ["Tighten every title to one line", "Add an agenda slide after the cover", "Review the deck against the brand pack"];
 
 /** The editor: the deck workspace (slide-ui) with the agent chat in its side panel. */
 export function Editor({ id }: { id: string }) {
   const [deck, setDeck] = useState<Deck | null>(null);
-  const [errors, setErrors] = useState<number | null>(null);
+  const [findings, setFindings] = useState<Finding[] | null>(null);
+  const [report, setReport] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [history, setHistory] = useState(false);
+  // toolbar actions that go through the agent chat, and their dialogs
+  const [ask, setAsk] = useState<Ask | null>(null);
+  const [dialog, setDialog] = useState<"add" | "review" | "share" | "export" | null>(null);
 
   const reload = useCallback(async () => {
     try {
       setDeck(await tool<Deck>("open_deck", { deck_id: id }));
-      setErrors((await tool<{ errors: number }>("lint_deck", { deck_id: id })).errors);
+      setFindings((await tool<{ findings: Finding[] }>("lint_deck", { deck_id: id })).findings);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -59,6 +68,16 @@ export function Editor({ id }: { id: string }) {
         )}
       </div>
     );
+  const summary = findings && lintSummary(findings);
+  // a deck shared with the user: viewers read, commenters also comment, editors change it
+  const role = deck.role ?? "owner";
+  const edits = role === "editor" || role === "owner";
+  const errors = findings?.filter((f) => f.severity === "ERROR") ?? [];
+  const exportPptx = async (reason?: string) =>
+    location.assign((await tool<{ download_url: string }>("export_pptx", { deck_id: id, ...(reason ? { reason } : {}) })).download_url);
+  const approval = deck.approval?.enabled ? deck.approval : null;
+  const setApproval = (status: "draft" | "in_review" | "approved", label: string) =>
+    void run(label, () => tool("set_approval", { deck_id: id, status }));
   return (
     <>
       <DeckViewer
@@ -66,51 +85,128 @@ export function Editor({ id }: { id: string }) {
         working={busy}
         actions={
           <>
-            {errors !== null &&
-              (errors ? (
-                <Tag tone="danger">
-                  <TriangleAlert /> {errors} lint error{errors > 1 ? "s" : ""}
-                </Tag>
+            {summary &&
+              (findings?.length ? (
+                <Button variant="ghost" aria-label={`Lint: ${summary.label}`} onClick={() => setReport(true)}>
+                  <Tag tone={summary.tone}>
+                    <TriangleAlert /> {summary.label}
+                  </Tag>
+                </Button>
               ) : (
                 <Tag tone="success">
-                  <CircleCheck /> Lint clean
+                  <CircleCheck /> {summary.label}
                 </Tag>
               ))}
+            {edits ? (
+              <>
+                <Button variant="ghost" onClick={() => setDialog("add")}>
+                  <ListPlus /> Add slides
+                </Button>
+                <Button variant="ghost" onClick={() => setDialog("review")}>
+                  <ListChecks /> Review
+                </Button>
+              </>
+            ) : (
+              <Tag>{role === "viewer" ? "Viewer" : "Commenter"}</Tag>
+            )}
             <Button variant="ghost" onClick={() => setHistory(true)}>
               <History /> History
             </Button>
             <Button variant="outline" onClick={() => navigate(`/present/${id}`)}>
               <Play /> Present
             </Button>
+            {approval && (
+              <>
+                <Tag tone={approval.status === "approved" ? "success" : approval.status === "in_review" ? "warning" : "neutral"}>{APPROVAL[approval.status]}</Tag>
+                {approval.can_request && (
+                  <Button variant="ghost" onClick={() => setApproval("in_review", "Requesting review")}>
+                    <Send /> Request review
+                  </Button>
+                )}
+                {approval.can_approve && (
+                  <>
+                    <Button variant="ghost" onClick={() => setApproval("approved", "Approving")}>
+                      <BadgeCheck /> Approve
+                    </Button>
+                    <Button variant="ghost" onClick={() => setApproval("draft", "Requesting changes")}>
+                      <Undo2 /> Request changes
+                    </Button>
+                  </>
+                )}
+                {approval.can_withdraw && !approval.can_approve && (
+                  <Button variant="ghost" onClick={() => setApproval("draft", "Back to draft")}>
+                    <Undo2 /> Back to draft
+                  </Button>
+                )}
+              </>
+            )}
             <Button
-              onClick={async () => location.assign((await tool<{ download_url: string }>("export_pptx", { deck_id: id })).download_url)}
+              variant="outline"
+              disabled={busy !== null}
+              onClick={async () => {
+                setBusy("Exporting PDF");
+                setError(null);
+                try {
+                  location.assign((await tool<{ download_url: string }>("export_pdf", { deck_id: id })).download_url);
+                } catch (e) {
+                  setError((e as Error).message);
+                } finally {
+                  setBusy(null);
+                }
+              }}
             >
+              <FileText /> Export PDF
+            </Button>
+            {/* the soft gate: lint ERRORs ask for a reason, recorded with the export, never a block */}
+            <Button onClick={() => (errors.length ? setDialog("export") : void exportPptx().catch((e: Error) => setError(e.message)))}>
               <Download /> Export PPTX
             </Button>
+            {role === "owner" && (
+              <Button variant="outline" onClick={() => setDialog("share")}>
+                <Share2 /> Share
+              </Button>
+            )}
           </>
         }
         agent={
-          <Chat
-            storageKey={`chat:${id}`}
-            deck_id={id}
-            pack_id={deck.pack_id}
-            placeholder="Ask for a change: reword, add a slide, review…"
-            suggestions={EDITS}
-            empty={
-              <div className="cq-empty">
-                <Sparkles />
-                <strong>Edit with the agent</strong>
-                <span>Ask for a change in your words. Comments on the slides go through the agent too.</span>
-              </div>
-            }
-            onDone={() => void reload()}
-          />
+          edits && (
+            <Chat
+              storageKey={`chat:${id}`}
+              deck_id={id}
+              pack_id={deck.pack_id}
+              placeholder="Ask for a change: reword, add a slide, review…"
+              suggestions={EDITS}
+              ask={ask}
+              empty={
+                <div className="cq-empty">
+                  <Sparkles />
+                  <strong>Edit with the agent</strong>
+                  <span>Ask for a change in your words. Comments on the slides go through the agent too.</span>
+                </div>
+              }
+              onDone={() => void reload()}
+            />
+          )
         }
-        onComment={async (c) => {
-          await tool("add_comment", { deck_id: id, ...c });
-          await reload();
-        }}
-        onApply={() => run("Applying comments", () => agent("/api/agent/apply-comments", { deck_id: id }, () => {}))}
+        {...(role !== "viewer"
+          ? {
+              onComment: async (c: NewComment) => {
+                await tool("add_comment", { deck_id: id, ...c });
+                await reload();
+              },
+              onReply: async (r: NewReply) => {
+                await tool("add_comment", { deck_id: id, ...r });
+                await reload();
+              },
+            }
+          : {})}
+        {...(edits
+          ? {
+              onApply: (ids?: number[]) =>
+                run("Applying comments", () => agent("/api/agent/apply-comments", { deck_id: id, ...(ids ? { comment_ids: ids } : {}) }, () => {})),
+              onResolve: (ids: number[], status: "open" | "resolved") => run("", () => tool("resolve_comments", { deck_id: id, comment_ids: ids, status })),
+            }
+          : {})}
       />
       {error && (
         <div className="cq-toast" role="alert">
@@ -119,6 +215,20 @@ export function Editor({ id }: { id: string }) {
             <X />
           </Button>
         </div>
+      )}
+      {dialog === "share" && <ShareDeck deck_id={id} onClose={() => setDialog(null)} />}
+      {dialog === "export" && <ExportWithErrors errors={errors} onClose={() => setDialog(null)} onExport={exportPptx} />}
+      {dialog === "add" && <AddSlides onClose={() => setDialog(null)} onAsk={setAsk} />}
+      {dialog === "review" && (
+        <ReviewDeck
+          deck_id={id}
+          onClose={() => setDialog(null)}
+          onAsk={setAsk}
+          onApplySafe={() => {
+            setDialog(null);
+            void run("Applying safe fixes", () => tool("review_deck", { deck_id: id, apply_safe_fixes: true }));
+          }}
+        />
       )}
       {history && (
         <Dialog title="Version history" wide onClose={() => setHistory(false)}>
@@ -142,23 +252,57 @@ export function Editor({ id }: { id: string }) {
                       {v.note}
                       <div className="cq-hint">{ago(v.created_at)}</div>
                     </TableCell>
-                    <TableCell>{v.author}</TableCell>
+                    <TableCell>{v.author_name || v.author}</TableCell>
                     <TableCell>
                       {v.version === deck.head ? (
                         <Tag>Current</Tag>
                       ) : (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          aria-label={`Restore v${v.version}`}
-                          onClick={() => {
-                            setHistory(false);
-                            void run("Restoring", () => tool("restore_version", { deck_id: id, version: v.version }));
-                          }}
-                        >
-                          Restore
-                        </Button>
+                        edits && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            aria-label={`Restore v${v.version}`}
+                            onClick={() => {
+                              setHistory(false);
+                              void run("Restoring", () => tool("restore_version", { deck_id: id, version: v.version }));
+                            }}
+                          >
+                            Restore
+                          </Button>
+                        )
                       )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </Dialog>
+      )}
+      {report && findings && (
+        <Dialog title={`Lint: ${summary?.label}`} wide onClose={() => setReport(false)}>
+          <div className="cq-dialog-body">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Severity</TableHead>
+                  <TableHead>Slide</TableHead>
+                  <TableHead>Finding</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {bySeverity(findings).map((f, i) => (
+                  <TableRow key={i}>
+                    <TableCell>
+                      <Tag tone={f.severity === "ERROR" ? "danger" : f.severity === "WARN" ? "warning" : "neutral"}>{f.severity}</Tag>
+                    </TableCell>
+                    <TableCell>{f.slide ? `Slide ${f.slide}` : "Deck"}</TableCell>
+                    <TableCell>
+                      {f.message}
+                      <div className="cq-hint">
+                        <span className="cq-mono">{f.check}</span>
+                        {f.shape_id !== null && ` · shape ${f.shape_id}`}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}

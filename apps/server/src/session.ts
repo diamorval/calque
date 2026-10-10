@@ -4,6 +4,7 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { jwtVerify, SignJWT } from "jose";
 import * as oidc from "openid-client";
 import type { User } from "./packs.ts";
+import { teamsOf, type TeamsConfig } from "./teams.ts";
 
 /** Web app sign-in: OIDC authorization code + PKCE against the issuer (Keycloak), then a signed,
 HttpOnly session cookie. The server keeps no session state and no IdP token: the web agent runs
@@ -14,7 +15,10 @@ export interface SessionConfig {
   clientSecret?: string | undefined; // CALQUE_OIDC_CLIENT_SECRET; unset = public client
   publicUrl: string;
   teamsClaim: string;
+  teams?: Omit<TeamsConfig, "claim"> | undefined; // group id -> team name (Entra ID)
   secret: string; // CALQUE_SECRET
+  /** Told of each sign-in (the audit log). */
+  onSignIn?: ((user: User) => Promise<void>) | undefined;
 }
 
 const SESSION = "calque_session";
@@ -65,7 +69,9 @@ export function sessions(cfg: SessionConfig): Sessions {
       const verifier = oidc.randomPKCECodeVerifier();
       const state = oidc.randomState();
       const back = c.req.query("return") ?? "/";
-      setCookie(c, LOGIN, await seal({ verifier, state, back: back.startsWith("/") ? back : "/" }, "10m"), { ...cookie, maxAge: 600 });
+      // a path on this site only: "//host" and "/\host" are other sites to a browser, which also drops tabs and newlines
+      const local = /^\/(?![/\\])\P{Cc}*$/u.test(back);
+      setCookie(c, LOGIN, await seal({ verifier, state, back: local ? back : "/" }, "10m"), { ...cookie, maxAge: 600 });
       const url = oidc.buildAuthorizationUrl(await discover(), {
         redirect_uri: redirect,
         scope: "openid profile email",
@@ -87,14 +93,13 @@ export function sessions(cfg: SessionConfig): Sessions {
       });
       const claims = tokens.claims();
       if (!claims) throw new Error("the issuer returned no ID token");
-      const groups = claims[cfg.teamsClaim];
       const user = {
         sub: claims.sub,
         name: String(claims.name ?? claims.preferred_username ?? claims.sub),
-        // Keycloak group paths look like "/team-a"
-        teams: Array.isArray(groups) ? groups.map((t) => String(t).replace(/^\//, "")) : [],
+        teams: teamsOf(claims, { ...cfg.teams, claim: cfg.teamsClaim }),
       };
       setCookie(c, SESSION, await seal(user, `${HOURS}h`), { ...cookie, maxAge: HOURS * 3600 });
+      await cfg.onSignIn?.({ id: user.sub, name: user.name, teams: user.teams });
       return c.redirect(String(login.back));
     },
 

@@ -80,7 +80,8 @@ follows the closing slash after two or more spaces. `#` starts a comment. Pack r
 ERROR; they never lower one. Every hit is reported: one finding per distinct match, per rule and
 shape, with a count when the same match repeats.
 
-Exemption: the text of a slide cloned from the pack `closing` role keeps its signature line.
+Exemption: the text of a slide cloned from the pack `closing` role keeps its signature line, as
+long as it reads exactly as the template writes it. Copy rewritten there is linted like any other.
 
 ```anti-slop
 # --- typography (generic) ---------------------------------------------------

@@ -60,24 +60,45 @@ export async function startDemo() {
       },
     ];
 
+  const shares = new Map<string, Json>();
+  const link = (id: string) =>
+    `${location.origin}${BASE}/decks/${id}?k=${Math.random().toString(36).slice(2)}`;
+  const sharing = (id: string): Json => {
+    if (!shares.has(id))
+      shares.set(id, {
+        owner: "local",
+        people: [],
+        general: { access: "private", role: "viewer" },
+        url: link(id),
+      });
+    return shares.get(id) as Json;
+  };
+
   // method + path pattern -> answer; the request body is parsed JSON, or the FormData of an upload
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const routes: [RegExp, (m: string[], b: any) => unknown][] = [
     [
       /^POST \/api\/models$/,
       (_, b) => {
+        const prev = models.models.find((x: Json) => x.id === b.id);
         const m = {
-          id: `demo-${Date.now()}`,
+          id: b.id ?? `demo-${Date.now()}`,
           provider: b.provider,
           model: b.model,
+          label: b.label ?? null,
           base_url: b.base_url ?? null,
-          has_key: !!b.api_key,
-          is_default: false,
+          has_key: !!b.api_key || !!prev?.has_key,
+          headers: b.headers ? Object.keys(b.headers) : (prev?.headers ?? []),
+          resource: b.resource ?? null,
+          api_version: b.api_version ?? null,
+          managed_identity: !!b.managed_identity,
+          is_default: !!prev?.is_default,
         };
-        models.models.push(m);
+        const saved = prev ? Object.assign(prev, m) : m;
+        if (!prev) models.models.push(m);
         if (b.default || models.models.length === 1)
-          for (const x of models.models) x.is_default = x === m;
-        return m;
+          for (const x of models.models) x.is_default = x === saved;
+        return saved;
       },
     ],
     [
@@ -108,6 +129,30 @@ export async function startDemo() {
         return p;
       },
     ],
+    [/^GET \/api\/packs$/, () => ({ packs })],
+    [
+      /^POST \/api\/packs\/([^/]+)\/archive$/,
+      ([, id], b) => {
+        const p = packs.find((x) => x.id === id);
+        Object.assign(p ?? {}, { archived: b.archived });
+        return { id, archived: b.archived };
+      },
+    ],
+    [
+      /^GET \/api\/packs\/([^/]+)\/versions$/,
+      ([, id]) => ({
+        id,
+        current: 1,
+        versions: [
+          {
+            version: 1,
+            note: "initial version",
+            author: null,
+            created_at: new Date().toISOString(),
+          },
+        ],
+      }),
+    ],
     // any pack, and any uploaded template, opens on the Diametral template's review screen
     [
       /^POST \/api\/packs\/([^/]+)\/edit$/,
@@ -135,6 +180,13 @@ export async function startDemo() {
           voice: undefined,
           fonts: [],
         };
+      },
+    ],
+    [
+      /^POST \/api\/files$/,
+      (_, f: FormData) => {
+        const file = f.get("file") as File;
+        return { file_id: `demo-${Date.now()}`, name: file.name, size: file.size, type: file.type };
       },
     ],
     [
@@ -173,19 +225,103 @@ export async function startDemo() {
       /^POST \/api\/tools\/add_comment$/,
       (_, b) => {
         const deck = opened(b.deck_id);
+        const parent = b.parent_id !== undefined ? deck.open_comments.find((c: Json) => c.id === b.parent_id) : undefined;
         const comment = {
           id: Date.now(),
           deck_id: b.deck_id,
           version: deck.head,
-          slide_id: b.slide_id,
-          shape_id: b.shape_id ?? null,
+          slide_id: parent?.slide_id ?? b.slide_id,
+          shape_id: parent ? parent.shape_id : (b.shape_id ?? null),
           text: b.text,
-          author: "Demo",
+          author: "demo",
+          author_name: "Demo",
           status: "open",
+          parent_id: parent?.id ?? null,
+          replies: [],
           created_at: new Date().toISOString(),
         };
-        deck.open_comments.push(comment);
+        if (parent) parent.replies = [...(parent.replies ?? []), comment];
+        else deck.open_comments.push(comment);
         return { comment };
+      },
+    ],
+    [
+      /^POST \/api\/tools\/resolve_comments$/,
+      (_, b) => {
+        const deck = opened(b.deck_id);
+        const all: Json[] = [...deck.open_comments, ...(deck.resolved_comments ?? [])];
+        for (const c of all) if (b.comment_ids.includes(c.id)) c.status = b.status ?? "resolved";
+        deck.open_comments = all.filter((c) => c.status === "open");
+        deck.resolved_comments = all.filter((c) => c.status === "resolved");
+        return { status: b.status ?? "resolved", comment_ids: b.comment_ids };
+      },
+    ],
+    // sharing, in memory: people, general access and the share link of each deck
+    [/^POST \/api\/tools\/list_shares$/, (_, b) => sharing(b.deck_id)],
+    [
+      /^POST \/api\/tools\/share_deck$/,
+      (_, b) => {
+        const s = sharing(b.deck_id);
+        s.people = s.people.filter((p: Json) => p.principal !== b.principal);
+        s.people.push({ principal_type: b.principal_type, principal: b.principal, role: b.role });
+        return { principal_type: b.principal_type, principal: b.principal, role: b.role };
+      },
+    ],
+    [
+      /^POST \/api\/tools\/unshare_deck$/,
+      (_, b) => {
+        const s = sharing(b.deck_id);
+        s.people = s.people.filter((p: Json) => p.principal !== b.principal);
+        return { principal_type: b.principal_type, principal: b.principal };
+      },
+    ],
+    [
+      /^POST \/api\/tools\/set_general_access$/,
+      (_, b) => {
+        sharing(b.deck_id).general = { access: b.access, role: b.role ?? "viewer" };
+        return sharing(b.deck_id).general;
+      },
+    ],
+    [
+      /^POST \/api\/tools\/reset_link$/,
+      (_, b) => {
+        const s = sharing(b.deck_id);
+        s.url = link(b.deck_id);
+        return { deck_id: b.deck_id, url: s.url };
+      },
+    ],
+    // an imported file opens a deck the engine built earlier on that pack
+    [
+      /^POST \/api\/tools\/import_pptx$/,
+      (_, b) => ({
+        deck_id: (decks.find((d) => d.pack_id === b.pack_id) ?? decks[0])?.id,
+      }),
+    ],
+    // the review report, from the saved lint: a generated deck has no safe fixes to apply
+    [
+      /^POST \/api\/tools\/review_deck$/,
+      (_, b) => {
+        if (b.apply_safe_fixes)
+          return Response.json(READ_ONLY, { status: 403 });
+        const lint: Json =
+          api[
+            `POST /api/tools/lint_deck ${JSON.stringify({ deck_id: b.deck_id })}`
+          ] ?? { version: 1, findings: [] };
+        const of = (s: string) =>
+          lint.findings.filter((f: Json) => f.severity === s);
+        return {
+          report: {
+            version: lint.version,
+            ERROR: of("ERROR"),
+            WARN: of("WARN"),
+            NOTE: of("NOTE"),
+            safe_fixes: [],
+            judgment_calls: lint.findings.filter(
+              (f: Json) => f.severity !== "NOTE",
+            ),
+          },
+          applied: [],
+        };
       },
     ],
   ];
@@ -209,7 +345,7 @@ export async function startDemo() {
       const b = JSON.parse(String(init?.body));
       if (b.deck_id)
         return stream([
-          { step: { tools: ["open_deck"] } },
+          { step: { tools: [{ name: "open_deck" }] } },
           {
             done: {
               model: "demo",
@@ -239,22 +375,21 @@ export async function startDemo() {
         { role: "assistant", content: text },
       ];
       return stream([
-        { step: { tools: ["list_packs"] } },
-        { step: { tools: ["create_deck"] } },
+        { step: { tools: [{ name: "list_packs" }] } },
+        { step: { tools: [{ name: "create_deck" }] } },
         { done: { model: "demo", text, messages } },
       ]);
     }
     for (const [re, answer] of routes) {
       const m = req.match(re);
-      if (m)
-        return Response.json(
-          answer(
-            m,
-            init?.body instanceof FormData
-              ? init.body
-              : JSON.parse((init?.body as string) || "{}"),
-          ),
-        );
+      if (!m) continue;
+      const out = answer(
+        m,
+        init?.body instanceof FormData
+          ? init.body
+          : JSON.parse((init?.body as string) || "{}"),
+      );
+      return out instanceof Response ? out : Response.json(out);
     }
     return Response.json(READ_ONLY, { status: 403 });
   };

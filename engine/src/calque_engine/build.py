@@ -6,6 +6,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,7 @@ from pptx.util import Emu
 
 from . import draw as d
 from . import slides as sl
+from . import tags
 from .deckspec import DeckSpec, Issue, Slide, resolve_clone_slide, validate
 from .draw import Run
 from .extract import extract
@@ -70,21 +72,43 @@ def build(
     pack: Pack,
     out: str | Path,
     base: str | Path | None = None,
+    check: bool = True,
+    image_roots: list[str | Path] | None = None,
+    author: str | None = None,
 ) -> BuildReport:
-    """Build a deck. `base` is the imported PPTX a DeckSpec with `base` edits."""
+    """Build a deck. `base` is the imported PPTX a DeckSpec with `base` edits: its slides are
+    edited in place, template clones and drawn slides are copied in from the pack template.
+    `check=False` skips the doctrine rules (schema only), for internal reference builds. Image
+    values are paths relative to `image_roots` (default: the pack, and the base's folder).
+    `author` goes in the document properties (else they name no one)."""
     _load_renderers()
     raw = data.model_dump(exclude_none=True) if isinstance(data, DeckSpec) else data
-    deck, warnings = validate(raw, pack)
+    if check:
+        deck, warnings = validate(raw, pack)
+    else:
+        deck, warnings = DeckSpec.model_validate(raw), []
     st = Style(pack)
     report = BuildReport(path=Path(out), warnings=list(warnings))
 
-    template = Path(base) if base else pack.template
-    prs = Presentation(str(template))
-    tmap = extract(template) if base else pack.template_map
-    tmap_by_n = {s["number"]: s for s in tmap["slides"]}
+    if image_roots is None:
+        image_roots = [pack.dir, *([Path(base).parent] if base else [])]
+    prs = Presentation(str(base or pack.template))
+    base_map = {s["number"]: s for s in extract(base)["slides"]} if base else {}
+    pack_map = {s["number"]: s for s in pack.template_map["slides"]}
     originals = list(prs.slides)
     used: set[int] = set()
     built = []
+    # the pack template's slides; a base deck opens the template only if it needs it
+    tpl: list | None = None if base else originals
+
+    def from_template(n: int):
+        nonlocal tpl
+        if tpl is None:
+            tpl = list(Presentation(str(pack.template)).slides)
+        slides = tpl
+        if not 1 <= n <= len(slides):
+            raise ValueError(f"slide {n} not in the pack template (1..{len(slides)})")
+        return sl.duplicate_slide(prs, slides[n - 1])
 
     for s in deck.slides:
         src = s.source
@@ -93,26 +117,37 @@ def build(
             if from_base and not base:
                 raise ValueError(f"[{s.id}] clones from base but the deck has no base")
             n = src["slide"] if from_base else resolve_clone_slide(s, pack)
-            if not 1 <= n <= len(originals):
-                raise ValueError(f"[{s.id}] slide {n} not in {template.name} (1..{len(originals)})")
-            if from_base and n not in used:
-                # first use of an imported slide: edit it in place, so notes, animations and
-                # transitions survive untouched
-                new = originals[n - 1]
-                used.add(n)
+            if from_base:
+                if not 1 <= n <= len(originals):
+                    raise ValueError(
+                        f"[{s.id}] slide {n} not in {Path(base).name} (1..{len(originals)})"
+                    )
+                if n not in used:
+                    # first use of an imported slide: edit it in place, so notes, animations and
+                    # transitions survive untouched
+                    new = originals[n - 1]
+                    used.add(n)
+                else:
+                    new = sl.duplicate_slide(prs, originals[n - 1])
+                    if originals[n - 1].has_notes_slide:
+                        new.notes_slide.notes_text_frame.text = originals[
+                            n - 1
+                        ].notes_slide.notes_text_frame.text
+                tslide = base_map[n]
             else:
-                new = sl.duplicate_slide(prs, originals[n - 1])
-                if from_base and originals[n - 1].has_notes_slide:
-                    new.notes_slide.notes_text_frame.text = originals[
-                        n - 1
-                    ].notes_slide.notes_text_frame.text
-            _apply_clone(new, s, st, deck.language, report, tmap_by_n[n], holes=not from_base)
+                try:
+                    new = from_template(n)
+                except ValueError as e:
+                    raise ValueError(f"[{s.id}] {e}") from None
+                tslide = pack_map[n]
+            _apply_clone(
+                new, s, st, deck.language, report, tslide, image_roots, holes=not from_base
+            )
         else:
-            if base:
-                raise ValueError(f"[{s.id}] drawn slides cannot be added to an imported deck yet")
             n = pack.slides_for("content")[0]
-            new = sl.duplicate_slide(prs, originals[n - 1])
-            slots = tmap_by_n[n].get("slots", {})
+            new = from_template(n)
+            tslide = pack_map[n]
+            slots = tslide.get("slots", {})
             _prepare_content(new, s, slots, st)
             fn = RENDERERS.get(_render_key(s))
             if fn is None:
@@ -121,16 +156,41 @@ def build(
                 fn(new, st, s)
         if s.notes:
             new.notes_slide.notes_text_frame.text = s.notes
-        built.append((s, new, n))
+        tags.mark(new, s.model_dump(exclude_none=True), drawn=src["kind"] != "clone")
+        built.append((s, new, n, tslide))
 
     sl.keep_only(prs, [b[1] for b in built])
-    for pos, (s, new, n) in enumerate(built, start=1):
+    for pos, (s, new, n, tslide) in enumerate(built, start=1):
         report.slides[s.id] = (pos, n)
-        pn = tmap_by_n[n].get("page_number")
+        pn = tslide.get("page_number")
         if pn is not None:
             _renumber(new, pn, pos)
+    _own_properties(prs, deck.title, author)
     prs.save(str(out))
     return report
+
+
+# presentation parts holding the template's edit history (who changed what, when)
+HISTORY_RELS = ("/changesInfo", "/revisionInfo")
+
+
+def _own_properties(prs, title: str, author: str | None) -> None:
+    """The deck's document properties, not the template's: no template authors, no python-pptx
+    defaults, no revision history parts (dropped with their relationship, so with their content
+    type on save)."""
+    core = prs.core_properties
+    for child in list(core._element):
+        core._element.remove(child)
+    now = datetime.now(UTC).replace(tzinfo=None, microsecond=0)
+    core.title = title
+    core.author = author or ""
+    core.last_modified_by = author or ""
+    core.revision = 1
+    core.created = now
+    core.modified = now
+    rels = prs.part.rels
+    for rid in [r for r, rel in rels.items() if rel.reltype.endswith(HISTORY_RELS)]:
+        rels.pop(rid)
 
 
 def _apply_clone(
@@ -140,6 +200,7 @@ def _apply_clone(
     language: str,
     report: BuildReport,
     tslide: dict[str, Any],
+    image_roots: list[str | Path],
     holes: bool = True,
 ) -> None:
     values: dict[str, Any] = s.source.get("values", {})
@@ -149,7 +210,7 @@ def _apply_clone(
         if value is None:
             sl.delete_shape(shape)
             continue
-        sl.apply_value(shape, value, st)
+        sl.apply_value(shape, value, st, image_roots)
         if int(key) in fit and not (isinstance(value, dict) and "fit" in value):
             sl.fit_box(shape, st)
     if holes:
