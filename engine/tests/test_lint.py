@@ -1,6 +1,7 @@
 """Generic lint checks, run on every pack in packs/: the template lints clean, and each fault
 injected into a cleanly built deck is caught by the right check."""
 
+import io
 from pathlib import Path
 
 import pytest
@@ -234,3 +235,31 @@ def test_missing_pack_fonts_are_reported(neutral_pack, tmp_path, capsys):
     assert [f for f in found if f.check == "fonts"] == []
     assert main(["validate-pack", str(neutral_pack)]) == 0
     assert "fonts/ lacks Face-Regular.ttf" in capsys.readouterr().err
+
+
+RT = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+
+
+def test_external_content_and_ole_flagged(clean, tmp_path):
+    """DLP: a hyperlink out warns; an OLE object, a remote template and a linked picture fail."""
+    from pptx.enum.shapes import PROG_ID
+
+    pack, path, tmap = clean
+    prs = Presentation(str(path))
+    slide = prs.slides[POS - 1]
+    _box(slide, pack, 1, 2, 3, 0.4, "see the source").hyperlink.address = "https://example.org/x"
+    link = slide.shapes[-1]
+    ole = slide.shapes.add_ole_object(io.BytesIO(b"PK\x05\x06" + b"\0" * 18), PROG_ID.XLSX, 0, 0)
+    slide.part.relate_to("https://example.org/beacon.png", f"{RT}/image", is_external=True)
+    prs.part.relate_to("https://example.org/remote.potx", f"{RT}/attachedTemplate", True)
+    bad = tmp_path / "external.pptx"
+    prs.save(str(bad))
+
+    found = [f for f in lint(bad, pack, "en", tmap) if f.check in ("external", "ole")]
+    by = {(f.check, f.severity, f.slide): f for f in found}
+    assert by[("external", "WARN", POS)].shape_id == link.shape_id
+    assert "example.org/x" in by[("external", "WARN", POS)].message
+    assert by[("ole", "ERROR", POS)].shape_id == ole.shape_id
+    assert any("beacon.png" in f.message and f.severity == "ERROR" for f in found), found
+    assert any("remote template" in f.message and f.slide is None for f in found), found
+    assert not [f for f in lint(path, pack, "en", tmap) if f.check in ("external", "ole")]

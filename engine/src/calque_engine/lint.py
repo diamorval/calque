@@ -4,7 +4,8 @@ Severities:
   ERROR  exact, no judgement involved: fails the run.
   WARN   needs eyes: an overflow estimate, a slot over its declared capacity, a single-use colour
          on two shapes (a shape and its own label may legitimately be one element), anti-slop
-         vocabulary, pack fonts missing (renders then use the fallback faces).
+         vocabulary, pack fonts missing (renders then use the fallback faces), an external
+         hyperlink (where it points is for the author to vouch for).
   NOTE   sanctioned but worth surfacing: missing-value markers, slop in speaker notes.
 """
 
@@ -16,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from lxml import etree
 from pptx import Presentation
 from pptx.oxml.ns import qn
 from pptx.util import Emu
@@ -35,6 +37,10 @@ P = "{http://schemas.openxmlformats.org/presentationml/2006/main}"
 CANVAS_TOL = 0.02  # ignore hairline bleed from rounded EMU
 LINE_FACTOR = 1.05  # line height as a multiple of font size
 DEEP_NESTING = 2  # paragraph level 0 = bullet, 1 = sub-bullet, 2 = too deep
+R = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+RELS = "{http://schemas.openxmlformats.org/package/2006/relationships}"
+# relationship types (their last segment) that run code or embed another application's object
+ACTIVE = {"oleObject", "control", "activeXControl", "activeXControlBinary"}
 
 
 @dataclass(frozen=True)
@@ -151,6 +157,59 @@ class _Linter:
                 f"rendered with fallback fonts: {faces} (pack font files missing from fonts/); "
                 "line breaks and overflow estimates may differ from PowerPoint",
             )
+
+    def external(self, path, prs) -> None:
+        """Data-loss and active content, in any part: OLE objects and ActiveX controls (ERROR),
+        content fetched from elsewhere when the file opens: a remote template, a linked picture,
+        media or data (ERROR), and hyperlinks out of the deck (WARN)."""
+        slides = {s.part.partname.lstrip("/"): (i, s) for i, s in enumerate(prs.slides, start=1)}
+        seen = set()
+
+        def add(sev, num, sid, check, msg):
+            key = (num, sid, check, None if check == "ole" else msg)
+            if key not in seen:
+                seen.add(key)
+                self.add(sev, num, sid, check, msg)
+
+        # an embedded object whatever its relationship (an Office file embeds as a package)
+        for num, slide in slides.values():
+            for el in slide._element.iter(f"{P}oleObj", f"{P}control"):
+                what = el.get("progId") or el.get("name") or el.tag.rpartition("}")[2]
+                add(
+                    "ERROR",
+                    num,
+                    _owner(el),
+                    "ole",
+                    f"embedded {what} object: active content, remove it",
+                )
+        with zipfile.ZipFile(path) as z:
+            for name in sorted(n for n in z.namelist() if n.endswith(".rels")):
+                folder, _, base = name.rpartition("_rels/")
+                part = folder + base[: -len(".rels")]
+                for rel in etree.fromstring(z.read(name)).iter(f"{RELS}Relationship"):
+                    kind = rel.get("Type", "").rsplit("/", 1)[-1]
+                    target = _snippet(rel.get("Target", ""), 80)
+                    linked = rel.get("TargetMode") == "External"
+                    if kind not in ACTIVE and not linked:
+                        continue
+                    num, slide = slides.get(part, (None, None))
+                    sid = _referrer(slide, rel.get("Id")) if slide is not None else None
+                    where = "" if num else f"{part}: "
+                    if kind in ACTIVE:
+                        what = f"linked to {target!r}" if linked else "embedded"
+                        sev, check, msg = (
+                            "ERROR",
+                            "ole",
+                            f"{kind} {what}: active content, remove it",
+                        )
+                    elif kind == "hyperlink":
+                        sev, check, msg = "WARN", "external", f"hyperlink to {target!r}"
+                    elif kind == "attachedTemplate":
+                        sev, check, msg = "ERROR", "external", f"remote template {target!r}"
+                    else:
+                        sev, check = "ERROR", "external"
+                        msg = f"{kind} fetched from {target!r} when the file opens"
+                    add(sev, num, sid, check, where + msg)
 
     # --- per slide -------------------------------------------------------------------------------
 
@@ -529,10 +588,19 @@ def lint(
         lt.inferred = _infer_sources(prs, pack)
     lt.theme(pptx_path)
     lt.fallback_fonts()
+    lt.external(pptx_path, prs)
     w, h = Emu(prs.slide_width).inches, Emu(prs.slide_height).inches
     for i, slide in enumerate(prs.slides, start=1):
         lt.slide(i, slide, w, h)
     return lt.out
+
+
+def _referrer(slide, rid: str | None) -> int | None:
+    """shape_id of the shape on `slide` using relationship `rid` (a link, a picture, an object)."""
+    for el in slide._element.iter():
+        if rid and any(k.startswith(R) and v == rid for k, v in el.attrib.items()):
+            return _owner(el)
+    return None
 
 
 def _norm(text: str) -> str:
