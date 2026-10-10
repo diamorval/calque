@@ -4,6 +4,13 @@ version: 0.1.0
 # No default: the deck language is asked every time (mirror the audience / source).
 default_language: null
 missing_value: { fr: "[À COMPLÉTER]", en: "[TO COMPLETE]", es: "[POR COMPLETAR]", pt: "[A COMPLETAR]" }
+# The closing line in the deck language when the deck does not write its own. reference/brand.md
+# keeps it English "unless the user asks": drop a language here to keep the English line.
+localized_text:
+  "Thanks for watching!":
+    fr: "Merci de votre\nattention."
+    es: "Gracias por su\natención."
+    pt: "Obrigado pela\natenção."
 
 roles:
   cover: [1]

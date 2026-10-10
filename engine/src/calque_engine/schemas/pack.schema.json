@@ -45,6 +45,18 @@
         "minLength": 1
       }
     },
+    "localized_text": {
+      "description": "The template's own lines in other languages: line as the template writes it (whitespace folded) -> language -> text (\\n breaks the line). A slide cloned from the template shows them in the deck language unless the deck sets that shape.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "minProperties": 1,
+        "additionalProperties": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
     "roles": {
       "description": "Role -> 1-based template slide numbers that may be cloned for that role.",
       "type": "object",

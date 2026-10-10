@@ -184,6 +184,22 @@ def test_closing_slide_keeps_its_signature_line(tmp_path):
     ]
 
 
+def test_closing_line_in_the_deck_language(tmp_path):
+    """A French deck closes in French (pack.yaml `localized_text`), still exempt as a signature."""
+    pack = load_pack(PACK)
+    end = {"kind": "clone", "role": "closing", "values": {}}
+    slide = {"id": "end", "message": "Close", "message_type": "closing", "form": "closing"}
+    for language, line in (("fr", "Merci de votre attention."), ("en", "Thanks for watching!")):
+        spec = {"pack_id": "diametral", "language": language, "title": "Fin", "slides": []}
+        spec["slides"].append({**slide, "source": end})
+        out = tmp_path / f"{language}.pptx"
+        tmap = dict(build(spec, pack, out).slides.values())
+        (shape,) = [s for s in Presentation(str(out)).slides[0].shapes if s.shape_id == 1710]
+        assert " ".join(shape.text_frame.text.split()) == line
+        for m in (tmap, None):
+            assert [f for f in lint(out, pack, language, m) if f.check == "slop"] == []
+
+
 def test_webinar_cover_and_closing(tmp_path):
     """The persona-review webinar deck: a keyword too long for its tag, a closing rewritten in
     off-charter copy. Built (server, with the map) and linted bare (CLI), the findings agree."""

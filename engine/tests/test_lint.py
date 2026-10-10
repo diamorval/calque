@@ -179,6 +179,35 @@ def test_rewritten_closing_text_is_linted(clean, tmp_path):
     assert mapped and mapped == unmapped
 
 
+def test_closing_line_follows_the_deck_language(neutral_pack, tmp_path):
+    """The pack's `localized_text` writes the template's closing line in the deck language; the
+    deck's own value still wins, and the translated line keeps the signature's exemption."""
+    manifest = neutral_pack / "pack.yaml"
+    data = yaml.safe_load(manifest.read_text())
+    data["missing_value"]["fr"] = "[À COMPLÉTER]"
+    data["localized_text"] = {"Closing": {"fr": "Merci !"}}
+    manifest.write_text(yaml.safe_dump(data, allow_unicode=True))
+    pack = load_pack(neutral_pack)
+
+    def closing(language, values):
+        spec = {"pack_id": pack.id, "language": language, "title": "T", "slides": []}
+        spec["slides"].append(_clone("end", "closing", values))
+        out = tmp_path / f"{language}-{len(values)}.pptx"
+        tmap = dict(build(spec, pack, out).slides.values())
+        return out, tmap, Presentation(str(out)).slides[0].shapes.title.text
+
+    out, tmap, text = closing("fr", {})
+    assert text == "Merci !"
+    assert [f for f in lint(out, pack, "fr", tmap) if f.check == "slop"] == []
+    assert [f for f in lint(out, pack, "fr") if f.check == "slop"] == []
+    assert closing("en", {})[2] == "Closing"
+    # the author's line wins, and is linted: a bare "merci" closer is not the pack's signature
+    title = Presentation(str(pack.template)).slides[2].shapes.title.shape_id
+    out, tmap, text = closing("fr", {str(title): "Merci"})
+    assert text == "Merci"
+    assert [f for f in lint(out, pack, "fr", tmap) if f.check == "slop"]
+
+
 def _capacity_slot(pack):
     """(role, shape id, capacity) of a slot on a role's first slide that declares a capacity
     and is not a `fit` label."""

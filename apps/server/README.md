@@ -357,7 +357,7 @@ prompts as Claude. Models go through `@calque/llm` only.
 | `GET /api/models` | provider catalog + configured models (never their keys) |
 | `POST /api/models` | `{id?, provider, model, label?, api_key?, base_url?, headers?, resource?, api_version?, managed_identity?, default?}`: tested with a 1-token call, refused (422) if the provider refuses. With `id`: edits that configuration (an unset key or `headers` keeps the stored ones). Without: id `provider:model`, `@<label>` if labelled; the same model on another endpoint gets `@2`, `@3`… instead of overwriting |
 | `POST /api/models/:id/default`, `DELETE /api/models/:id` | the default is read on every call: no restart; removing the default promotes the most recently configured model |
-| `POST /api/agent/chat` | `{messages, workflow?, pack_id?, deck_id?, model?, files?}` → `{model, text, messages}`; the client keeps the conversation. `files`: uploaded file ids; documents (txt, md, csv, docx, xlsx, pptx; not PDF yet) reach the model as text, images as `file:<id>` references. `Accept: application/x-ndjson` streams `{step: {text, tools: [{name, error?}]}}` lines, then `{done}` |
+| `POST /api/agent/chat` | `{messages, workflow?, pack_id?, deck_id?, model?, files?}` → `{model, text, messages}`; the client keeps the conversation. `files`: uploaded file ids; documents (txt, md, csv, docx, xlsx, pptx, pdf) reach the model as text, images as `file:<id>` references. `Accept: application/x-ndjson` streams `{step: {text, tools: [{name, error?}]}}` lines, then `{done}` |
 | `POST /api/agent/apply-comments` | `{deck_id, model?}`: the open comments become `patch_deck` calls |
 
 **Azure OpenAI.** The model is the deployment name. Give the resource name (or a base URL: an APIM

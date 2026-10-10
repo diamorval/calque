@@ -1,6 +1,7 @@
 """Plain text of a document the user attached, for the model: minimal, no layout.
 
-txt/md/csv are read as is; pptx with python-pptx; docx and xlsx straight from their XML parts.
+txt/md/csv are read as is; pptx with python-pptx; docx and xlsx straight from their XML parts;
+pdf with pypdf (its text layer only: a scanned PDF without one reads as empty pages).
 """
 
 from __future__ import annotations
@@ -66,6 +67,25 @@ def _pptx(path: Path) -> str:
     return "\n".join(out)
 
 
+def _pdf(path: Path) -> str:
+    from pypdf import PdfReader
+    from pypdf.errors import PyPdfError
+
+    try:
+        reader = PdfReader(path)
+        if reader.is_encrypted and not reader.decrypt(""):
+            raise ValueError("this PDF is password-protected")
+        pages = [page.extract_text().strip() for page in reader.pages]
+    except PyPdfError as e:
+        raise ValueError(f"unreadable PDF: {e}") from e
+    out: list[str] = []
+    for n, text in enumerate(pages, 1):
+        out.append(f"# Page {n}")
+        if text:
+            out.append(text)
+    return "\n".join(out)
+
+
 def read_text(path: str | Path, name: str) -> str:
     """The text of `path`, its type taken from the file `name`'s extension."""
     ext = Path(name).suffix.lower()
@@ -78,4 +98,6 @@ def read_text(path: str | Path, name: str) -> str:
         return _xlsx(p)
     if ext == ".pptx":
         return _pptx(p)
+    if ext == ".pdf":
+        return _pdf(p)
     raise NotImplementedError(f"reading {ext or 'this'} files is not supported yet")

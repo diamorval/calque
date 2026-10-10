@@ -658,12 +658,16 @@ def _texts(shapes) -> list[str]:
 
 
 def _signatures(pack: Pack, roles: set[int]) -> set[str]:
-    """The texts of the `closing` template slides as the template writes them: the pack's own
-    lines, the only closing text exempt from slop."""
+    """The texts of the `closing` template slides as the template writes them, or as the pack's
+    `localized_text` translates them: the pack's own lines, the only closing text exempt from
+    slop."""
     if not roles:
         return set()
     tmpl = Presentation(str(pack.template))
-    return {t for n in roles for t in _texts(tmpl.slides[n - 1].shapes)}
+    lines = {t for n in roles for t in _texts(tmpl.slides[n - 1].shapes)}
+    # and the same lines as the pack writes them in other languages
+    table = pack.manifest.get("localized_text") or {}
+    return lines | {_norm(t) for line in lines for t in table.get(line, {}).values()}
 
 
 def _flat(shapes: list[dict]) -> list[dict]:
