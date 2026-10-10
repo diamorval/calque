@@ -27,6 +27,9 @@ node apps/server/src/stdio.ts          # stdio, for a local MCP client (bridge t
 | `CALQUE_TEAMS_MAP_ONLY` | unset | `1`: drop the groups the map does not name |
 | `CALQUE_OIDC_CLIENT_ID` | the audience | the web app's OIDC client (authorization code + PKCE) |
 | `CALQUE_OIDC_CLIENT_SECRET` | unset: public client | its secret, for a confidential client |
+| `CALQUE_OIDC_SCOPE` | `openid profile email` | scopes the web sign-in asks for; with Entra, add `GroupMember.Read.All` to read the groups over the overage with the sign-in's own token |
+| `CALQUE_ENTRA_TENANT` / `_CLIENT_ID` / `_CLIENT_SECRET` | unset | an Entra app (application permission `GroupMember.Read.All`, admin consent) that reads a user's groups from Graph when the token leaves them out (group overage), on both doors (see [Microsoft Entra ID](#microsoft-entra-id)) |
+| `CALQUE_ENTRA_AUTHORITY` / `_GRAPH` | `https://login.microsoftonline.com` / `https://graph.microsoft.com/v1.0` | sign-in and Graph endpoints for those lookups (national clouds, tests) |
 | `CALQUE_SECRET` | random, in `$CALQUE_DATA/secret` | seals model API keys and Microsoft 365 refresh tokens at rest (AES-256-GCM) and sessions: required when `CALQUE_OIDC_ISSUER` is set (the server refuses to start without it) |
 | `CALQUE_ADMIN_TEAM` | `calque-admins` | team allowed to configure AI models, to manage every brand pack (seeded ones included) and, on any deck, see who has access, make it private, reset its link and transfer it (never to read it) |
 | `CALQUE_LLM_MODEL` | unset | preconfigured gateway, saved as model `env`, default unless another is set |
@@ -332,8 +335,20 @@ Entra ID works as the issuer for both doors, next to Keycloak:
    secret for `CALQUE_OIDC_CLIENT_SECRET`. *Expose an API* with a scope (e.g. `access_as_user`), and
    set `"accessTokenAcceptedVersion": 2` in the manifest so access tokens carry the v2 issuer.
 2. **Groups claim.** *Token configuration > Add groups claim*, and prefer *Groups assigned to the
-   application*: past 200 groups Entra leaves `groups` out of the token (the overage claim). Calque
-   makes no Graph call: it logs a warning naming the user, who then has no teams.
+   application*: past 200 groups Entra leaves `groups` out of the token (the overage claim,
+   `_claim_names.groups` or `hasgroups`). Calque then reads the user's groups (transitive, nested
+   groups included) from Microsoft Graph, kept 10 minutes per user:
+   - **app-only** (both doors; the MCP door's bearer token is for Calque, not Graph): set
+     `CALQUE_ENTRA_TENANT`, `CALQUE_ENTRA_CLIENT_ID`, `CALQUE_ENTRA_CLIENT_SECRET` for an app
+     registration (it may be this one) with the Graph *application* permission
+     `GroupMember.Read.All`, admin-consented; Calque calls
+     `/users/{oid}/transitiveMemberOf/microsoft.graph.group` with a client-credentials token;
+   - **delegated** (web sign-in only): add `GroupMember.Read.All` to `CALQUE_OIDC_SCOPE`
+     (`openid profile email GroupMember.Read.All`, admin consent): the sign-in's access token is
+     then a Graph token, and Calque calls `/me/transitiveMemberOf/microsoft.graph.group` with it.
+
+   With neither, or when Graph fails, Calque logs a warning naming the user, who then has no teams
+   (they still sign in).
 3. **Environment.**
 
    ```bash
@@ -349,8 +364,19 @@ Entra ID works as the issuer for both doors, next to Keycloak:
    Entra sends group object ids (GUIDs): `CALQUE_TEAMS_MAP` names them, so pack visibility reads
    `sales` rather than `3f2a…`.
 
-Limits: Entra has no dynamic client registration, so an MCP client that relies on it cannot sign in
-on its own (pre-register a client for it, or broker Entra through Keycloak). To cut a removed user's
+4. **Claude's MCP connector.** Claude (claude.ai, Desktop, Cowork) registers itself as an OAuth
+   client through dynamic client registration (DCR) unless it is given one. Entra has no DCR, so a
+   custom connector pointing at `<public url>/mcp` cannot sign in on its own. Workaround: a
+   pre-registered client. Simplest is this same app registration: under *Authentication*, add
+   Claude's OAuth callback `https://claude.ai/api/mcp/auth_callback` as a Web redirect URI, and
+   create a client secret for Claude. In Claude, *Settings > Connectors > Add custom connector*:
+   URL `<public url>/mcp` and, under *Advanced settings*, its **OAuth Client ID** (the application
+   id) and **OAuth Client Secret**. The connector then asks Entra for this API's scope, and its
+   access tokens carry the audience Calque checks (`CALQUE_OIDC_AUDIENCE`). Another MCP client
+   without DCR takes the same pre-registered client (see its documentation for where to enter it).
+   Alternatively, broker Entra through Keycloak, which supports DCR.
+
+Limits: to cut a removed user's
 access before their 8-hour cookie expires, provision the enterprise application over SCIM to
 `<public url>/scim/v2` with `CALQUE_SCIM_TOKEN` as the secret token, and map `userName` to the
 `preferred_username` (UPN) the tokens carry.

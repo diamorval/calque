@@ -3,6 +3,7 @@ import { serve } from "@hono/node-server";
 import { createApp } from "./app.ts";
 import { audit } from "./audit.ts";
 import type { AuthConfig } from "./auth.ts";
+import { EntraGroups, entraConfig } from "./entra.ts";
 import { createHttp } from "./http.ts";
 import { purge, retentionDays } from "./retention.ts";
 import { sessions } from "./session.ts";
@@ -17,7 +18,8 @@ const auth: AuthConfig | undefined = issuer
       audience: process.env.CALQUE_OIDC_AUDIENCE ?? "calque",
       resource: new URL("/mcp", app.publicUrl),
       teamsClaim: claim,
-      teams,
+      // Entra group overage: the user's groups from Microsoft Graph (entra.ts)
+      teams: { ...teams, groups: new EntraGroups(entraConfig()) },
     }
   : undefined;
 // the web app signs in against the same issuer (CALQUE_OIDC_CLIENT_ID: its client, default the audience)
@@ -26,6 +28,7 @@ const web = auth
       issuer: auth.issuer,
       clientId: process.env.CALQUE_OIDC_CLIENT_ID ?? auth.audience,
       clientSecret: process.env.CALQUE_OIDC_CLIENT_SECRET,
+      scope: process.env.CALQUE_OIDC_SCOPE,
       publicUrl: app.publicUrl,
       teamsClaim: auth.teamsClaim,
       teams: auth.teams,

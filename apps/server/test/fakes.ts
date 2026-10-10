@@ -137,7 +137,10 @@ interface DriveItem {
 /** Microsoft 365: the Entra endpoints (authorize answers at once, token checks PKCE and rotates
 refresh tokens) and the Graph calls Calque makes, over an in-memory OneDrive ("me") and one
 SharePoint site ("Sales", its library "sales-docs"), and Teams: one team ("Sales", channels
-General and Deals), one chat; `messages` records what is posted. `requests` records each Graph call. */
+General and Deals), one chat; `messages` records what is posted. Directory: `members` (user object
+id -> group ids) read by `/me` and `/users/{id}/transitiveMemberOf` (two per page), app tokens by
+client credentials, `delegated(oid, scp)` mints a sign-in's Graph token. `requests` records each
+Graph call. */
 export async function fakeGraph(account = "alice@contoso.test") {
   let base = "";
   const items = new Map<string, DriveItem>();
@@ -153,6 +156,9 @@ export async function fakeGraph(account = "alice@contoso.test") {
   const uploads = new Map<string, { drive: string; parent: string; name: string; chunks: Buffer[]; got: number }>();
   const requests: { method: string; path: string; auth: string | undefined }[] = [];
   const messages: { to: string; body: { contentType: string; content: string } }[] = [];
+  const members = new Map<string, string[]>();
+  /** access token -> the user object id it acts for ("app": client credentials) */
+  const actor = new Map<string, string>();
   const channels: Record<string, { id: string; displayName: string }[]> = {
     "team-sales": [
       { id: "19:general@thread.tacv2", displayName: "General" },
@@ -202,6 +208,12 @@ export async function fakeGraph(account = "alice@contoso.test") {
         const pkce = createHash("sha256").update(f.get("code_verifier") ?? "").digest("base64url");
         if (!c || pkce !== c.challenge || f.get("redirect_uri") !== c.redirect) return json({ error: "invalid_grant", error_description: "bad code" }, 400);
         codes.delete(f.get("code") ?? "");
+      } else if (f.get("grant_type") === "client_credentials") {
+        if (f.get("client_secret") !== "app-secret") return json({ error: "invalid_client", error_description: "AADSTS7000215: Invalid client secret" }, 401);
+        const at = `app-${++n}`;
+        access.add(at);
+        actor.set(at, "app");
+        return json({ token_type: "Bearer", expires_in: 3600, access_token: at });
       } else if (!refresh.delete(f.get("refresh_token") ?? "")) return json({ error: "invalid_grant", error_description: "AADSTS70008: the refresh token has expired" }, 400);
       const [at, rt] = [`at-${++n}`, `rt-${n}`];
       access.add(at);
@@ -232,6 +244,18 @@ export async function fakeGraph(account = "alice@contoso.test") {
     if (!auth || !access.has(auth.replace(/^Bearer /, ""))) return err(401, "InvalidAuthenticationToken");
     const g = path.slice("/v1.0".length).replace(/^\/me\/drive(?=\/|$)/, "/drives/me");
     if (g === "/me") return json({ userPrincipalName: account, mail: account });
+    const mm = /^\/(?:me|users\/([^/]+))\/transitiveMemberOf\/microsoft\.graph\.group$/.exec(g);
+    if (mm) {
+      const who = mm[1] ?? actor.get(auth.replace(/^Bearer /, ""));
+      if (!who || (who === "app" && !mm[1])) return err(400, "/me request is only valid with delegated authentication flow.");
+      if (mm[1] && actor.get(auth.replace(/^Bearer /, "")) !== "app") return err(403, "Insufficient privileges to complete the operation.");
+      const all = members.get(who);
+      if (!all) return err(404, `Resource '${who}' does not exist`);
+      const at = Number(url.searchParams.get("$skiptoken") ?? 0);
+      const next = new URL(url.href);
+      next.searchParams.set("$skiptoken", String(at + 2));
+      return json({ value: all.slice(at, at + 2).map((id) => ({ "@odata.type": "#microsoft.graph.group", id })), ...(at + 2 < all.length ? { "@odata.nextLink": next.href } : {}) });
+    }
     if (g === "/sites") return json({ value: /sal/i.test(url.searchParams.get("search") ?? "") ? [{ id: "site-sales", displayName: "Sales", webUrl: "https://contoso.sharepoint.test/sites/sales" }] : [] });
     if (g === "/sites/site-sales/drives") return json({ value: [{ id: "sales-docs", name: "Documents", webUrl: "https://contoso.sharepoint.test/sites/sales/Shared Documents" }] });
     if (g === "/me/joinedTeams") return json({ value: [{ id: "team-sales", displayName: "Sales", description: "The sales team" }] });
@@ -273,5 +297,12 @@ export async function fakeGraph(account = "alice@contoso.test") {
   base = await listen(server);
   /** Revoke every token, as withdrawing consent does. */
   const revoke = () => (access.clear(), refresh.clear());
-  return { server, items, requests, messages, revoke, authority: base, graph: `${base}/v1.0` };
+  /** A Graph access token from a sign-in, for user `oid` with scopes `scp` (a JWT whose payload Calque reads). */
+  const delegated = (oid: string, scp: string) => {
+    const at = [{ alg: "none" }, { oid, scp, aud: "00000003-0000-0000-c000-000000000000" }, "sig"].map((p) => Buffer.from(typeof p === "string" ? p : JSON.stringify(p)).toString("base64url")).join(".");
+    access.add(at);
+    actor.set(at, oid);
+    return at;
+  };
+  return { server, items, requests, messages, members, delegated, revoke, authority: base, graph: `${base}/v1.0` };
 }

@@ -6,7 +6,7 @@ import * as oidc from "openid-client";
 import type { Access } from "./access.ts";
 import { namesOf } from "./auth.ts";
 import type { User } from "./packs.ts";
-import { teamsOf, type TeamsConfig } from "./teams.ts";
+import { resolveTeams, type TeamsConfig } from "./teams.ts";
 
 /** Web app sign-in: OIDC authorization code + PKCE against the issuer (Keycloak), then a signed,
 HttpOnly session cookie. The server keeps no IdP token: the web agent runs in process, so the
@@ -18,7 +18,10 @@ export interface SessionConfig {
   clientSecret?: string | undefined; // CALQUE_OIDC_CLIENT_SECRET; unset = public client
   publicUrl: string;
   teamsClaim: string;
-  teams?: Omit<TeamsConfig, "claim"> | undefined; // group id -> team name (Entra ID), prefix filter
+  teams?: Omit<TeamsConfig, "claim"> | undefined; // group id -> team name (Entra ID), prefix filter, overage lookups
+  /** CALQUE_OIDC_SCOPE, default "openid profile email"; with Entra, add GroupMember.Read.All to read
+  the groups over the overage with the sign-in's own token (entra.ts) */
+  scope?: string | undefined;
   secret: string; // CALQUE_SECRET
   access: Access;
   /** Told of each sign-in (the audit log). */
@@ -78,7 +81,7 @@ export function sessions(cfg: SessionConfig): Sessions {
       setCookie(c, LOGIN, await seal({ verifier, state, back: local ? back : "/" }, "10m"), { ...cookie, maxAge: 600 });
       const url = oidc.buildAuthorizationUrl(await discover(), {
         redirect_uri: redirect,
-        scope: "openid profile email",
+        scope: cfg.scope ?? "openid profile email",
         code_challenge: await oidc.calculatePKCECodeChallenge(verifier),
         code_challenge_method: "S256",
         state,
@@ -102,7 +105,7 @@ export function sessions(cfg: SessionConfig): Sessions {
       const user = {
         sub: claims.sub,
         name: String(claims.name ?? claims.preferred_username ?? claims.sub),
-        teams: teamsOf(claims, { ...cfg.teams, claim: cfg.teamsClaim }),
+        teams: await resolveTeams(claims, { ...cfg.teams, claim: cfg.teamsClaim }, tokens.access_token),
         names,
         sid: randomUUID(),
         at: Date.now(),
