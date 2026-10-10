@@ -11,6 +11,7 @@ import { applyComments, chat, type Message } from "@calque/agent";
 import { PROVIDERS, type ModelConfig, type ProviderId, type Step } from "@calque/llm";
 import { z } from "zod";
 import { auditLog } from "./audit.ts";
+import { compliance } from "./compliance.ts";
 import { discovery, gate, userOf, type AuthConfig } from "./auth.ts";
 import { Conflict } from "./decks.ts";
 import { EngineError, REPO } from "./engine.ts";
@@ -34,6 +35,7 @@ import {
   setVisibility,
   type User,
 } from "./packs.ts";
+import { imageType, packImage, packPortal, templateSlide } from "./portal.ts";
 import { tokenUser } from "./preview.ts";
 import { clientAddress, rateLimit } from "./ratelimit.ts";
 import type { Sessions } from "./session.ts";
@@ -316,6 +318,26 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
       return restorePack(app.db, user, param(c, "id"), b.version, b.note);
     }),
   );
+
+  // The brand portal (read-only, anyone who sees the pack) and brand compliance (pack owners, admins).
+  http.get("/api/packs/:id", route((c, user) => packPortal(app.db, user, param(c, "id"))));
+  const file = (path: (c: Context, user: User) => Promise<string>, type: (path: string) => string) => async (c: Context) => {
+    const user = await who(c);
+    if (user instanceof Response) return user;
+    try {
+      const p = await path(c, user);
+      return new Response(Readable.toWeb(createReadStream(p)) as ReadableStream, { headers: { "content-type": type(p), "cache-control": "no-cache" } });
+    } catch (e) {
+      return fail(c, e);
+    }
+  };
+  http.get(
+    "/api/packs/:id/slides/:png",
+    file((c, user) => templateSlide(app.db, user, app.data, param(c, "id"), Number(param(c, "png").replace(/\.png$/, ""))), () => "image/png"),
+  );
+  for (const kind of ["exemplar", "icons"] as const)
+    http.get(`/api/packs/:id/${kind}/:file`, file((c, user) => packImage(app.db, user, param(c, "id"), kind, param(c, "file")), imageType));
+  http.get("/api/compliance", route((c, user) => compliance(app.db, app.decks, user, c.req.query("pack_id") || undefined)));
 
   // Settings > AI Models (PipesHub pattern). Keys go in, never out.
   http.get("/api/models", route(async () => ({ providers: app.models.catalog(), models: await app.models.list() })));

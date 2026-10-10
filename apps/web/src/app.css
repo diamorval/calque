@@ -118,6 +118,23 @@
 .cq-swatches li { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12.5px; }
 .cq-swatch { width: 18px; height: 18px; flex: none; border: 1px solid var(--cq-line); }
 
+/* brand portal (PackPortal.tsx), compliance (Compliance.tsx), team picker (Packs.tsx) */
+.cq-portal-section h2 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cq-doc { margin: 0; padding: 14px 16px; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--cq-mono); font-size: 12.5px; line-height: 1.55; max-height: 420px; overflow: auto; }
+.cq-portal-section details summary { cursor: pointer; color: var(--cq-muted); margin-bottom: 10px; }
+.cq-rules { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 13px; }
+.cq-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.cq-exemplar-grid { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+.cq-exemplar-grid img { display: block; width: 100%; border: 1px solid var(--cq-line); }
+.cq-icon-grid { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); }
+.cq-icon-grid li { display: grid; justify-items: center; gap: 4px; min-width: 0; padding: 10px 4px; border: 1px solid var(--cq-line); background: var(--cq-surface-2); }
+.cq-icon-grid img { width: 32px; height: 32px; object-fit: contain; }
+/* pack icons are dark line art for light slides */
+:root[data-theme="dark"] .cq-icon-grid img { filter: invert(1); }
+.cq-icon-grid .cq-hint { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cq-stats { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.cq-team-pick { display: grid; gap: 6px; margin: 4px 0 12px; }
+
 /* ---------- login ---------- */
 
 .cq-login { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: var(--cq-bg); }

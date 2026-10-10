@@ -26,9 +26,19 @@ const [CMD, ...ARGS] = process.env.CALQUE_ENGINE?.split(" ") ?? [
   "call",
 ];
 
+let packDirs: () => Promise<Record<string, string>> = async () => ({});
+
+/** Where every pack's current release lives (id -> directory), sent with each call so the engine
+resolves a pack's `extends` (group -> subsidiary). Set once by createApp. */
+// ponytail: one app per process; a second createApp (tests) takes over the lookup.
+export function lookupPacks(fn: () => Promise<Record<string, string>>) {
+  packDirs = fn;
+}
+
 /** One engine call: JSON request on stdin, JSON response on stdout (`calque_engine.api`). */
 // ponytail: one Python process per call (~0.3 s start-up); a long-lived worker if latency matters.
-export function engine<T = Record<string, unknown>>(op: string, args: Record<string, unknown>): Promise<T> {
+export async function engine<T = Record<string, unknown>>(op: string, args: Record<string, unknown>): Promise<T> {
+  const packs = "pack" in args ? await packDirs() : undefined;
   return new Promise((resolve, reject) => {
     const child = spawn(CMD as string, ARGS, { stdio: ["pipe", "pipe", "pipe"] });
     let out = "";
@@ -48,6 +58,6 @@ export function engine<T = Record<string, unknown>>(op: string, args: Record<str
       if (!res.ok) return reject(new EngineError(res.error ?? "engine", res.message ?? "", res.issues));
       resolve(res);
     });
-    child.stdin.end(JSON.stringify({ op, ...args }));
+    child.stdin.end(JSON.stringify({ op, ...args, ...(packs ? { packs } : {}) }));
   });
 }

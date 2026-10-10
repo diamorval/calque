@@ -9,6 +9,8 @@ import { Login } from "./pages/Login.tsx";
 import { Models } from "./pages/Models.tsx";
 import { NewDeck } from "./pages/NewDeck.tsx";
 import { Packs } from "./pages/Packs.tsx";
+import { PackPortal } from "./pages/PackPortal.tsx";
+import { Compliance } from "./pages/Compliance.tsx";
 import { Presenter } from "./pages/Presenter.tsx";
 import { Mark, Spinner } from "./ui.tsx";
 
@@ -18,6 +20,9 @@ function page(path: string, me: Me) {
   if (path === "/new") return <NewDeck />;
   if (path === "/settings/models") return <Models me={me} />;
   if (path === "/settings/packs") return <Packs me={me} />;
+  const pack = path.match(/^\/settings\/packs\/([^/]+)$/)?.[1];
+  if (pack) return <PackPortal id={decodeURIComponent(pack)} />;
+  if (path === "/settings/compliance") return <Compliance />;
   return <Decks />;
 }
 
@@ -89,7 +94,7 @@ export function App() {
         <NavItem href="/new" label="New deck" short="New" icon={Plus} active={path === "/new"} />
         <span className="cq-side-gap" />
         <NavItem href="/settings/models" label="AI models" short="Models" icon={Cpu} active={path === "/settings/models"} />
-        <NavItem href="/settings/packs" label="Brand packs" short="Packs" icon={Palette} active={path === "/settings/packs"} />
+        <NavItem href="/settings/packs" label="Brand packs" short="Packs" icon={Palette} active={path.startsWith("/settings/packs") || path === "/settings/compliance"} />
         <span className="cq-side-rule" />
         <button type="button" className="cq-nav" aria-label={theme === "dark" ? "Light theme" : "Dark theme"} title="Switch theme" onClick={toggleTheme}>
           {theme === "dark" ? <Sun /> : <Moon />}

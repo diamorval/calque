@@ -87,6 +87,8 @@ export interface Pack {
   /** The pack's current release (every publish, edit or restore adds one). */
   pack_version?: number;
   archived?: boolean;
+  /** The group pack it inherits voice, storyline, exemplar and slop rules from. */
+  extends?: string | null;
   /** The caller manages it: its owner, or an admin. */
   editable: boolean;
 }

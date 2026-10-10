@@ -7,10 +7,11 @@ import { Stepper, StepperIndicator, StepperItem, StepperSeparator, StepperTitle 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "diametral-ds/table";
 import { Tag } from "diametral-ds/tag";
 import { Textarea } from "diametral-ds/textarea";
-import { Archive, ArchiveRestore, FileUp, Globe, History, Lock, Pencil, Upload, X } from "lucide-react";
+import { Archive, ArchiveRestore, FileUp, GitBranch, Globe, History, Lock, Pencil, ShieldCheck, Upload, X } from "lucide-react";
 import { Fragment, useCallback, useEffect, useState, type FormEvent } from "react";
 import { api, upload, type Me, type Pack } from "../api.ts";
-import { Field, FileDrop, PageHead, Spinner } from "../ui.tsx";
+import { go } from "../nav.ts";
+import { Dialog, Field, FileDrop, PageHead, Spinner } from "../ui.tsx";
 
 interface Releases {
   id: string;
@@ -26,16 +27,17 @@ export function Packs({ me }: { me: Me }) {
   const [editing, setEditing] = useState<Draft | null>(null);
   const [opening, setOpening] = useState<string | null>(null);
   const [history, setHistory] = useState<Releases | null>(null);
+  const [restricting, setRestricting] = useState<{ pack: Pack; teams: string[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const reload = useCallback(() => api<{ packs: Pack[] }>("/api/packs").then((r) => setPacks(r.packs)), []);
   useEffect(() => {
     void reload();
   }, [reload]);
 
-  const share = async (p: Pack, visibility: Pack["visibility"]) => {
+  const share = async (p: Pack, visibility: Pack["visibility"], teams = p.teams) => {
     setError(null);
     try {
-      await api(`/api/packs/${p.id}/visibility`, { visibility, teams: p.teams.length ? p.teams : me.teams });
+      await api(`/api/packs/${p.id}/visibility`, { visibility, teams });
       await reload();
     } catch (e) {
       setError((e as Error).message);
@@ -76,6 +78,7 @@ export function Packs({ me }: { me: Me }) {
       <Import
         me={me}
         editing={editing}
+        packs={packs ?? []}
         onDone={async () => {
           setImporting(false);
           setEditing(null);
@@ -89,6 +92,11 @@ export function Packs({ me }: { me: Me }) {
         title="Brand packs"
         description="Each company's template, charter and voice. A new pack is visible to your teams only until you share it. Its owner and the admins edit it; every save is a release you can roll back."
       >
+        {(me.admin || packs?.some((p) => p.editable)) && (
+          <Button variant="outline" onClick={(e) => go(e, "/settings/compliance")}>
+            <ShieldCheck /> Compliance
+          </Button>
+        )}
         <Button onClick={() => setImporting(true)}>
           <Upload /> Import a template
         </Button>
@@ -117,11 +125,18 @@ export function Packs({ me }: { me: Me }) {
               {packs.map((p) => (
                 <TableRow key={p.id} data-pack={p.id} className={p.archived ? "cq-muted" : undefined}>
                   <TableCell>
-                    <strong>{p.name}</strong>{" "}
+                    <a href={`/settings/packs/${p.id}`} onClick={(e) => go(e, `/settings/packs/${p.id}`)} title="Open its charter">
+                      <strong>{p.name}</strong>
+                    </a>{" "}
                     <span className="cq-mono cq-muted">
                       {p.id} · v{p.version}
                       {p.pack_version ? ` · release ${p.pack_version}` : ""}
                     </span>{" "}
+                    {p.extends && (
+                      <Tag tone="info" title={`Inherits voice, storyline, exemplar and lint rules from ${p.extends}`}>
+                        <GitBranch /> extends {p.extends}
+                      </Tag>
+                    )}{" "}
                     {p.archived && (
                       <Tag tone="warning">
                         <Archive /> Archived
@@ -147,16 +162,16 @@ export function Packs({ me }: { me: Me }) {
                         <Pencil /> Edit
                       </Button>
                     )}
-                    {p.editable &&
-                      (p.visibility === "team" ? (
-                        <Button size="sm" variant="outline" onClick={() => share(p, "workspace")}>
-                          Share with the workspace
-                        </Button>
-                      ) : (
-                        <Button size="sm" variant="ghost" onClick={() => share(p, "team")}>
-                          Restrict to my teams
-                        </Button>
-                      ))}
+                    {p.editable && p.visibility === "team" && (
+                      <Button size="sm" variant="outline" onClick={() => share(p, "workspace")}>
+                        Share with the workspace
+                      </Button>
+                    )}
+                    {p.editable && (
+                      <Button size="sm" variant="ghost" onClick={() => setRestricting({ pack: p, teams: p.visibility === "team" ? p.teams : me.teams })}>
+                        <Lock /> {p.visibility === "team" ? "Teams" : "Restrict to teams"}
+                      </Button>
+                    )}
                     {p.editable && (
                       <Button size="sm" variant="ghost" onClick={() => void releases(p)}>
                         <History /> History
@@ -181,6 +196,20 @@ export function Packs({ me }: { me: Me }) {
             </TableBody>
           </Table>
         </Card>
+      )}
+      {restricting && (
+        <Dialog title={`Who sees ${restricting.pack.name}`} onClose={() => setRestricting(null)}>
+          <p className="cq-hint">The teams picked, and its owner. Nobody picked: its owner only.</p>
+          <TeamPicker options={me.teams} value={restricting.teams} onChange={(teams) => setRestricting({ ...restricting, teams })} />
+          <Button
+            onClick={() => {
+              void share(restricting.pack, "team", restricting.teams);
+              setRestricting(null);
+            }}
+          >
+            Restrict to {restricting.teams.length ? restricting.teams.join(", ") : "its owner"}
+          </Button>
+        </Dialog>
       )}
       {history && (
         <Card className="cq-table-card" data-history={history.id}>
@@ -230,6 +259,38 @@ export function Packs({ me }: { me: Me }) {
   );
 }
 
+/** Pick teams: the caller's (`options`), and any other by name (an admin restricts to teams they are not in). */
+function TeamPicker({ options, value, onChange }: { options: string[]; value: string[]; onChange: (teams: string[]) => void }) {
+  const [other, setOther] = useState("");
+  const add = () => {
+    const t = other.trim();
+    if (t && !value.includes(t)) onChange([...value, t]);
+    setOther("");
+  };
+  return (
+    <div className="cq-team-pick">
+      {[...new Set([...options, ...value])].map((t) => (
+        <label key={t} className="cq-check">
+          <input type="checkbox" checked={value.includes(t)} onChange={(e) => onChange(e.target.checked ? [...value, t] : value.filter((x) => x !== t))} />
+          {t}
+        </label>
+      ))}
+      <Input
+        aria-label="Another team"
+        placeholder="Another team, then Enter"
+        value={other}
+        onChange={(e) => setOther(e.target.value)}
+        onBlur={add}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter") return;
+          e.preventDefault();
+          add();
+        }}
+      />
+    </div>
+  );
+}
+
 interface Draft {
   draft_id: string;
   manifest: Record<string, unknown> & {
@@ -268,7 +329,7 @@ function archetypesOf(d: Draft): Record<number, string> {
 }
 
 /** Import a template, or (`editing`) review and republish an existing pack: same review screen. */
-function Import({ me, editing, onDone }: { me: Me; editing?: Draft | null; onDone: () => Promise<void> }) {
+function Import({ me, editing, packs, onDone }: { me: Me; editing?: Draft | null; packs: Pack[]; onDone: () => Promise<void> }) {
   const [id, setId] = useState("");
   const [name, setName] = useState(editing ? String(editing.manifest.name ?? "") : "");
   const [template, setTemplate] = useState<File | null>(null);
@@ -282,6 +343,8 @@ function Import({ me, editing, onDone }: { me: Me; editing?: Draft | null; onDon
   const [voice, setVoice] = useState(editing?.voice ?? "");
   const [fonts, setFonts] = useState<string[]>(editing?.fonts ?? []);
   const [visibility, setVisibility] = useState<"team" | "workspace">("team");
+  const [teams, setTeams] = useState<string[]>(me.teams);
+  const [parent, setParent] = useState(editing ? String(editing.manifest.extends ?? "") : "");
   const [note, setNote] = useState("");
   const [newTokens, setNewTokens] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -326,6 +389,7 @@ function Import({ me, editing, onDone }: { me: Me; editing?: Draft | null; onDon
       for (const [n, a] of Object.entries(archetypes)) if (a !== NONE) (declared[a] ??= []).push(Number(n));
       const manifest = {
         ...draft.manifest,
+        extends: parent || undefined, // none: left out of the JSON
         ...(editing ? { name: name || draft.manifest.name } : {}),
         default_language: language || null,
         roles: {
@@ -340,7 +404,7 @@ function Import({ me, editing, onDone }: { me: Me; editing?: Draft | null; onDon
       const r = await api<{ status: string; problems?: string[] }>(`/api/packs/drafts/${draft.draft_id}/publish`, {
         manifest,
         visibility,
-        teams: me.teams,
+        teams,
         ...(voice.trim() || editing ? { voice } : {}),
         ...(note.trim() ? { note: note.trim() } : {}),
       });
@@ -510,6 +574,18 @@ function Import({ me, editing, onDone }: { me: Me; editing?: Draft | null; onDon
               <Field label="What changed" htmlFor="p-note" hint="One line for the pack's history.">
                 <Input id="p-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder={editing ? "New logo on the cover" : "First release"} />
               </Field>
+              <Field label="Group pack" htmlFor="p-extends" hint="A subsidiary inherits its group's voice, storyline, exemplar and lint rules, unless it sets its own. Template and tokens stay its own.">
+                <select id="p-extends" className="cq-select" value={parent} onChange={(e) => setParent(e.target.value)}>
+                  <option value="">None</option>
+                  {packs
+                    .filter((p) => p.id !== draft.manifest.id && !p.archived)
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} ({p.id})
+                      </option>
+                    ))}
+                </select>
+              </Field>
               <Field label="Default language" htmlFor="p-lang" hint="Empty: ask for the language of every deck.">
                 <Input id="p-lang" value={language} onChange={(e) => setLanguage(e.target.value)} placeholder="en" />
               </Field>
@@ -521,8 +597,9 @@ function Import({ me, editing, onDone }: { me: Me; editing?: Draft | null; onDon
                   <FieldLegend variant="label">Visible to</FieldLegend>
                   <label className="cq-check">
                     <input type="radio" name="visibility" value="team" checked={visibility === "team"} onChange={() => setVisibility("team")} />
-                    My teams ({me.teams.join(", ") || "only me"})
+                    These teams ({teams.join(", ") || "only me"})
                   </label>
+                  {visibility === "team" && <TeamPicker options={me.teams} value={teams} onChange={setTeams} />}
                   <label className="cq-check">
                     <input type="radio" name="visibility" value="workspace" checked={visibility === "workspace"} onChange={() => setVisibility("workspace")} />
                     The whole workspace

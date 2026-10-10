@@ -3,9 +3,11 @@ import { readFile, readdir } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { McpServer, ResourceTemplate, type CallToolResult } from "@modelcontextprotocol/server";
 import { RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
+import { stringify } from "yaml";
 import { z } from "zod";
 import { REPO } from "./engine.ts";
 import { getPack, listPacks, type User } from "./packs.ts";
+import { imageType, packImage, packImages, resolvePack } from "./portal.ts";
 import { TOOLS, type App } from "./tools.ts";
 
 export const UI_URI = "ui://calque/deck.html";
@@ -85,16 +87,51 @@ export async function buildServer(app: App, user: User): Promise<McpServer> {
         ),
       }),
     }),
-    { description: "A brand pack's charter (DESIGN.md), voice, exemplar, storyline, template-map, tokens and manifest." },
+    {
+      description:
+        "A brand pack's charter (DESIGN.md), voice, exemplar, storyline, template-map, tokens and manifest. A pack that extends a group pack shows the voice, exemplar, storyline and slop rules it inherits.",
+    },
     async (uri, vars) => {
       const pack = await getPack(app.db, user, String(vars.id));
-      const f = PACK_FILES[String(vars.name)];
+      const name = String(vars.name);
+      const f = PACK_FILES[name];
       if (!f) throw new Error(`pack resources: ${Object.keys(PACK_FILES).join(", ")}`);
-      const path = join(pack.dir, f.file);
-      const text = existsSync(path) ? await readFile(path, "utf8") : `(${pack.id} has no ${f.file})`;
+      // inherited from the parent pack: docs, and the manifest's slop rules
+      const r = ["voice", "exemplar", "storyline", "manifest"].includes(name) ? await resolvePack(pack.dir) : null;
+      if (r && name === "manifest" && r.extends.length) return { contents: [{ uri: uri.href, mimeType: f.mime, text: stringify(r.manifest) }] };
+      const path = r && name !== "manifest" ? r.docs[name as keyof typeof r.docs] : join(pack.dir, f.file);
+      const text = path && existsSync(path) ? await readFile(path, "utf8") : `(${pack.id} has no ${f.file})`;
       return { contents: [{ uri: uri.href, mimeType: f.mime, text }] };
     },
   );
+
+  // the pack's images: exemplar pages (inherited with the exemplar) and icons
+  for (const kind of ["exemplar", "icons"] as const) {
+    server.registerResource(
+      `pack-${kind}`,
+      new ResourceTemplate(`pack://{id}/${kind}/{file}`, {
+        list: async () => ({
+          resources: (
+            await Promise.all(
+              (await listPacks(app.db, user)).map(async (p) =>
+                (await packImages((await getPack(app.db, user, p.id)).dir, kind)).map((img) => ({
+                  uri: `pack://${p.id}/${kind}/${encodeURIComponent(img.name)}`,
+                  name: `${p.id} ${kind} ${img.name}`,
+                  mimeType: imageType(img.name),
+                })),
+              ),
+            )
+          ).flat(),
+        }),
+      }),
+      { description: kind === "icons" ? "A brand pack's icons." : "A brand pack's exemplar pages: what a good deck on it looks like." },
+      async (uri, vars) => {
+        const file = decodeURIComponent(String(vars.file));
+        const path = await packImage(app.db, user, String(vars.id), kind, file);
+        return { contents: [{ uri: uri.href, mimeType: imageType(file), blob: (await readFile(path)).toString("base64") }] };
+      },
+    );
+  }
 
   for (const [name, p] of Object.entries(PROMPTS)) {
     server.registerPrompt(
