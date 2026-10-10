@@ -26,15 +26,19 @@ import {
   draftDir,
   draftPack,
   editPack,
+  exemplarImage,
   Forbidden,
   listPacks,
   NotFound,
   packVersions,
+  previewDraft,
   publishDraft,
+  replaceLogo,
   replaceTemplate,
   replaceTokens,
   restorePack,
   setDefaultPack,
+  setManagers,
   setVisibility,
   type User,
 } from "./packs.ts";
@@ -332,19 +336,21 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
       return draftPack(user, app.data, bytes, String(form.id ?? ""), String(form.name ?? form.id ?? ""), tokens);
     }),
   );
-  http.get("/api/packs/drafts/:id/slides/:png", async (c) => {
-    const user = await who(c);
-    if (user instanceof Response) return user;
-    try {
-      const dir = await draftDir(user, app.data, param(c, "id"));
-      const n = Number(param(c, "png").replace(/\.png$/, ""));
-      const path = join(dir, "render", `slide-${n}.png`);
-      if (!Number.isInteger(n) || !existsSync(path)) return c.notFound();
-      return new Response(Readable.toWeb(createReadStream(path)) as ReadableStream, { headers: { "content-type": "image/png" } });
-    } catch (e) {
-      return fail(c, e);
-    }
-  });
+  // a draft's template slides (render/), and its sample deck previewed before publishing (preview/)
+  for (const [route, folder] of [["slides", "render"], ["preview", "preview"]] as const)
+    http.get(`/api/packs/drafts/:id/${route}/:png`, async (c) => {
+      const user = await who(c);
+      if (user instanceof Response) return user;
+      try {
+        const dir = await draftDir(user, app.data, param(c, "id"));
+        const n = Number(param(c, "png").replace(/\.png$/, ""));
+        const path = join(dir, folder, `slide-${n}.png`);
+        if (!Number.isInteger(n) || !existsSync(path)) return c.notFound();
+        return new Response(Readable.toWeb(createReadStream(path)) as ReadableStream, { headers: { "content-type": "image/png" } });
+      } catch (e) {
+        return fail(c, e);
+      }
+    });
   http.post(
     "/api/packs/drafts/:id/fonts",
     limit,
@@ -356,7 +362,13 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
   http.post(
     "/api/packs/drafts/:id/publish",
     route(async (c, user) => {
-      const b = Visibility.extend({ manifest: z.record(z.string(), z.unknown()), voice: z.string().optional(), note: z.string().optional() }).parse(await body(c));
+      const b = Visibility.extend({
+        manifest: z.record(z.string(), z.unknown()),
+        voice: z.string().optional(),
+        exemplar: z.string().optional(),
+        storyline: z.string().optional(),
+        note: z.string().optional(),
+      }).parse(await body(c));
       return publishDraft(app.db, user, app.data, param(c, "id"), b);
     }),
   );
@@ -377,6 +389,37 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
   http.post(
     "/api/packs/drafts/:id/tokens",
     route(async (c, user) => replaceTokens(user, app.data, param(c, "id"), (await upload(c, "tokens")).bytes)),
+  );
+  // Pack edits beyond the manifest: exemplar pages, the logo asset, a sample deck on the draft; co-managers.
+  http.post(
+    "/api/packs/drafts/:id/exemplar",
+    limit,
+    route(async (c, user) => {
+      const f = await upload(c, "image");
+      return exemplarImage(user, app.data, param(c, "id"), f.name, f.bytes);
+    }),
+  );
+  http.post(
+    "/api/packs/drafts/:id/exemplar/remove",
+    route(async (c, user) => exemplarImage(user, app.data, param(c, "id"), z.object({ name: z.string() }).parse(await body(c)).name, null)),
+  );
+  http.post(
+    "/api/packs/drafts/:id/logo",
+    limit,
+    route(async (c, user) => {
+      const f = await upload(c, "logo");
+      return replaceLogo(user, app.data, param(c, "id"), f.name, f.bytes);
+    }),
+  );
+  http.post(
+    "/api/packs/drafts/:id/preview",
+    route(async (c, user) =>
+      previewDraft(user, app.data, param(c, "id"), z.object({ manifest: z.record(z.string(), z.unknown()).optional() }).parse(await body(c)).manifest),
+    ),
+  );
+  http.post(
+    "/api/packs/:id/managers",
+    route(async (c, user) => setManagers(app.db, user, param(c, "id"), z.object({ managers: z.array(z.string()) }).parse(await body(c)).managers)),
   );
   http.post(
     "/api/packs/:id/archive",

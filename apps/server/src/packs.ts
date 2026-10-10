@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { designMd, readPack } from "@calque/design";
 import { parse, stringify } from "yaml";
 import { engine, REPO } from "./engine.ts";
@@ -28,6 +28,8 @@ export interface PackRow {
   visibility: "workspace" | "team";
   teams: string[];
   owner: string | null;
+  /** Co-managers (user ids): they edit, share with teams, archive and restore it like its owner. */
+  managers: string[];
   /** The current release: every publish, edit or restore adds one (pack_versions). */
   version: number;
   /** Hidden from pickers; decks already on it still open. */
@@ -42,14 +44,20 @@ export class Forbidden extends Error {}
 export const ADMIN_TEAM = process.env.CALQUE_ADMIN_TEAM ?? "calque-admins";
 export const isAdmin = (u: User) => u.local === true || u.teams.includes(ADMIN_TEAM);
 
-/** Edit, share, archive and restore a pack: its owner, or an admin (seeded packs have no owner). */
-export const manages = (p: PackRow, user: User) => isAdmin(user) || p.owner === user.id;
+/** Edit, share, archive and restore a pack: its owner, a co-manager, or an admin (seeded packs have no owner). */
+export const manages = (p: PackRow, user: User) => isAdmin(user) || p.owner === user.id || (p.managers ?? []).includes(user.id);
+
+/** Only admins offer a pack to the whole workspace; others publish to their teams. */
+function checkWorkspace(user: User, visibility: "workspace" | "team") {
+  if (visibility === "workspace" && !isAdmin(user)) throw new Forbidden(`only ${ADMIN_TEAM} publish a pack to the whole workspace: restrict it to teams`);
+}
 
 export function visible(p: PackRow, user: User): boolean {
   return (
     user.local === true ||
     p.visibility === "workspace" ||
     p.owner === user.id ||
+    (p.managers ?? []).includes(user.id) ||
     p.teams.some((t) => user.teams.includes(t))
   );
 }
@@ -80,6 +88,13 @@ export async function seedPacks(
   await db.query(
     "insert into pack_versions (pack_id, version, dir, note) select id, version, dir, 'initial version' from packs on conflict do nothing",
   );
+}
+
+/** The packs seeded from CALQUE_PACKS still offered to the whole workspace (no owner, not
+archived): main.ts logs them at start-up, so a client deployment notices a pack it did not mean to ship. */
+export async function seededPacks(db: Db): Promise<string[]> {
+  const { rows } = await db.query<{ id: string }>("select id from packs where owner is null and visibility = 'workspace' and not archived order by id");
+  return rows.map((r) => r.id);
 }
 
 /** A pack `user` manages; 404 if they cannot see it, 403 if they see it but do not manage it. */
@@ -143,6 +158,7 @@ export async function listPacks(db: Db, user: User, opts: { archived?: boolean; 
           visibility: r.visibility,
           teams: r.teams,
           owner: r.owner,
+          managers: r.managers ?? [],
           pack_version: r.version,
           archived: r.archived,
           default: r.is_default,
@@ -186,6 +202,7 @@ export async function importPack(db: Db, user: User, data: string, input: Import
     if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) throw new Error(`pack id ${JSON.stringify(id)}: lowercase letters, digits and dashes`);
     const { rows } = await db.query<PackRow>("select * from packs where id = $1", [id]);
     if (rows[0] && !manages(rows[0], user)) throw new Error(`pack id ${JSON.stringify(id)} is taken`);
+    checkWorkspace(user, input.visibility);
 
     await checkParent(db, user, input.manifest);
     let manifest = input.manifest;
@@ -229,6 +246,18 @@ async function validateStaged(dir: string, manifest: Record<string, unknown>): P
   const tpl = await engine<{ findings: Finding[] }>("lint", { pack: dir, pptx: join(dir, "template.pptx"), template: true });
   const problems = errors(tpl.findings).map((p) => `template ${p}`);
 
+  const deck = await testDeck(dir, manifest);
+  const language = deck.language;
+  const out = join(dir, ".test-deck.pptx");
+  const built = await engine<{ slides: Record<string, { position: number; source: number }> }>("build", { pack: dir, deck, out });
+  const sources = Object.fromEntries(Object.values(built.slides).map((s) => [String(s.position), s.source]));
+  const test = await engine<{ findings: Finding[] }>("lint", { pack: dir, pptx: out, language, sources });
+  await rm(out);
+  return [...problems, ...errors(test.findings).map((p) => `test deck ${p}`)];
+}
+
+/** The test deck a pack must build clean: its cover, content and closing slides, titles filled. */
+async function testDeck(dir: string, manifest: Record<string, unknown>) {
   const tmap = parse(await readFile(join(dir, "template-map.yaml"), "utf8")) as {
     slides: { number: number; slots?: Record<string, number> }[];
   };
@@ -239,13 +268,7 @@ async function validateStaged(dir: string, manifest: Record<string, unknown>): P
     const values = slot ? { [String(slot)]: `Test ${role}` } : {};
     return { id: role, message: `Test ${role}`, message_type: role === "content" ? "narrative" : role, form: role, source: { kind: "clone", role, values } };
   };
-  const out = join(dir, ".test-deck.pptx");
-  const deck = { pack_id: manifest.id, language, title: "Test", slides: ["cover", "content", "closing"].map(slide) };
-  const built = await engine<{ slides: Record<string, { position: number; source: number }> }>("build", { pack: dir, deck, out });
-  const sources = Object.fromEntries(Object.values(built.slides).map((s) => [String(s.position), s.source]));
-  const test = await engine<{ findings: Finding[] }>("lint", { pack: dir, pptx: out, language, sources });
-  await rm(out);
-  return [...problems, ...errors(test.findings).map((p) => `test deck ${p}`)];
+  return { pack_id: manifest.id, language, title: "Test", slides: ["cover", "content", "closing"].map(slide) };
 }
 
 type Draft = {
@@ -373,6 +396,7 @@ async function draftView(dir: string, draftId: string) {
     draft_id: draftId,
     manifest: parse(await readFile(join(dir, "pack.yaml"), "utf8")) as Record<string, unknown>,
     voice: existsSync(join(dir, "voice.md")) ? await readFile(join(dir, "voice.md"), "utf8") : "",
+    ...(await draftDocs(dir)),
     fonts: (await readdir(join(dir, "fonts"))).sort(),
     archetypes: await archetypes(),
     slides: tmap.slides.map((s) => ({
@@ -426,6 +450,97 @@ export async function replaceTokens(user: User, data: string, draftId: string, b
   return { tokens: Object.keys(d.tokens).sort(), review: d.review };
 }
 
+/** What a published edit carries: the reviewed manifest (its `lint.slop_rules` included), and the
+pack's own docs. A doc left out stays as it is; an empty one is removed (a subsidiary then inherits
+its group's). */
+export interface EditInput {
+  manifest: Record<string, unknown>;
+  voice?: string | undefined;
+  exemplar?: string | undefined;
+  storyline?: string | undefined;
+  note?: string | undefined;
+}
+
+const DOCS = ["exemplar", "storyline"] as const;
+const LOGO = /^logo\.(png|svg|jpe?g)$/i;
+const IMAGE = /^[\w .-]+\.(png|jpe?g|svg|webp|gif)$/i;
+
+/** A draft's own exemplar and storyline (markdown), exemplar images and logo asset, for review. */
+async function draftDocs(dir: string) {
+  const m = parse(await readFile(join(dir, "pack.yaml"), "utf8")) as { docs?: Record<string, string> };
+  const text = async (key: (typeof DOCS)[number]) => {
+    const path = join(dir, m.docs?.[key] ?? `${key}.md`);
+    return existsSync(path) ? readFile(path, "utf8") : "";
+  };
+  return {
+    exemplar: await text("exemplar"),
+    storyline: await text("storyline"),
+    exemplar_images: existsSync(join(dir, "exemplar")) ? (await readdir(join(dir, "exemplar"))).filter((f) => IMAGE.test(f)).sort() : [],
+    logo: (await readdir(dir)).find((f) => LOGO.test(f)) ?? null,
+  };
+}
+
+/** Write the edited exemplar and storyline into draft `dir`; the manifest's `docs` follows them. */
+async function withDocs(dir: string, manifest: Record<string, unknown>, input: EditInput): Promise<Record<string, unknown>> {
+  const docs = { ...((manifest.docs as Record<string, string> | undefined) ?? {}) };
+  const removed = new Set<string>();
+  for (const key of DOCS) {
+    const value = input[key];
+    if (value === undefined) continue;
+    const path = join(dir, docs[key] ?? `${key}.md`);
+    if (value.trim()) {
+      await writeFile(path, value);
+      docs[key] ??= `${key}.md`;
+    } else {
+      await rm(path, { force: true });
+      removed.add(key);
+    }
+  }
+  const kept = Object.fromEntries(Object.entries(docs).filter(([k]) => !removed.has(k)));
+  const rest = { ...manifest };
+  delete rest.docs;
+  return Object.keys(kept).length ? { ...rest, docs: kept } : rest;
+}
+
+/** Add an image to a draft's exemplar pages (`exemplar/`), or (`bytes` null) take one out. */
+export async function exemplarImage(user: User, data: string, draftId: string, name: string, bytes: Buffer | null) {
+  if (!IMAGE.test(name) || basename(name) !== name) throw new Error("exemplar: an image file (.png, .jpg, .svg, .webp, .gif)");
+  const dir = await draftDir(user, data, draftId);
+  await mkdir(join(dir, "exemplar"), { recursive: true });
+  if (bytes) await writeFile(join(dir, "exemplar", name), bytes);
+  else await rm(join(dir, "exemplar", name), { force: true });
+  return { exemplar_images: (await draftDocs(dir)).exemplar_images };
+}
+
+/** Replace a draft's logo asset (`logo.png|svg|jpg` at the pack root). A pack whose logo is drawn
+in its template has none: a new logo there is a new template. */
+export async function replaceLogo(user: User, data: string, draftId: string, name: string, bytes: Buffer) {
+  const ext = /\.(png|svg|jpe?g)$/i.exec(name)?.[1]?.toLowerCase();
+  if (!ext) throw new Error("logo: a .png, .svg or .jpg file");
+  const dir = await draftDir(user, data, draftId);
+  const current = (await draftDocs(dir)).logo;
+  if (!current) throw new Error("this pack has no logo asset: its logo is in the template, replace the template instead");
+  await rm(join(dir, current));
+  await writeFile(join(dir, `logo.${ext}`), bytes);
+  return { logo: `logo.${ext}` };
+}
+
+/** Preview a pending edit before publishing it: the test deck (cover, content, closing) built on the
+draft, with `manifest` (the roles being reviewed) applied, one PNG per slide. */
+export async function previewDraft(user: User, data: string, draftId: string, manifest?: Record<string, unknown>) {
+  const dir = await draftDir(user, data, draftId);
+  if (manifest) await writeFile(join(dir, "pack.yaml"), stringify(await withFonts({ ...manifest }, join(dir, "fonts"))));
+  const m = parse(await readFile(join(dir, "pack.yaml"), "utf8")) as Record<string, unknown>;
+  const out = join(dir, "preview");
+  await rm(out, { recursive: true, force: true });
+  await mkdir(out, { recursive: true });
+  const deck = await testDeck(dir, m);
+  await engine("build", { pack: dir, deck, out: join(out, "sample.pptx") });
+  const r = await engine<{ slides: { number: number }[] }>("render", { pack: dir, pptx: join(out, "sample.pptx"), out_dir: out });
+  const t = Date.now(); // same URLs after another preview, new pictures
+  return { slides: r.slides.map((s) => ({ number: s.number, image_url: `/api/packs/drafts/${draftId}/preview/${s.number}.png?t=${t}` })) };
+}
+
 /** Edit, step 2: the reviewed manifest and voice over the copy; validated like an import, then
 published as the pack's next release (same id, same visibility). The previous release is kept. */
 async function publishEdit(
@@ -434,10 +549,10 @@ async function publishEdit(
   data: string,
   dir: string,
   id: string,
-  input: { manifest: Record<string, unknown>; voice?: string | undefined; note?: string | undefined },
+  input: EditInput,
 ) {
   await checkParent(db, user, input.manifest);
-  const manifest = await withFonts({ ...input.manifest, id }, join(dir, "fonts"));
+  const manifest = await withDocs(dir, await withFonts({ ...input.manifest, id }, join(dir, "fonts")), input);
   await writeFile(join(dir, "pack.yaml"), stringify(manifest));
   if (input.voice !== undefined) await writeFile(join(dir, "voice.md"), input.voice);
   await engine("validate_pack", { pack: dir });
@@ -447,7 +562,7 @@ async function publishEdit(
 
   await managedPack(db, user, id, "edit it"); // still theirs to change
   const out = releaseDir(data, id, await nextVersion(db, id));
-  const skip = new Set(["owner", "edits", "render"].map((f) => join(dir, f)));
+  const skip = new Set(["owner", "edits", "render", "preview"].map((f) => join(dir, f)));
   await rm(out, { recursive: true, force: true });
   await cp(dir, out, { recursive: true, filter: (src) => !skip.has(src) });
   const version = await release(db, id, out, input.note || "edit", user.id);
@@ -461,13 +576,7 @@ export async function publishDraft(
   user: User,
   data: string,
   draftId: string,
-  input: {
-    manifest: Record<string, unknown>;
-    voice?: string | undefined;
-    note?: string | undefined;
-    visibility: "workspace" | "team";
-    teams?: string[] | undefined;
-  },
+  input: EditInput & { visibility: "workspace" | "team"; teams?: string[] | undefined },
 ) {
   const dir = await draftDir(user, data, draftId);
   if (existsSync(join(dir, "edits"))) {
@@ -486,12 +595,24 @@ export async function publishDraft(
   return r;
 }
 
-/** Who sees a pack: the whole workspace, or the listed teams (and its owner). Owner or admin. */
+/** Who sees a pack: the whole workspace (admins only), or the listed teams (and its owner and
+co-managers). Its managers or an admin. */
 export async function setVisibility(db: Db, user: User, id: string, visibility: "workspace" | "team", teams: string[]) {
   await managedPack(db, user, id, "change its visibility");
+  checkWorkspace(user, visibility);
   await db.query("update packs set visibility = $2, teams = $3 where id = $1", [id, visibility, JSON.stringify(teams)]);
   await audit(db, user, "visibility", "pack", id, { visibility, teams });
   return { id, visibility, teams };
+}
+
+/** Co-managers of pack `id` (user ids, the owner left out): its owner or an admin sets them. */
+export async function setManagers(db: Db, user: User, id: string, managers: string[]) {
+  const pack = await managedPack(db, user, id, "change its managers");
+  if (!isAdmin(user) && pack.owner !== user.id) throw new Forbidden(`only the owner of ${id} or ${ADMIN_TEAM} change its managers`);
+  const list = [...new Set(managers.map((m) => m.trim()).filter((m) => m && m !== pack.owner))];
+  await db.query("update packs set managers = $2 where id = $1", [id, JSON.stringify(list)]);
+  await audit(db, user, "managers", "pack", id, { managers: list });
+  return { id, managers: list };
 }
 
 /** Archive a pack (a finished client engagement): gone from pickers and new decks, while decks
