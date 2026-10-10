@@ -46,6 +46,7 @@ describe("enterprise compliance", { timeout: ENGINE_TIMEOUT }, () => {
       publicUrl: app.publicUrl,
       teamsClaim: "groups",
       secret: app.secret,
+      access: app.access,
       onSignIn: (u) => audit(app.db, u, "sign_in", "user", u.id),
     });
     http = createHttp(app, auth, web);

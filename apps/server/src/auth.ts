@@ -8,6 +8,7 @@ import {
   type OAuthMetadata,
   type OAuthTokenVerifier,
 } from "@modelcontextprotocol/server";
+import type { Identity } from "./access.ts";
 import type { User } from "./packs.ts";
 import { teamsOf, type TeamsConfig } from "./teams.ts";
 
@@ -17,7 +18,7 @@ export interface AuthConfig {
   audience: string; // CALQUE_OIDC_AUDIENCE: the client id / audience tokens are minted for
   resource: URL; // this server's MCP endpoint, <public url>/mcp
   teamsClaim: string; // CALQUE_TEAMS_CLAIM, default "groups"
-  teams?: Omit<TeamsConfig, "claim"> | undefined; // CALQUE_TEAMS_MAP, CALQUE_TEAMS_MAP_ONLY (Entra group ids)
+  teams?: Omit<TeamsConfig, "claim"> | undefined; // CALQUE_TEAMS_MAP, CALQUE_TEAMS_MAP_ONLY (Entra group ids), CALQUE_TEAMS_PREFIX
   keys?: JWTVerifyGetKey; // tests inject a local key set...
   metadata?: OAuthMetadata; // ...and the authorization server metadata
 }
@@ -36,6 +37,7 @@ export function verifier(cfg: AuthConfig, metadata: () => Promise<OAuthMetadata>
           expiresAt: payload.exp ?? 0, // no exp: the SDK refuses the token
           extra: {
             sub: payload.sub,
+            names: namesOf(payload),
             // shown as the author of versions and comments (S18); the sub stays the id
             ...(typeof payload.name === "string" ? { name: payload.name } : {}),
             teams: teamsOf(payload, { ...cfg.teams, claim: cfg.teamsClaim }),
@@ -47,6 +49,15 @@ export function verifier(cfg: AuthConfig, metadata: () => Promise<OAuthMetadata>
     },
   };
 }
+
+/** The names SCIM may know the user by (access.ts). */
+export const namesOf = (claims: Record<string, unknown>): string[] =>
+  ["preferred_username", "email", "upn"].map((k) => claims[k]).filter((v): v is string => typeof v === "string");
+
+export const identityOf = (auth: AuthInfo): Identity => ({
+  sub: String(auth.extra?.sub ?? auth.clientId),
+  names: (auth.extra?.names as string[]) ?? [],
+});
 
 export function userOf(auth: AuthInfo | undefined): User {
   if (!auth) return { id: "local", teams: [], local: true };

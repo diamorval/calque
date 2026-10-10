@@ -75,6 +75,22 @@ create table if not exists models (
   updated_by text not null,
   updated_at timestamptz not null default now()
 );
+create table if not exists users (
+  id text primary key,
+  user_name text,
+  external_id text,
+  display_name text,
+  active boolean not null default true,
+  deleted boolean not null default false,
+  sessions_after timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create unique index if not exists users_user_name on users (lower(user_name));
+create table if not exists revoked_sessions (
+  sid text primary key,
+  expires_at timestamptz not null
+);
 -- label: tells two configs of one model apart; options: provider settings (JSON); headers: sealed JSON
 alter table models add column if not exists label text;
 alter table models add column if not exists options text;

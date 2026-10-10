@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { ADMIN_TEAM } from "./packs.ts";
 
 /** How a token's group claim becomes the user's teams (pack visibility, model admin).
 Keycloak sends group paths ("/sales"); Entra ID sends group object ids (GUIDs), which
@@ -8,6 +9,8 @@ export interface TeamsConfig {
   map?: Record<string, string> | undefined; // CALQUE_TEAMS_MAP
   /** drop the groups the map does not name (CALQUE_TEAMS_MAP_ONLY=1): GUIDs never show as teams */
   mappedOnly?: boolean | undefined;
+  /** keep only the teams starting with it, and the admin team (CALQUE_TEAMS_PREFIX): directory groups never show as teams */
+  prefix?: string | undefined;
 }
 
 export function teamsConfig(env = process.env): TeamsConfig {
@@ -22,7 +25,7 @@ export function teamsConfig(env = process.env): TeamsConfig {
   } else if (env.CALQUE_TEAMS_MAP_ONLY === "1") {
     throw new Error("CALQUE_TEAMS_MAP_ONLY=1 needs CALQUE_TEAMS_MAP");
   }
-  return { claim: env.CALQUE_TEAMS_CLAIM ?? "groups", map, mappedOnly: env.CALQUE_TEAMS_MAP_ONLY === "1" };
+  return { claim: env.CALQUE_TEAMS_CLAIM ?? "groups", map, mappedOnly: env.CALQUE_TEAMS_MAP_ONLY === "1", prefix: env.CALQUE_TEAMS_PREFIX || undefined };
 }
 
 /** Entra ID leaves the groups out of a token past 200 groups (`_claim_names.groups` points to
@@ -34,7 +37,7 @@ function overage(claims: Record<string, unknown>, claim: string): boolean {
 
 const warned = new Set<string>();
 
-/** The user's teams from token claims: the claim's values, a leading "/" stripped, mapped, deduped. */
+/** The user's teams from token claims: the claim's values, a leading "/" stripped, mapped, filtered by prefix, deduped. */
 export function teamsOf(claims: Record<string, unknown>, cfg: TeamsConfig, warn: (m: string) => void = console.warn): string[] {
   const raw = claims[cfg.claim];
   if (!Array.isArray(raw)) {
@@ -53,5 +56,5 @@ export function teamsOf(claims: Record<string, unknown>, cfg: TeamsConfig, warn:
     if (named) out.add(named);
     else if (!cfg.mappedOnly) out.add(g);
   }
-  return [...out];
+  return [...out].filter((t) => !cfg.prefix || t.startsWith(cfg.prefix) || t === ADMIN_TEAM);
 }

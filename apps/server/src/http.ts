@@ -2,8 +2,9 @@ import { createReadStream, existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join, normalize } from "node:path";
 import { Readable } from "node:stream";
-import { Hono, type Context } from "hono";
+import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
+import { getCookie } from "hono/cookie";
 import { stream } from "hono/streaming";
 import { Client } from "@modelcontextprotocol/client";
 import { createMcpHandler, InMemoryTransport, oauthMetadataResponse } from "@modelcontextprotocol/server";
@@ -12,7 +13,7 @@ import { PROVIDERS, type ModelConfig, type ProviderId, type Step } from "@calque
 import { z } from "zod";
 import { auditLog } from "./audit.ts";
 import { compliance } from "./compliance.ts";
-import { discovery, gate, userOf, type AuthConfig } from "./auth.ts";
+import { discovery, gate, identityOf, userOf, type AuthConfig } from "./auth.ts";
 import { Conflict } from "./decks.ts";
 import { EngineError, REPO } from "./engine.ts";
 import { attachment, MAX_UPLOAD, saveFile, ticketUser, TooLarge } from "./files.ts";
@@ -39,7 +40,8 @@ import {
 import { imageType, packImage, packPortal, templateSlide } from "./portal.ts";
 import { tokenUser } from "./preview.ts";
 import { clientAddress, rateLimit } from "./ratelimit.ts";
-import type { Sessions } from "./session.ts";
+import { scimRoutes } from "./scim.ts";
+import { SESSION, type Sessions } from "./session.ts";
 import { resetLink, setGeneralAccess, shares, transfer } from "./shares.ts";
 import { TOOLS, toolNamed, type App } from "./tools.ts";
 
@@ -104,8 +106,10 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
     const s = await sessions?.user(c);
     if (s) return s;
     const a = await check(c.req.raw);
-    return a instanceof Response ? a : userOf(a);
+    if (a instanceof Response) return a;
+    return (await app.access.blocked(identityOf(a))) ? deactivated(c) : userOf(a);
   }
+  const deactivated = (c: Context) => c.json({ error: "Unauthorized", message: "this account is deactivated" }, 401);
 
   /** A preview route's caller: the user a per-user URL token (`?t=`) was minted for; else, with the
   deck's share link key (`?k=`), the signed-in caller or an anonymous one presenting it; else `who`.
@@ -137,6 +141,7 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
   http.all("/mcp", jsonLimit, async (c) => {
     const a = check ? await check(c.req.raw) : undefined;
     if (a instanceof Response) return a;
+    if (a && (await app.access.blocked(identityOf(a)))) return deactivated(c);
     return mcp.fetch(c.req.raw, a ? { authInfo: a } : {});
   });
 
@@ -158,7 +163,32 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
       }
     });
     http.get("/auth/logout", (c) => sessions.logout(c));
+
+    /** CSRF: a state-changing /api or /decks request riding on the session cookie must come from the
+    app's own origin (Origin, else Referer). Bearer requests (MCP, API clients) and preview calls with
+    a per-user URL token (`?t=`, the MCP App) carry no ambient credential. */
+    const origin = new URL(app.publicUrl).origin;
+    const refererOrigin = (r?: string) => {
+      try {
+        return r ? new URL(r).origin : undefined;
+      } catch {
+        return undefined;
+      }
+    };
+    const sameOrigin: MiddlewareHandler = async (c, next) => {
+      if (["GET", "HEAD", "OPTIONS"].includes(c.req.method) || c.req.header("authorization") || c.req.query("t") || !getCookie(c, SESSION)) return next();
+      if ((c.req.header("origin") ?? refererOrigin(c.req.header("referer"))) !== origin) {
+        return c.json({ error: "Forbidden", message: `cross-site request refused: Origin must be ${origin}` }, 403);
+      }
+      return next();
+    };
+    http.use("/api/*", sameOrigin);
+    http.use("/decks/*", sameOrigin);
   }
+
+  // SCIM 2.0 deprovisioning (scim.ts), when the IdP has a token for it.
+  const scimToken = process.env.CALQUE_SCIM_TOKEN;
+  if (scimToken) scimRoutes(http, app.access, scimToken, app.publicUrl);
 
   /** REST handler: authenticate, run, map errors to statuses. */
   const route = (fn: (c: Context, user: User) => Promise<unknown>) => async (c: Context) => {

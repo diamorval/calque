@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { DeckSpec, PatchOp, Slide } from "@calque/deckspec";
 import { compliance } from "./compliance.ts";
+import type { Access } from "./access.ts";
 import type { Db } from "./db.ts";
 import type { Decks, Finding, Role } from "./decks.ts";
 import { REPO } from "./engine.ts";
@@ -19,6 +20,8 @@ export interface App {
   db: Db;
   decks: Decks;
   models: Models;
+  /** session revocation and SCIM deprovisioning */
+  access: Access;
   data: string;
   /** seals model keys and web sessions */
   secret: string;
@@ -559,6 +562,14 @@ export const TOOLS = {
     input: z.object({ pack_id: z.string().optional().describe("One pack; default: every pack you manage.") }),
     readOnly: true,
     run: (app, user, a) => compliance(app.db, app.decks, user, a.pack_id),
+  }),
+
+  revoke_sessions: tool({
+    title: "Revoke sessions",
+    description:
+      "Admin only: sign a user out everywhere. Every web session the user holds now stops working; they can sign in again (to block sign-in, deactivate them in the IdP, which deprovisions them over SCIM).",
+    input: z.object({ user: z.string().min(1).describe("The user's id (OIDC sub) or user name.") }),
+    run: (app, user, a) => app.access.revokeUser(user, a.user),
   }),
 } satisfies Record<string, Tool>;
 

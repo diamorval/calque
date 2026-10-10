@@ -30,6 +30,7 @@ const web = auth
       teamsClaim: auth.teamsClaim,
       teams: auth.teams,
       secret: app.secret,
+      access: app.access,
       onSignIn: (u) => audit(app.db, u, "sign_in", "user", u.id, { name: u.name }),
     })
   : undefined;

@@ -54,7 +54,7 @@ process.env.CALQUE_LLM_MODEL = "gateway-e2e";
 process.env.CALQUE_TEST_PACKS = "1"; // the acme-test pack the scripted agent builds on
 const app = await createApp({ data: mkdtempSync(join(tmpdir(), "calque-e2e-")), db: "memory://", publicUrl });
 const auth = { issuer: idp.issuer, audience: "calque", resource: new URL("/mcp", publicUrl), teamsClaim: "groups" };
-const web = sessions({ issuer: idp.issuer, clientId: "calque-web", publicUrl, teamsClaim: "groups", secret: app.secret });
+const web = sessions({ issuer: idp.issuer, clientId: "calque-web", publicUrl, teamsClaim: "groups", secret: app.secret, access: app.access });
 serve({ fetch: createHttp(app, auth, web).fetch, port, hostname: "localhost" }, () => {
   console.log(`e2e stack on ${publicUrl} (model ${model.url})`);
 });

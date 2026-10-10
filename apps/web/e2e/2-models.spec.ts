@@ -53,5 +53,5 @@ test("a non-admin cannot change the models", async ({ page }) => {
   await signIn(page, "bob", "/settings/models");
   await expect(page.getByText("Only workspace admins change the models.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Set as default" })).toHaveCount(0);
-  expect((await page.request.post("/api/models", { data: { provider: "ollama", model: "x" } })).status()).toBe(403);
+  expect((await page.request.post("/api/models", { data: { provider: "ollama", model: "x" }, headers: { origin: new URL(page.url()).origin } })).status()).toBe(403);
 });

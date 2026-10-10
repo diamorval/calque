@@ -1,7 +1,8 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
-import { PROVIDERS, testModel, type ModelConfig, type ModelOptions, type ProviderId } from "@calque/llm";
+import { PROVIDERS, testModel, type ModelConfig, type ModelOptions, type ProviderId, type ProviderInfo } from "@calque/llm";
 import { audit } from "./audit.ts";
 import type { Db } from "./db.ts";
+import { allowedHosts, checkEndpoint } from "./egress.ts";
 import { ADMIN_TEAM, Forbidden, isAdmin, NotFound, type User } from "./packs.ts";
 
 export { Forbidden, isAdmin };
@@ -39,6 +40,19 @@ export interface ModelInput {
   api_version?: string | undefined;
   managed_identity?: boolean | undefined;
   default?: boolean | undefined;
+}
+
+/** The egress policy (egress.ts) on the endpoint the server will call: the base URL, else the Azure
+resource's, else the provider's public default (allow-list only: not resolved) or Ollama's localhost. */
+async function egress(provider: ProviderId, baseUrl: string | null | undefined, o: ModelOptions = {}) {
+  const own = baseUrl ?? (o.resource ? `https://${o.resource}.openai.azure.com/openai` : undefined);
+  const url = own ?? (PROVIDERS[provider] as ProviderInfo).defaultBaseURL;
+  if (!url || url.includes("<")) return;
+  try {
+    await checkEndpoint(url, allowedHosts(), own || provider === "ollama" ? undefined : async () => []);
+  } catch (e) {
+    throw new InvalidModel((e as Error).message);
+  }
 }
 
 const slug = (s: string) =>
@@ -135,6 +149,7 @@ export class Models {
   async configure(user: User, input: ModelInput) {
     if (!isAdmin(user)) throw new Forbidden(`only ${ADMIN_TEAM} configure models`);
     if (!(input.provider in PROVIDERS)) throw new InvalidModel(`unknown provider ${JSON.stringify(input.provider)}`);
+    await egress(input.provider, input.base_url, options(input));
     if (input.id) {
       const r = await this.row(input.id);
       if (!r) throw new NotFound(`no model ${JSON.stringify(input.id)}`);
@@ -193,6 +208,7 @@ export class Models {
   async resolve(id?: string): Promise<ModelConfig & { id: string }> {
     const r = id ? await this.row(id) : await this.defaultRow();
     if (!r) throw new NotFound(id ? `no model ${JSON.stringify(id)}` : "no AI model configured: add one in Settings > AI Models");
+    await egress(r.provider, r.base_url, r.options ? (JSON.parse(r.options) as ModelOptions) : {});
     return { id: r.id, ...this.config(r) };
   }
 

@@ -36,7 +36,8 @@ Everything lives in two places the operator chooses:
   decks, uploads, imported brand packs and pack drafts.
 
 Model API keys are sealed with AES-256-GCM under `CALQUE_SECRET` and never returned by the API.
-Web sessions are signed with the same secret: an 8-hour HttpOnly cookie, Secure over HTTPS. When
+Web sessions are signed with the same secret: an 8-hour HttpOnly cookie, Secure over HTTPS, whose
+session id is checked server-side on every request (see Sessions and deprovisioning). When
 `CALQUE_OIDC_ISSUER` is set, the server refuses to start without `CALQUE_SECRET`, so an ephemeral
 data directory cannot silently rotate the key.
 
@@ -48,7 +49,8 @@ each turn.
 - **The audit log** (`audit` table): who did what, when, never the content itself. Deck create,
   edit (version and note), export, delete, share, unshare, general access change, link reset and
   transfer; pack publish, edit and visibility change; model add, update, default and remove;
-  sign-in; retention purges. Rows outlive what they name: a deleted deck's history stays. Admins
+  sign-in; session revocation by an admin (`revoke_sessions`); SCIM user create, update, activate,
+  deactivate and delete (actor `scim`); retention purges. Rows outlive what they name: a deleted deck's history stays. Admins
   (`CALQUE_ADMIN_TEAM`) read it at `GET /api/admin/audit`, filtered by `actor`, `action`,
   `target_type`, `target_id`, `since` and `until`.
 - **Process output** (stderr): start-up, retention summaries, and the engine's error output when an
@@ -85,6 +87,13 @@ each turn.
   loopback only.
 - **Authorization**: decks are private to their owner unless shared. Admins manage a deck's access
   and may delete it, but never read it. Only admins configure models.
+- **Sessions and deprovisioning**: sign-out revokes the session; admins revoke all of a user's
+  sessions; a user deactivated over SCIM can neither sign in nor use a session or a token. See
+  below.
+- **CSRF**: besides `SameSite=Lax`, cookie-authenticated writes must come from the server's own
+  origin. See below.
+- **Model egress**: the model endpoints the server calls are checked against `CALQUE_MODEL_HOSTS`
+  and never reach cloud metadata addresses. See below.
 - **Request limits**: uploads (`/api/files`, pack template, fonts) are capped at 50 MB. JSON calls
   that may carry a file in base64 (`/api/tools/*`, `/mcp`) are capped at the same file size, and
   the tool checks the decoded size again.
@@ -99,12 +108,86 @@ each turn.
   the repository (TypeScript and Python, from `pnpm-lock.yaml` and `uv.lock`), kept as the
   `calque-sbom.cdx.json` build artifact.
 
+## Model endpoints (SSRF)
+
+Admins configure AI models with a `base_url` that the **server** calls (`apps/server/src/egress.ts`).
+The server checks it when a model is saved (before its test call) and every time a model is used,
+including the deployment's `CALQUE_LLM_*` gateway:
+
+- only `http` and `https`;
+- `CALQUE_MODEL_HOSTS`, when set, is an allow-list: comma-separated host names or IPs, and
+  `.example.com` (or `*.example.com`) for any subdomain. A model whose host is not on it is refused
+  (422), whatever its provider. Without a base URL the provider's endpoint is checked: its public
+  API host (`api.anthropic.com`, `api.openai.com`, …, list them too), `<resource>.openai.azure.com`
+  for Azure OpenAI, `localhost` for Ollama;
+- link-local and cloud metadata addresses are always refused, whether the host is an IP literal or a
+  name resolving to one: `169.254.0.0/16`, `fe80::/10`, `fd00:ec2::254`, `100.100.100.200`
+  (IPv4-mapped IPv6 included). Only an entry naming the host exactly in `CALQUE_MODEL_HOSTS` lifts this.
+
+Loopback and private addresses are allowed unless the allow-list says otherwise: an internal gateway
+or Ollama on the same host is a normal deployment.
+
+The name is resolved at check time; the provider SDK resolves it again when it calls, so a hostile
+DNS server could answer differently (DNS rebinding). Production deployments should also restrict
+the server's egress at the network level (firewall, egress proxy) to the model hosts.
+
+## Sessions and deprovisioning
+
+Sign-in is OIDC authorization code + PKCE (`apps/server/src/session.ts`). The session is a signed,
+`HttpOnly`, `SameSite=Lax` cookie, `Secure` on https, valid 8 hours. It carries a random session id
+and its issue time, checked server-side on every request (`apps/server/src/access.ts`):
+
+- **sign-out** (`/auth/logout`) revokes that session id until it would have expired, so a copied cookie
+  stops working too;
+- **revoke a user's sessions:** the `revoke_sessions` tool (`POST /api/tools/revoke_sessions`
+  `{user}`, admins only) revokes every session issued before now for a user id (OIDC `sub`) or user
+  name. The user can sign in again;
+- **deprovisioning:** a user deactivated or deleted over SCIM cannot use a session, a bearer token
+  (REST or MCP) or sign in.
+
+## SCIM 2.0
+
+With `CALQUE_SCIM_TOKEN` set, the IdP (Entra ID, Okta, Keycloak with a SCIM plugin) provisions users
+on `<public url>/scim/v2/Users`, authenticated by `Authorization: Bearer <CALQUE_SCIM_TOKEN>`.
+Users only, no groups:
+
+| | |
+| --- | --- |
+| `GET /scim/v2/Users?filter=userName eq "…"` | list; filters `userName eq`, `externalId eq`, `id eq`; `startIndex`, `count` |
+| `GET /scim/v2/Users/:id` | one user |
+| `POST /scim/v2/Users` | `{userName, externalId?, displayName?, active?}`; 409 if the userName exists |
+| `PUT /scim/v2/Users/:id` | replace those attributes |
+| `PATCH /scim/v2/Users/:id` | `add`/`replace` on `active`, `userName`, `externalId`, `displayName` (with or without `path`; `"False"` strings accepted); others ignored |
+| `DELETE /scim/v2/Users/:id` | 204; the user stays blocked here |
+
+`active: false` or `DELETE` revokes the user's sessions and blocks sign-in; `active: true` lets them
+sign in again (their earlier sessions stay revoked). A SCIM user matches a signed-in user when its
+`id` or `externalId` is the OIDC `sub`, or its `userName` is the `sub`, `preferred_username`, `email` or
+`upn` claim (case-insensitive): map the IdP's SCIM `userName` to the same value as one of those claims.
+
+Teams come from one token claim (`CALQUE_TEAMS_CLAIM`), named through `CALQUE_TEAMS_MAP` (Entra ID
+group ids). `CALQUE_TEAMS_PREFIX` then keeps only the teams whose name starts with it (and the admin
+team), so that a user's hundreds of directory groups do not become Calque teams.
+
+## CSRF
+
+Besides `SameSite=Lax`, a state-changing `/api` or `/decks` request (not GET, HEAD or OPTIONS) sent
+with the session cookie must carry an `Origin` header, or else a `Referer`, whose origin is exactly
+`CALQUE_PUBLIC_URL`'s; otherwise it is refused with 403. Requests with an `Authorization` header (MCP
+clients, API clients) or a per-user preview token (`?t=`, the MCP App) carry no ambient credential
+and are exempt. Set `CALQUE_PUBLIC_URL` to the URL
+users open: behind a proxy that rewrites the host, the browser's `Origin` must still match it. The
+Vite dev server presents the server's origin to it.
+
 ## Known limits
 
 - Rate limits and per-deck locks live in one process. Running several server instances needs a
   shared store.
-- There is no egress allow-list for a model's `base_url`. An admin can point it at any host the
-  server reaches.
-- CSRF protection relies on `SameSite=Lax` cookies and JSON bodies. There is no token and no
-  `Origin` check.
-- A user removed from the identity provider keeps a valid session until it expires (8 hours).
+- Without `CALQUE_MODEL_HOSTS`, an admin can point a model at any host the server reaches except
+  link-local and metadata addresses. The host name is resolved when it is checked and again by the
+  provider SDK when it calls, so a hostile DNS server could answer differently (DNS rebinding):
+  restrict the server's egress at the network level too.
+- Without SCIM, a user removed from the identity provider keeps a valid session until it expires
+  (8 hours) or an admin revokes it.
+- Session revocation is checked against the database on each request; MCP bearer tokens are only
+  refused for deactivated users, not for revoked sessions (they expire with the IdP's token lifetime).
