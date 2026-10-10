@@ -3,19 +3,21 @@ import { readFile } from "node:fs/promises";
 import { join, normalize } from "node:path";
 import { Readable } from "node:stream";
 import { Hono, type Context } from "hono";
+import { getCookie } from "hono/cookie";
 import { stream } from "hono/streaming";
 import { Client } from "@modelcontextprotocol/client";
 import { createMcpHandler, InMemoryTransport, oauthMetadataResponse } from "@modelcontextprotocol/server";
 import { applyComments, chat, type Message } from "@calque/agent";
 import { PROVIDERS, type ModelConfig, type ProviderId } from "@calque/llm";
 import { z } from "zod";
-import { discovery, gate, userOf, type AuthConfig } from "./auth.ts";
+import { discovery, gate, identityOf, userOf, type AuthConfig } from "./auth.ts";
 import { Conflict } from "./decks.ts";
 import { EngineError, REPO } from "./engine.ts";
 import { buildServer, UI_HTML } from "./mcp.ts";
 import { InvalidModel, isAdmin } from "./models.ts";
 import { addFont, draftDir, draftPack, editPack, Forbidden, NotFound, publishDraft, setVisibility, type User } from "./packs.ts";
-import type { Sessions } from "./session.ts";
+import { scimRoutes } from "./scim.ts";
+import { SESSION, type Sessions } from "./session.ts";
 import { TOOLS, toolNamed, type App } from "./tools.ts";
 
 /** The preview link is a capability URL: knowing a deck's id (random UUID) opens its preview,
@@ -75,13 +77,16 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
     const s = await sessions?.user(c);
     if (s) return s;
     const a = await check(c.req.raw);
-    return a instanceof Response ? a : userOf(a);
+    if (a instanceof Response) return a;
+    return (await app.access.blocked(identityOf(a))) ? deactivated(c) : userOf(a);
   }
+  const deactivated = (c: Context) => c.json({ error: "Unauthorized", message: "this account is deactivated" }, 401);
 
   const mcp = createMcpHandler(({ authInfo }) => buildServer(app, userOf(authInfo)));
   http.all("/mcp", async (c) => {
     const a = check ? await check(c.req.raw) : undefined;
     if (a instanceof Response) return a;
+    if (a && (await app.access.blocked(identityOf(a)))) return deactivated(c);
     return mcp.fetch(c.req.raw, a ? { authInfo: a } : {});
   });
 
@@ -102,7 +107,29 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
       }
     });
     http.get("/auth/logout", (c) => sessions.logout(c));
+
+    /** CSRF: a state-changing /api request riding on the session cookie must come from the app's own
+    origin (Origin, else Referer). Bearer requests (MCP, API clients) carry no ambient credential. */
+    const origin = new URL(app.publicUrl).origin;
+    const refererOrigin = (r?: string) => {
+      try {
+        return r ? new URL(r).origin : undefined;
+      } catch {
+        return undefined;
+      }
+    };
+    http.use("/api/*", async (c, next) => {
+      if (["GET", "HEAD", "OPTIONS"].includes(c.req.method) || c.req.header("authorization") || !getCookie(c, SESSION)) return next();
+      if ((c.req.header("origin") ?? refererOrigin(c.req.header("referer"))) !== origin) {
+        return c.json({ error: "Forbidden", message: `cross-site request refused: Origin must be ${origin}` }, 403);
+      }
+      return next();
+    });
   }
+
+  // SCIM 2.0 deprovisioning (scim.ts), when the IdP has a token for it.
+  const scimToken = process.env.CALQUE_SCIM_TOKEN;
+  if (scimToken) scimRoutes(http, app.access, scimToken, app.publicUrl);
 
   /** REST handler: authenticate, run, map errors to statuses. */
   const route = (fn: (c: Context, user: User) => Promise<unknown>) => async (c: Context) => {

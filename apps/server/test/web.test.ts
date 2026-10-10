@@ -20,6 +20,7 @@ describe("web app routes", { timeout: ENGINE_TIMEOUT }, () => {
   const req = async (path: string, init: RequestInit & { cookie?: string; bearer?: string } = {}) => {
     const headers = new Headers(init.headers);
     if (init.cookie) headers.set("cookie", init.cookie);
+    if (init.cookie && !headers.has("origin")) headers.set("origin", app.publicUrl); // what the browser sends
     if (init.bearer) headers.set("authorization", `Bearer ${init.bearer}`);
     return http.request(path, { ...init, headers });
   };
@@ -46,7 +47,7 @@ describe("web app routes", { timeout: ENGINE_TIMEOUT }, () => {
     vi.stubEnv("CALQUE_LLM_MODEL", "m");
     app = await testApp();
     const auth = { issuer: idp.issuer, audience: "calque", resource: new URL("/mcp", app.publicUrl), teamsClaim: "groups" };
-    http = createHttp(app, auth, sessions({ issuer: idp.issuer, clientId: "calque-web", publicUrl: app.publicUrl, teamsClaim: "groups", secret: app.secret }));
+    http = createHttp(app, auth, sessions({ issuer: idp.issuer, clientId: "calque-web", publicUrl: app.publicUrl, teamsClaim: "groups", secret: app.secret, access: app.access }));
   });
   afterAll(async () => {
     vi.unstubAllEnvs();

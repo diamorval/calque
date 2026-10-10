@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { DeckSpec, PatchOp, Slide } from "@calque/deckspec";
+import type { Access } from "./access.ts";
 import type { Db } from "./db.ts";
 import type { Decks, Finding } from "./decks.ts";
 import { REPO } from "./engine.ts";
@@ -13,6 +14,8 @@ export interface App {
   db: Db;
   decks: Decks;
   models: Models;
+  /** session revocation and SCIM deprovisioning */
+  access: Access;
   data: string;
   /** seals model keys and web sessions */
   secret: string;
@@ -273,6 +276,14 @@ export const TOOLS = {
     }),
     run: async (app, user, a) =>
       importPack(app.db, user, app.data, { ...a, template: await materialize(app, user, a.template) }),
+  }),
+
+  revoke_sessions: tool({
+    title: "Revoke sessions",
+    description:
+      "Admin only: sign a user out everywhere. Every web session the user holds now stops working; they can sign in again (to block sign-in, deactivate them in the IdP, which deprovisions them over SCIM).",
+    input: z.object({ user: z.string().min(1).describe("The user's id (OIDC sub) or user name.") }),
+    run: (app, user, a) => app.access.revokeUser(user, a.user),
   }),
 } satisfies Record<string, Tool>;
 

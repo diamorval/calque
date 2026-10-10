@@ -13,6 +13,7 @@ const auth: AuthConfig | undefined = issuer
       audience: process.env.CALQUE_OIDC_AUDIENCE ?? "calque",
       resource: new URL("/mcp", app.publicUrl),
       teamsClaim: process.env.CALQUE_TEAMS_CLAIM ?? "groups",
+      teamsPrefix: process.env.CALQUE_TEAMS_PREFIX,
     }
   : undefined;
 // the web app signs in against the same issuer (CALQUE_OIDC_CLIENT_ID: its client, default the audience)
@@ -23,7 +24,9 @@ const web = auth
       clientSecret: process.env.CALQUE_OIDC_CLIENT_SECRET,
       publicUrl: app.publicUrl,
       teamsClaim: auth.teamsClaim,
+      teamsPrefix: auth.teamsPrefix,
       secret: app.secret,
+      access: app.access,
     })
   : undefined;
 const port = Number(process.env.PORT ?? 8787);

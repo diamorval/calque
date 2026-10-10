@@ -25,6 +25,9 @@ node apps/server/src/stdio.ts          # stdio, for a local MCP client
 | `CALQUE_ADMIN_TEAM` | `calque-admins` | team allowed to configure AI models |
 | `CALQUE_LLM_MODEL` | unset | preconfigured gateway, saved as model `env`, default unless another is set |
 | `CALQUE_LLM_PROVIDER` / `_BASE_URL` / `_API_KEY` | `openai-compatible` / – / – | the gateway's provider, endpoint and key |
+| `CALQUE_MODEL_HOSTS` | unset: any host | allow-list of model endpoint hosts (`api.example.com,.openai.azure.com`); metadata addresses are always refused ([security](../../docs/security.md)) |
+| `CALQUE_TEAMS_PREFIX` | unset: every group | keep only the groups starting with it (and `CALQUE_ADMIN_TEAM`) as teams |
+| `CALQUE_SCIM_TOKEN` | unset: no SCIM | bearer token of the SCIM 2.0 endpoint `/scim/v2/Users` (deprovisioning) |
 
 ## Connect
 
@@ -46,6 +49,12 @@ the browser signs in at `/auth/login` (code + PKCE against the issuer; redirect 
 `<public url>/auth/callback`) and gets an 8-hour signed `HttpOnly` session cookie; every `/api` route
 refuses a request without a session or a bearer token. The Keycloak login theme ships with the
 design system: `node_modules/@diametral/design-system/keycloak/diametral`.
+
+Sessions are checked server-side on each request: sign-out revokes the session, the
+`revoke_sessions` tool (admins) revokes all of a user's sessions, and a user deactivated over SCIM
+(`/scim/v2/Users`, with `CALQUE_SCIM_TOKEN`) can neither sign in nor use a session or a token. A
+cookie-authenticated write (`POST`, `DELETE`… on `/api`) must come from `CALQUE_PUBLIC_URL`'s origin
+(`Origin`, else `Referer`): 403 otherwise. Details in [docs/security.md](../../docs/security.md).
 
 | Route | |
 | --- | --- |

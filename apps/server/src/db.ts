@@ -53,7 +53,23 @@ create table if not exists models (
   updated_by text not null,
   updated_at timestamptz not null default now()
 );
-create unique index if not exists one_default_model on models (is_default) where is_default;`;
+create unique index if not exists one_default_model on models (is_default) where is_default;
+create table if not exists users (
+  id text primary key,
+  user_name text,
+  external_id text,
+  display_name text,
+  active boolean not null default true,
+  deleted boolean not null default false,
+  sessions_after timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create unique index if not exists users_user_name on users (lower(user_name));
+create table if not exists revoked_sessions (
+  sid text primary key,
+  expires_at timestamptz not null
+);`;
 
 /** Postgres when `url` is a postgres:// URL, else embedded PGlite (a data dir, or in memory). */
 export async function openDb(url = process.env.DATABASE_URL): Promise<Db> {

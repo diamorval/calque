@@ -1,6 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
-import { PROVIDERS, testModel, type ModelConfig, type ProviderId } from "@calque/llm";
+import { PROVIDERS, testModel, type ModelConfig, type ProviderId, type ProviderInfo } from "@calque/llm";
 import type { Db } from "./db.ts";
+import { checkEndpoint } from "./egress.ts";
 import { Forbidden, NotFound, type User } from "./packs.ts";
 
 export { Forbidden };
@@ -28,7 +29,18 @@ export interface ModelInput {
   default?: boolean | undefined;
 }
 
-const ADMIN_TEAM = process.env.CALQUE_ADMIN_TEAM ?? "calque-admins";
+/** The egress policy (egress.ts) on the endpoint the server will call; a provider's own SDK default is not checked. */
+async function egress(provider: ProviderId, baseUrl: string | null | undefined) {
+  const url = baseUrl ?? (PROVIDERS[provider] as ProviderInfo).defaultBaseURL;
+  if (!url) return;
+  try {
+    await checkEndpoint(url);
+  } catch (e) {
+    throw new InvalidModel((e as Error).message);
+  }
+}
+
+export const ADMIN_TEAM = process.env.CALQUE_ADMIN_TEAM ?? "calque-admins";
 export const isAdmin = (u: User) => u.local === true || u.teams.includes(ADMIN_TEAM);
 
 export class Models {
@@ -79,6 +91,7 @@ export class Models {
   async configure(user: User, input: ModelInput, id = `${input.provider}:${input.model}`) {
     if (!isAdmin(user)) throw new Forbidden(`only ${ADMIN_TEAM} configure models`);
     if (!(input.provider in PROVIDERS)) throw new InvalidModel(`unknown provider ${JSON.stringify(input.provider)}`);
+    await egress(input.provider, input.base_url);
     const { rows } = await this.db.query<Row>("select * from models where id = $1", [id]);
     const sealed = input.api_key ? this.seal(input.api_key) : (rows[0]?.api_key ?? null);
     const cfg: ModelConfig = {
@@ -128,6 +141,7 @@ export class Models {
       ? (await this.db.query<Row>("select * from models where id = $1", [id])).rows[0]
       : await this.defaultRow();
     if (!r) throw new NotFound(id ? `no model ${JSON.stringify(id)}` : "no AI model configured: add one in Settings > AI Models");
+    await egress(r.provider, r.base_url);
     return { id: r.id, ...this.config(r) };
   }
 
