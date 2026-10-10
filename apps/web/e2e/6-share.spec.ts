@@ -67,7 +67,10 @@ test("alice shares a deck: bob as viewer, anyone with the link may comment, then
   await expect(page.getByRole("button", { name: "Export PPTX" })).toBeVisible();
   for (const name of ["Add slides", "Review", "Share"]) await expect(page.getByRole("button", { name, exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Comment", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("tab", { name: /Agent/ })).toHaveCount(0);
+  // the deck's conversation is shared: bob reads it but cannot talk to the agent (S3)
+  await page.getByRole("tab", { name: /Agent/ }).click();
+  await expect(page.getByText("Only the deck's editors talk to the agent: you read the conversation.")).toBeVisible();
+  await expect(page.getByLabel("Message")).toHaveCount(0);
   const patch = await page.request.post("/api/tools/patch_deck", { data: { deck_id: id, ops: [{ op: "set", slide: "cover", shape_id: 2, value: "x" }] }, headers: { origin: new URL(page.url()).origin } });
   expect(patch.status()).toBe(403);
 });
