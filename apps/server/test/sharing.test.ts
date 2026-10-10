@@ -19,6 +19,7 @@ describe("deck sharing", { timeout: ENGINE_TIMEOUT }, () => {
   let http: ReturnType<typeof createHttp>;
   let idp: Awaited<ReturnType<typeof fakeOidc>>;
   let id = "";
+  let key = "";
 
   /** Run tool `name` as `user`, its input parsed as the REST and MCP doors do. */
   const call = (user: User, name: keyof typeof TOOLS, args: Json = {}): Promise<Json> => {
@@ -33,61 +34,149 @@ describe("deck sharing", { timeout: ENGINE_TIMEOUT }, () => {
     const res = await http.request(path, { ...init, headers });
     return { status: res.status, body: (await res.json().catch(() => ({}))) as Json };
   };
+  const post = (path: string, bearer?: string, body: Json = {}) =>
+    get(path, bearer, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  /** The deck through its share link (`?k=`), as `who` (a signed-in user id) or anonymously. */
+  const viaLink = async (who?: string, k = key) => get(`/decks/${id}/data?k=${encodeURIComponent(k)}`, who && (await idp.token(who)));
+  const commentViaLink = async (who?: string) => post(`/decks/${id}/comments?k=${encodeURIComponent(key)}`, who && (await idp.token(who)), { slide_id: "cover", text: "via link" });
+  const keyOf = (url: string) => new URL(url).searchParams.get("k") ?? "";
+  const tokenOf = (url: string) => encodeURIComponent(new URL(url).searchParams.get("t") ?? "");
+  const onPack = async (pack: string) => app.db.query("update decks set pack_id = $2 where id = $1", [id, pack]);
 
   beforeAll(async () => {
     idp = await fakeOidc();
     app = await testApp();
     http = createHttp(app, { issuer: idp.issuer, audience: "calque", resource: new URL("/mcp", app.publicUrl), teamsClaim: "groups" });
     id = (await call(alice, "create_deck", { deck: acmeDeck() })).deck_id;
+    await app.db.query("insert into packs (id, dir, visibility, teams, owner) values ('sales-only', $1, 'team', '[\"sales\"]', 'alice')", [`${REPO}/packs/acme-test`]);
   });
   afterAll(async () => {
     idp.server.close();
     await app.db.close();
   });
 
-  it("shares with a user: viewer reads but neither comments nor edits, commenter comments", async () => {
-    await expect(open(bob)).rejects.toThrow(/no deck/);
-    expect(await call(alice, "share_deck", { deck_id: id, principal_type: "user", principal: "bob", role: "viewer" })).toMatchObject({ role: "viewer" });
+  it("a new deck is private: its one link opens for the owner and people with access only", async () => {
+    const s = await call(alice, "list_shares", { deck_id: id });
+    expect(s).toMatchObject({ owner: "alice", people: [], general: { access: "private", role: "viewer" } });
+    expect(s.url).toMatch(new RegExp(`/decks/${id}\\?k=`));
+    key = keyOf(s.url);
+    expect(key.length).toBeGreaterThan(20);
 
+    expect((await viaLink()).status).toBe(404); // anonymous
+    expect((await viaLink("dave")).status).toBe(404); // signed in, no access
+    expect((await viaLink("alice")).body).toMatchObject({ deck_id: id, role: "owner" });
+    expect(await call(alice, "share_deck", { deck_id: id, principal_type: "user", principal: "bob", role: "viewer" })).toMatchObject({ role: "viewer" });
+    expect((await viaLink("bob")).body).toMatchObject({ deck_id: id, role: "viewer" });
+  });
+
+  it("people grants: a viewer reads but neither comments nor edits, a commenter comments", async () => {
+    await expect(open(carol)).rejects.toThrow(/no deck/);
     expect(await open(bob)).toMatchObject({ deck_id: id, role: "viewer" });
     expect((await call(bob, "export_pptx", { deck_id: id })).download_url).toContain(`/decks/${id}/deck.pptx`);
     await expect(comment(bob)).rejects.toThrow(/commenter access needed/);
     await expect(call(bob, "patch_deck", { deck_id: id, ops: [{ op: "set", slide: "cover", shape_id: 2, value: "x" }] })).rejects.toThrow(/editor access needed/);
-    await expect(open(carol)).rejects.toThrow(/no deck/);
 
     await call(alice, "share_deck", { deck_id: id, principal_type: "user", principal: "bob", role: "commenter" });
     expect((await comment(bob)).comment).toMatchObject({ author: "bob" });
     await expect(call(bob, "restore_version", { deck_id: id })).rejects.toThrow(/editor access needed/);
+    await call(alice, "share_deck", { deck_id: id, principal_type: "user", principal: "bob", role: "viewer" });
   });
 
-  it("shares with a team and the workspace; the best role wins; unshare takes it back", async () => {
+  it("workspace: anyone signed in who has the link and sees the pack gets the general role", async () => {
+    expect(await call(alice, "set_general_access", { deck_id: id, access: "workspace", role: "commenter" })).toEqual({ access: "workspace", role: "commenter" });
+    // with the link: the general role
+    expect((await viaLink("dave")).body).toMatchObject({ deck_id: id, role: "commenter" });
+    expect((await commentViaLink("dave")).body.comment).toMatchObject({ author: "dave" });
+    // the best role wins: bob's viewer grant, the link's commenter
+    expect((await viaLink("bob")).body.role).toBe("commenter");
+    // without the link: nothing, and not in their list
+    expect((await get(`/decks/${id}/data`, await idp.token("dave"))).status).toBe(404);
+    await expect(open(dave)).rejects.toThrow(/no deck/);
+    expect((await call(dave, "list_decks")).decks).toEqual([]);
+    // never anonymous
+    expect((await viaLink()).status).toBe(404);
+    // the pack gate: dave does not see a sales-only pack
+    await onPack("sales-only");
+    try {
+      expect((await viaLink("dave")).status).toBe(404);
+    } finally {
+      await onPack("acme-test");
+    }
+  });
+
+  it("anyone with the link: no sign-in, viewer or commenter, never more", async () => {
+    await call(alice, "set_general_access", { deck_id: id, access: "anyone", role: "viewer" });
+    const anon = await viaLink();
+    expect(anon.body).toMatchObject({ deck_id: id, role: "viewer" });
+    // its URLs carry the link, not a token
+    expect(keyOf(anon.body.preview_url)).toBe(key);
+    expect(keyOf(anon.body.slides[0].image_url)).toBe(key);
+    expect((await commentViaLink()).status).toBe(403);
+
+    await call(alice, "set_general_access", { deck_id: id, access: "anyone", role: "commenter" });
+    expect((await commentViaLink()).body.comment).toMatchObject({ author: "guest", text: "via link" });
+    // never an editor: not as a general role, nor through the tools
+    expect(() => TOOLS.set_general_access.input.parse({ deck_id: id, access: "anyone", role: "editor" })).toThrow();
+    const guest: User = { id: "guest", teams: [], anonymous: true, key };
+    await expect(call(guest, "patch_deck", { deck_id: id, ops: [{ op: "set", slide: "cover", shape_id: 2, value: "x" }] })).rejects.toThrow(/editor access needed/);
+    await expect(call(guest, "list_shares", { deck_id: id })).rejects.toThrow(/owner access needed/);
+    expect((await post("/api/tools/patch_deck", undefined, { deck_id: id, ops: [] })).status).toBe(401);
+    // no pack gate
+    await onPack("sales-only");
+    try {
+      expect((await viaLink()).body.role).toBe("commenter");
+    } finally {
+      await onPack("acme-test");
+    }
+    // a wrong key opens nothing
+    expect((await viaLink(undefined, `${key.slice(0, -1)}x`)).status).toBe(404);
+  });
+
+  it("reset link: the old link stops working, the new one works", async () => {
+    const old = key;
+    const r = await call(alice, "reset_link", { deck_id: id });
+    key = keyOf(r.url);
+    expect(key).not.toBe(old);
+    expect((await viaLink(undefined, old)).status).toBe(404);
+    expect((await viaLink("dave", old)).status).toBe(404);
+    expect((await viaLink()).status).toBe(200);
+    expect(keyOf((await call(alice, "list_shares", { deck_id: id })).url)).toBe(key);
+  });
+
+  it("team grants and the best role; a grant counts only while the user sees the pack", async () => {
+    await call(alice, "set_general_access", { deck_id: id, access: "private" });
     await call(alice, "share_deck", { deck_id: id, principal_type: "team", principal: "ops", role: "editor" });
     expect((await open(carol)).role).toBe("editor");
-    expect((await open(bob)).role).toBe("editor"); // user commenter, team editor
+    expect((await open(bob)).role).toBe("editor"); // user viewer, team editor
     const patched = await call(carol, "patch_deck", { deck_id: id, ops: [{ op: "set", slide: "cover", shape_id: 2, value: "Edited by Carol" }] });
     expect(patched.version).toBe(2);
     expect((await app.decks.versions(id)).at(-1)).toMatchObject({ author: "carol" });
 
-    await expect(open(dave)).rejects.toThrow(/no deck/);
-    await call(alice, "share_deck", { deck_id: id, principal_type: "workspace", role: "viewer" });
-    expect((await open(dave)).role).toBe("viewer");
-    await call(alice, "unshare_deck", { deck_id: id, principal_type: "workspace" });
-    await expect(open(dave)).rejects.toThrow(/no deck/);
+    await onPack("sales-only");
+    try {
+      await expect(open(carol)).rejects.toThrow(/no deck/);
+      expect((await call(carol, "list_decks")).decks).toEqual([]);
+      expect((await open(alice)).role).toBe("owner");
+    } finally {
+      await onPack("acme-test");
+    }
+    expect((await open(carol)).role).toBe("editor");
 
-    // only the owner manages shares
+    // only the owner manages access
     await expect(call(carol, "share_deck", { deck_id: id, principal_type: "user", principal: "dave", role: "viewer" })).rejects.toThrow(/owner access needed/);
     await expect(call(carol, "list_shares", { deck_id: id })).rejects.toThrow(/owner access needed/);
+    await expect(call(carol, "set_general_access", { deck_id: id, access: "anyone" })).rejects.toThrow(/owner access needed/);
+    await expect(call(carol, "reset_link", { deck_id: id })).rejects.toThrow(/owner access needed/);
     await expect(call(alice, "share_deck", { deck_id: id, principal_type: "user", principal: "alice", role: "viewer" })).rejects.toThrow(/owner already/);
-    const s = await call(alice, "list_shares", { deck_id: id });
-    expect(s.shares).toMatchObject([
-      { principal_type: "user", principal: "bob", role: "commenter", granted_by: "alice" },
+    expect(() => TOOLS.share_deck.input.parse({ deck_id: id, principal_type: "workspace", role: "viewer" })).toThrow();
+    expect((await call(alice, "list_shares", { deck_id: id })).people).toMatchObject([
+      { principal_type: "user", principal: "bob", role: "viewer", granted_by: "alice" },
       { principal_type: "team", principal: "ops", role: "editor" },
     ]);
   });
 
   it("lists own and shared decks with the role, over REST and MCP", async () => {
-    const mine = await call(alice, "list_decks");
-    expect(mine.decks).toMatchObject([{ id, role: "owner", owner: "alice" }]);
+    expect((await call(alice, "list_decks")).decks).toMatchObject([{ id, role: "owner", owner: "alice" }]);
     const rest = await get("/api/decks", await idp.token("bob"));
     expect(rest.body.decks).toMatchObject([{ id, role: "editor", owner: "alice", title: "Quarterly review" }]);
     const client = await connect(app, dave);
@@ -96,83 +185,73 @@ describe("deck sharing", { timeout: ENGINE_TIMEOUT }, () => {
     await client.close();
   });
 
-  it("counts a share only while the user sees the deck's pack", async () => {
-    await app.db.query("insert into packs (id, dir, visibility, teams, owner) values ('sales-only', $1, 'team', '[\"sales\"]', 'alice')", [`${REPO}/packs/acme-test`]);
-    await app.db.query("update decks set pack_id = 'sales-only' where id = $1", [id]);
-    try {
-      await expect(open(carol)).rejects.toThrow(/no deck/);
-      expect((await call(carol, "list_decks")).decks).toEqual([]);
-      expect((await open(alice)).role).toBe("owner");
-    } finally {
-      await app.db.query("update decks set pack_id = 'acme-test' where id = $1", [id]);
-    }
-    expect((await open(carol)).role).toBe("editor");
-  });
-
-  it("guest links: stored, role-limited, refused once revoked or expired", async () => {
-    const link = await call(alice, "create_link", { deck_id: id, role: "viewer", label: "board" });
-    expect(link).toMatchObject({ role: "viewer", label: "board", auto: false });
-    const url = new URL(link.url);
-    const t = encodeURIComponent(url.searchParams.get("t") ?? "");
-    const data = await get(`/decks/${id}/data?t=${t}`);
+  it("per-user URL tokens: work for their user, die with their access, never exceed it", async () => {
+    await call(alice, "share_deck", { deck_id: id, principal_type: "user", principal: "dave", role: "viewer" });
+    const daves = tokenOf((await open(dave)).preview_url);
+    const data = await get(`/decks/${id}/data?t=${daves}`);
     expect(data.body).toMatchObject({ deck_id: id, role: "viewer" });
-    const post = (q: string) =>
-      get(`/decks/${id}/comments?t=${q}`, undefined, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ slide_id: "cover", text: "x" }) });
-    expect((await post(t)).status).toBe(403);
-    // the owner's automatic preview link comments
-    const auto = new URL((await open(alice)).preview_url).searchParams.get("t") ?? "";
-    expect((await post(encodeURIComponent(auto))).status).toBe(200);
-    expect(new URL((await open(alice)).preview_url).searchParams.get("t")).toBe(auto); // reused: a stable URL
+    expect(new URL(data.body.slides[0].image_url).searchParams.get("t")).toBe(decodeURIComponent(daves)); // passed on, not extended
+    expect((await post(`/decks/${id}/comments?t=${daves}`, undefined, { slide_id: "cover", text: "x" })).status).toBe(403);
+    expect((await get(`/decks/${id}/data?t=${daves}x`)).status).toBe(401);
+    // the token is not the share link: it is never what list_shares gives out
+    expect((await call(alice, "list_shares", { deck_id: id })).url).not.toContain("t=");
 
-    expect((await call(alice, "list_shares", { deck_id: id })).links.map((l: Json) => l.id)).toContain(link.id);
-    await call(alice, "revoke_link", { deck_id: id, link_id: link.id });
-    expect((await get(`/decks/${id}/data?t=${t}`)).status).toBe(401);
-    expect((await call(alice, "list_shares", { deck_id: id })).links.map((l: Json) => l.id)).not.toContain(link.id);
+    const carols = tokenOf((await open(carol)).preview_url);
+    expect((await get(`/decks/${id}/data?t=${carols}`)).body.role).toBe("editor");
+    expect((await post(`/decks/${id}/comments?t=${carols}`, undefined, { slide_id: "cover", text: "ok" })).body.comment).toMatchObject({ author: "carol" });
 
-    const short = await call(alice, "create_link", { deck_id: id, role: "commenter" });
-    const st = encodeURIComponent(new URL(short.url).searchParams.get("t") ?? "");
-    expect((await get(`/decks/${id}/data?t=${st}`)).status).toBe(200);
-    await app.db.query("update deck_links set expires_at = now() - interval '1 minute' where id = $1", [short.id]);
-    expect((await get(`/decks/${id}/data?t=${st}`)).status).toBe(401);
-
-    // a link is worth no more than its minter's role: carol's (editor) dies with her share
-    const carols = new URL((await open(carol)).preview_url).searchParams.get("t") ?? "";
-    expect((await get(`/decks/${id}/data?t=${encodeURIComponent(carols)}`)).status).toBe(200);
+    await call(alice, "unshare_deck", { deck_id: id, principal_type: "user", principal: "dave" });
+    expect((await get(`/decks/${id}/data?t=${daves}`)).status).toBe(404);
     await call(alice, "unshare_deck", { deck_id: id, principal_type: "team", principal: "ops" });
-    expect((await get(`/decks/${id}/data?t=${encodeURIComponent(carols)}`)).status).toBe(404);
+    expect((await get(`/decks/${id}/data?t=${carols}`)).status).toBe(404);
+    await call(alice, "share_deck", { deck_id: id, principal_type: "team", principal: "ops", role: "editor" });
   });
 
-  it("admins cannot read a deck, but transfer it and revoke its links", async () => {
+  it("admins cannot read a deck, but see who has access, make it private, reset its link and transfer it", async () => {
+    const admin = await idp.token("root", ["/calque-admins"]);
     await expect(open(root)).rejects.toThrow(/no deck/);
-    await expect(call(root, "list_shares", { deck_id: id })).rejects.toThrow(/no deck/);
     await expect(call(root, "export_pptx", { deck_id: id })).rejects.toThrow(/no deck/);
+    await expect(call(root, "add_comment", { deck_id: id, slide_id: "cover", text: "x" })).rejects.toThrow(/no deck/);
+    expect((await get(`/decks/${id}/data`, admin)).status).toBe(404);
     await expect(call(bob, "transfer_deck", { deck_id: id, to: "bob" })).rejects.toThrow(/owner access needed/);
 
-    // admin routes: links without their URL; refused to non-admins
-    expect((await get(`/api/admin/decks/${id}/links`, await idp.token("bob"))).status).toBe(403);
-    const links = (await get(`/api/admin/decks/${id}/links`, await idp.token("alice"))).body.links as Json[];
-    expect(links.length).toBeGreaterThan(0);
-    expect(links[0]).not.toHaveProperty("url");
-    expect(links[0]).not.toHaveProperty("teams");
-    const link = await call(alice, "create_link", { deck_id: id });
-    await call(root, "revoke_link", { deck_id: id, link_id: link.id });
-    expect((await get(`/decks/${id}/data?t=${encodeURIComponent(new URL(link.url).searchParams.get("t") ?? "")}`)).status).toBe(401);
+    // who has access, never the link
+    const seen = await call(root, "list_shares", { deck_id: id });
+    expect(seen).toMatchObject({ owner: "alice", general: { access: "private" } });
+    expect(seen.people.length).toBeGreaterThan(0);
+    expect(seen).not.toHaveProperty("url");
+    expect(JSON.stringify(seen)).not.toContain(key);
+    expect((await get(`/api/admin/decks/${id}/access`, await idp.token("bob"))).status).toBe(403);
+    const rest = await get(`/api/admin/decks/${id}/access`, admin);
+    expect(rest.body).toMatchObject({ owner: "alice", general: { access: "private" } });
+    expect(JSON.stringify(rest.body)).not.toContain(key);
 
+    // incident response: make it private, reset the link
+    await call(alice, "set_general_access", { deck_id: id, access: "anyone", role: "commenter" });
+    expect((await viaLink()).status).toBe(200);
+    await expect(call(root, "set_general_access", { deck_id: id, access: "workspace" })).rejects.toThrow(/only make it private/);
+    expect((await post(`/api/admin/decks/${id}/private`, admin)).body).toMatchObject({ access: "private" });
+    expect((await viaLink()).status).toBe(404);
+    await call(alice, "set_general_access", { deck_id: id, access: "anyone", role: "viewer" });
+    const reset = await call(root, "reset_link", { deck_id: id });
+    expect(reset).not.toHaveProperty("url");
+    expect((await viaLink()).status).toBe(404);
+    key = keyOf((await call(alice, "list_shares", { deck_id: id })).url);
+    expect((await viaLink()).status).toBe(200);
+    expect((await post(`/api/admin/decks/${id}/reset-link`, admin)).body).toMatchObject({ reset: true });
+    expect((await viaLink()).status).toBe(404);
+
+    // transfer: the former owner keeps editor
     expect(await call(root, "transfer_deck", { deck_id: id, to: "dave" })).toMatchObject({ owner: "dave", previous_owner: "alice" });
     expect((await open(dave)).role).toBe("owner");
     expect((await open(alice)).role).toBe("editor");
     await expect(open(root)).rejects.toThrow(/no deck/);
-    const transferred = await get(`/api/admin/decks/${id}/transfer`, await idp.token("alice"), {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ to: "erin" }),
-    });
-    expect(transferred.body).toMatchObject({ owner: "erin", previous_owner: "dave" });
+    expect((await post(`/api/admin/decks/${id}/transfer`, admin, { to: "erin" })).body).toMatchObject({ owner: "erin", previous_owner: "dave" });
 
     const { rows } = await app.db.query<{ actor: string; action: string }>("select actor, action from deck_audit where deck_id = $1 order by id", [id]);
-    expect(rows.map((r) => r.action)).toEqual(
-      expect.arrayContaining(["share", "unshare", "link", "revoke_link", "transfer"]),
-    );
-    expect(rows.filter((r) => r.action === "transfer").map((r) => r.actor)).toEqual(["root", "alice"]);
+    expect(rows.map((r) => r.action)).toEqual(expect.arrayContaining(["share", "unshare", "access", "reset_link", "transfer"]));
+    expect(rows.filter((r) => r.action === "transfer").map((r) => r.actor)).toEqual(["root", "root"]);
+    expect(rows.filter((r) => r.action === "reset_link").map((r) => r.actor)).toEqual(["alice", "root", "root"]);
+    expect(rows.filter((r) => r.action === "access" && r.actor === "root")).toHaveLength(1);
   });
 });

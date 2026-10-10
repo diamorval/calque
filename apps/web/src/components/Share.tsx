@@ -1,30 +1,30 @@
-// The editor's Share dialog (deck owner only): roles given to people, teams or the workspace
-// (share_deck / unshare_deck), and guest links that open the deck without an account
-// (create_link / revoke_link). People see a shared deck only if they see its brand pack.
+// The editor's Share dialog (deck owner only), artifact style: the people and teams with access
+// (share_deck / unshare_deck), and the deck's one share link with its general access, who else it
+// opens for (set_general_access), copied as is or reset (reset_link). People and the workspace
+// see a shared deck only if they see its brand pack.
 import { Alert, AlertDescription } from "diametral-ds/alert";
 import { Button } from "diametral-ds/button";
 import { DialogFooter } from "diametral-ds/dialog";
 import { Input } from "diametral-ds/input";
 import { Table, TableBody, TableCell, TableRow } from "diametral-ds/table";
 import { Tag } from "diametral-ds/tag";
-import { Copy, Globe, Link2, Trash2, User, Users } from "lucide-react";
+import { Building2, Copy, Globe, Lock, RotateCcw, Trash2, User, UserPlus, Users } from "lucide-react";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { tool } from "../api.ts";
-import { ago, Dialog, Field, Spinner } from "../ui.tsx";
+import { Dialog, Field, Spinner } from "../ui.tsx";
 
-type Type = "user" | "team" | "workspace";
-interface Share {
+type Type = "user" | "team";
+type Access = "private" | "workspace" | "anyone";
+type GeneralRole = "viewer" | "commenter";
+interface Person {
   principal_type: Type;
   principal: string;
   role: string;
 }
-interface Link {
-  id: string;
-  role: string;
-  label: string;
-  auto: boolean;
-  created_by: string;
-  expires_at: string;
+interface Sharing {
+  owner: string;
+  people: Person[];
+  general: { access: Access; role: GeneralRole };
   url: string;
 }
 
@@ -33,91 +33,86 @@ const ROLES = [
   ["commenter", "Commenter"],
   ["editor", "Editor"],
 ] as const;
-const ICON = { user: User, team: Users, workspace: Globe };
-const who = (s: Share) => (s.principal_type === "workspace" ? "Everyone in the workspace" : s.principal);
+const ACCESS = { private: [Lock, "Private"], workspace: [Building2, "Workspace"], anyone: [Globe, "Anyone with the link"] } as const;
+const CAN = { viewer: "view", commenter: "comment" };
+
+/** Who the link opens for, in one line. */
+function hint({ access, role }: Sharing["general"]): string {
+  if (access === "private") return "Only you and the people with access can open the link.";
+  if (access === "workspace") return `Anyone signed in to the workspace who has the link and sees the deck's brand pack can ${CAN[role]}.`;
+  return `Anyone who has the link can ${CAN[role]}, no sign-in needed.`;
+}
 
 export function ShareDeck({ deck_id, onClose }: { deck_id: string; onClose: () => void }) {
-  const [data, setData] = useState<{ shares: Share[]; links: Link[] } | null>(null);
+  const [data, setData] = useState<Sharing | null>(null);
+  const [adding, setAdding] = useState(false);
   const [type, setType] = useState<Type>("user");
   const [principal, setPrincipal] = useState("");
   const [role, setRole] = useState("viewer");
-  const [linkRole, setLinkRole] = useState("viewer");
-  const [copied, setCopied] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const reload = useCallback(async () => setData(await tool<{ shares: Share[]; links: Link[] }>("list_shares", { deck_id })), [deck_id]);
+  const reload = useCallback(async () => setData(await tool<Sharing>("list_shares", { deck_id })), [deck_id]);
   useEffect(() => {
     reload().catch((e: Error) => setError(e.message));
   }, [reload]);
-  const act = async (fn: () => Promise<unknown>) => {
+  const act = async (fn: () => Promise<unknown>, done?: string) => {
     setError(null);
+    setNote(null);
     try {
       await fn();
       await reload();
+      if (done) setNote(done);
     } catch (e) {
       setError((e as Error).message);
     }
   };
-  const target = (s: Share) => ({ deck_id, principal_type: s.principal_type, ...(s.principal_type === "workspace" ? {} : { principal: s.principal }) });
+  const target = (p: Person) => ({ deck_id, principal_type: p.principal_type, principal: p.principal });
+  const general = (g: Partial<Sharing["general"]>) => data && act(() => tool("set_general_access", { deck_id, ...data.general, ...g }));
 
   function add(e: FormEvent) {
     e.preventDefault();
     void act(async () => {
-      await tool("share_deck", { deck_id, principal_type: type, ...(type === "workspace" ? {} : { principal: principal.trim() }), role });
+      await tool("share_deck", { deck_id, principal_type: type, principal: principal.trim(), role });
       setPrincipal("");
+      setAdding(false);
     });
   }
 
+  const AccessIcon = ACCESS[data?.general.access ?? "private"][0];
   return (
     <Dialog title="Share" wide onClose={onClose}>
       <div className="cq-dialog-body cq-share">
-        <form onSubmit={add} className="cq-share-add">
-          <Field label="Share with" htmlFor="s-type">
-            <select id="s-type" className="cq-select" value={type} onChange={(e) => setType(e.target.value as Type)}>
-              <option value="user">A person</option>
-              <option value="team">A team</option>
-              <option value="workspace">Everyone in the workspace</option>
-            </select>
-          </Field>
-          {type !== "workspace" && (
-            <Field label={type === "user" ? "User id" : "Team"} htmlFor="s-principal">
-              <Input id="s-principal" required value={principal} placeholder={type === "user" ? "jdoe" : "sales"} onChange={(e) => setPrincipal(e.target.value)} />
-            </Field>
-          )}
-          <Field label="Role" htmlFor="s-role">
-            <select id="s-role" className="cq-select" value={role} onChange={(e) => setRole(e.target.value)}>
-              {ROLES.map(([v, l]) => (
-                <option key={v} value={v}>
-                  {l}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Button type="submit">Share</Button>
-        </form>
-        <p className="cq-hint">Viewers read, export and present; commenters also comment; editors change the deck. Only people who see its brand pack see it.</p>
-
-        {!data && !error && <Spinner label="Loading shares" />}
+        {!data && !error && <Spinner label="Loading access" />}
         {data && (
           <>
-            <section aria-label="Shared with">
-              <h3>Shared with</h3>
-              {data.shares.length === 0 && <p className="cq-hint">Only you, so far.</p>}
+            <section aria-label="People with access">
+              <h3>People with access</h3>
               <Table>
                 <TableBody>
-                  {data.shares.map((s) => {
-                    const Icon = ICON[s.principal_type];
+                  <TableRow>
+                    <TableCell>
+                      <User size={14} /> {data.owner} (you)
+                    </TableCell>
+                    <TableCell>
+                      <Tag>Owner</Tag>
+                    </TableCell>
+                    <TableCell />
+                  </TableRow>
+                  {data.people.map((p) => {
+                    const Icon = p.principal_type === "team" ? Users : User;
                     return (
-                      <TableRow key={`${s.principal_type}:${s.principal}`}>
+                      <TableRow key={`${p.principal_type}:${p.principal}`}>
                         <TableCell>
-                          <Icon size={14} /> {who(s)}
+                          <Icon size={14} /> {p.principal}
+                          {p.principal_type === "team" && <span className="cq-hint"> · team</span>}
                         </TableCell>
                         <TableCell>
                           <select
                             className="cq-select"
-                            aria-label={`Role of ${who(s)}`}
-                            value={s.role}
-                            onChange={(e) => void act(() => tool("share_deck", { ...target(s), role: e.target.value }))}
+                            aria-label={`Role of ${p.principal}`}
+                            value={p.role}
+                            onChange={(e) => void act(() => tool("share_deck", { ...target(p), role: e.target.value }))}
                           >
                             {ROLES.map(([v, l]) => (
                               <option key={v} value={v}>
@@ -126,8 +121,8 @@ export function ShareDeck({ deck_id, onClose }: { deck_id: string; onClose: () =
                             ))}
                           </select>
                         </TableCell>
-                        <TableCell>
-                          <Button size="sm" variant="ghost" aria-label={`Remove ${who(s)}`} onClick={() => void act(() => tool("unshare_deck", target(s)))}>
+                        <TableCell className="cq-row-actions">
+                          <Button size="sm" variant="ghost" aria-label={`Remove ${p.principal}`} onClick={() => void act(() => tool("unshare_deck", target(p)))}>
                             <Trash2 />
                           </Button>
                         </TableCell>
@@ -136,57 +131,89 @@ export function ShareDeck({ deck_id, onClose }: { deck_id: string; onClose: () =
                   })}
                 </TableBody>
               </Table>
+              {adding ? (
+                <form onSubmit={add} className="cq-share-add">
+                  <Field label="Add" htmlFor="s-type">
+                    <select id="s-type" className="cq-select" value={type} onChange={(e) => setType(e.target.value as Type)}>
+                      <option value="user">A person</option>
+                      <option value="team">A team</option>
+                    </select>
+                  </Field>
+                  <Field label={type === "user" ? "User id" : "Team"} htmlFor="s-principal">
+                    <Input id="s-principal" required autoFocus value={principal} placeholder={type === "user" ? "jdoe" : "sales"} onChange={(e) => setPrincipal(e.target.value)} />
+                  </Field>
+                  <Field label="Role" htmlFor="s-role">
+                    <select id="s-role" className="cq-select" value={role} onChange={(e) => setRole(e.target.value)}>
+                      {ROLES.map(([v, l]) => (
+                        <option key={v} value={v}>
+                          {l}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Button type="submit">Add</Button>
+                  <Button type="button" variant="ghost" onClick={() => setAdding(false)}>
+                    Cancel
+                  </Button>
+                </form>
+              ) : (
+                <Button variant="ghost" onClick={() => setAdding(true)}>
+                  <UserPlus /> Add people or teams
+                </Button>
+              )}
             </section>
 
-            <section aria-label="Guest links">
-              <h3>Guest links</h3>
-              <p className="cq-hint">Whoever holds a link opens this deck without an account, until it expires or you revoke it.</p>
-              <Table>
-                <TableBody>
-                  {data.links.map((l) => (
-                    <TableRow key={l.id}>
-                      <TableCell>
-                        <Link2 size={14} /> {l.label}
-                        <div className="cq-hint">
-                          {l.auto ? `${l.created_by}'s preview link · ` : ""}expires {ago(l.expires_at)}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Tag>{l.role === "viewer" ? "Viewer" : "Commenter"}</Tag>
-                      </TableCell>
-                      <TableCell className="cq-row-actions">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          aria-label={`Copy ${l.label}`}
-                          onClick={async () => {
-                            await navigator.clipboard?.writeText(l.url).catch(() => {});
-                            setCopied(l.id);
-                          }}
-                        >
-                          <Copy /> {copied === l.id ? "Copied" : "Copy"}
-                        </Button>
-                        <Button size="sm" variant="ghost" aria-label={`Revoke ${l.label}`} onClick={() => void act(() => tool("revoke_link", { deck_id, link_id: l.id }))}>
-                          <Trash2 /> Revoke
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+            <section aria-label="General access">
+              <h3>General access</h3>
               <div className="cq-share-add">
-                <Field label="Link role" htmlFor="s-link-role">
-                  <select id="s-link-role" className="cq-select" value={linkRole} onChange={(e) => setLinkRole(e.target.value)}>
-                    <option value="viewer">Viewer</option>
-                    <option value="commenter">Commenter</option>
+                <select
+                  className="cq-select"
+                  aria-label="General access"
+                  value={data.general.access}
+                  onChange={(e) => void general({ access: e.target.value as Access })}
+                >
+                  {Object.entries(ACCESS).map(([v, [, l]]) => (
+                    <option key={v} value={v}>
+                      {l}
+                    </option>
+                  ))}
+                </select>
+                {data.general.access !== "private" && (
+                  <select
+                    className="cq-select"
+                    aria-label="Link role"
+                    value={data.general.role}
+                    onChange={(e) => void general({ role: e.target.value as GeneralRole })}
+                  >
+                    <option value="viewer">Can view</option>
+                    <option value="commenter">Can comment</option>
                   </select>
-                </Field>
-                <Button variant="outline" onClick={() => void act(() => tool("create_link", { deck_id, role: linkRole }))}>
-                  <Link2 /> Create link
+                )}
+              </div>
+              <p className="cq-hint">
+                <AccessIcon size={14} /> {hint(data.general)}
+              </p>
+              <div className="cq-row-actions">
+                <Button
+                  variant="outline"
+                  onClick={async () => {
+                    await navigator.clipboard?.writeText(data.url).catch(() => {});
+                    setNote("Link copied.");
+                  }}
+                >
+                  <Copy /> Copy link
+                </Button>
+                <Button variant="ghost" onClick={() => void act(() => tool("reset_link", { deck_id }), "Link reset: copies of the old link no longer open the deck.")}>
+                  <RotateCcw /> Reset link
                 </Button>
               </div>
             </section>
           </>
+        )}
+        {note && (
+          <p className="cq-hint" role="status">
+            {note}
+          </p>
         )}
         {error && (
           <Alert variant="destructive">

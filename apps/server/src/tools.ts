@@ -9,8 +9,8 @@ import { REPO } from "./engine.ts";
 import { getFile, MAX_UPLOAD, uploadTicket } from "./files.ts";
 import type { Models } from "./models.ts";
 import { importPack, listPacks, type User } from "./packs.ts";
-import { linkToken, type Link } from "./preview.ts";
-import { createLink, previewLink, revokeLink, share, shares, transfer, unshare } from "./shares.ts";
+import { userToken } from "./preview.ts";
+import { resetLink, setGeneralAccess, share, shares, transfer, unshare } from "./shares.ts";
 
 export interface App {
   db: Db;
@@ -68,22 +68,24 @@ async function materialize(app: App, user: User, f: z.infer<typeof File>): Promi
   return path;
 }
 
-/** The deck's preview link for `user`: their automatic guest link (a guest passes its own on, never extends it). */
-const token = async (app: App, user: User, id: string) =>
-  encodeURIComponent(user.guest ? user.guest.token : linkToken(app.secret, await previewLink(app.db, user, id)));
-const links = async (app: App, user: User, id: string) => ({ preview_url: `${app.publicUrl}/decks/${id}?t=${await token(app, user, id)}` });
-const linkUrl = (app: App, l: Link) => `${app.publicUrl}/decks/${l.deck_id}?t=${encodeURIComponent(linkToken(app.secret, l))}`;
+/** The query that lets a tool result's URLs open the deck with no browser session: the share link
+key the caller came with, else their per-user token (one they came with is passed on, never extended). */
+const token = (app: App, user: User, id: string) =>
+  user.key ? `k=${encodeURIComponent(user.key)}` : `t=${encodeURIComponent(user.token ?? userToken(app.secret, user, id))}`;
+const links = (app: App, user: User, id: string) => ({ preview_url: `${app.publicUrl}/decks/${id}?${token(app, user, id)}` });
+/** The deck's share link, the one people copy. */
+const shareUrl = (app: App, id: string, key: string) => `${app.publicUrl}/decks/${id}?k=${encodeURIComponent(key)}`;
 
 async function openDeck(app: App, user: User, id: string, v?: number, render = true) {
   const deck = await app.decks.deck(user, id, "viewer");
   const at = v ?? deck.head;
-  const t = await token(app, user, id);
+  const q = token(app, user, id);
   const spec = await app.decks.spec(id, at);
   const slides = render
     ? (await app.decks.render(user, id, at)).slides.map(({ id: sid, number, width_px, height_px, shapes }) => ({
         id: sid,
         number,
-        image_url: `${app.publicUrl}/decks/${id}/slides/${number}.png?v=${at}&t=${t}`,
+        image_url: `${app.publicUrl}/decks/${id}/slides/${number}.png?v=${at}&${q}`,
         width_px,
         height_px,
         shapes,
@@ -101,7 +103,7 @@ async function openDeck(app: App, user: User, id: string, v?: number, render = t
     spec,
     slides,
     open_comments: open,
-    ...(await links(app, user, id)),
+    ...links(app, user, id),
   };
 }
 
@@ -133,7 +135,7 @@ export const TOOLS = {
     ui: true,
     run: async (app, user, a) => {
       const r = await app.decks.create(user, a.deck, a.note ?? "create");
-      return { ...r, ...(await links(app, user, r.deck_id)) };
+      return { ...r, ...links(app, user, r.deck_id) };
     },
   }),
 
@@ -150,7 +152,7 @@ export const TOOLS = {
       const at = a.at ?? (last?.message_type === "closing" ? spec.slides.length - 1 : spec.slides.length);
       const ops = a.slides.map((slide, i) => ({ op: "insert_slide" as const, at: at + i, slide }));
       const r = await app.decks.patch(user, a.deck_id, ops, `add ${a.slides.length} slide(s)`);
-      return { ...r, ...(await links(app, user, a.deck_id)) };
+      return { ...r, ...links(app, user, a.deck_id) };
     },
   }),
 
@@ -171,7 +173,7 @@ export const TOOLS = {
     ui: true,
     run: async (app, user, a) => {
       const r = await app.decks.importPptx(user, await materialize(app, user, a.file), a.pack_id, a.language);
-      return { ...r, ...(await links(app, user, r.deck_id)) };
+      return { ...r, ...links(app, user, r.deck_id) };
     },
   }),
 
@@ -190,7 +192,7 @@ export const TOOLS = {
     run: async (app, user, a) => {
       const r = await app.decks.patch(user, a.deck_id, a.ops, a.note ?? "patch");
       await app.decks.resolve(user, a.deck_id, a.resolves ?? []);
-      return { ...r, resolved: a.resolves ?? [], ...(await links(app, user, a.deck_id)) };
+      return { ...r, resolved: a.resolves ?? [], ...links(app, user, a.deck_id) };
     },
   }),
 
@@ -200,7 +202,7 @@ export const TOOLS = {
     input: z.object({ deck_id: deckId, version }),
     ui: true,
     role: "editor",
-    run: async (app, user, a) => ({ ...(await app.decks.restore(user, a.deck_id, a.version)), ...(await links(app, user, a.deck_id)) }),
+    run: async (app, user, a) => ({ ...(await app.decks.restore(user, a.deck_id, a.version)), ...links(app, user, a.deck_id) }),
   }),
 
   add_comment: tool({
@@ -218,7 +220,7 @@ export const TOOLS = {
     input: z.object({ deck_id: deckId, status: z.enum(["open", "resolved"]).optional().default("open") }),
     readOnly: true,
     role: "viewer",
-    run: async (app, user, a) => ({ comments: await app.decks.comments(user, a.deck_id, a.status), ...(await links(app, user, a.deck_id)) }),
+    run: async (app, user, a) => ({ comments: await app.decks.comments(user, a.deck_id, a.status), ...links(app, user, a.deck_id) }),
   }),
 
   lint_deck: tool({
@@ -266,7 +268,7 @@ export const TOOLS = {
           : undefined,
         slides: opened.slides?.map((s) => ({ id: s.id, number: s.number, image_url: s.image_url })),
         visual_checklist: await checklist(),
-        ...(await links(app, user, a.deck_id)),
+        ...links(app, user, a.deck_id),
       };
     },
   }),
@@ -281,7 +283,7 @@ export const TOOLS = {
       const r = await app.decks.exportPath(user, a.deck_id, a.version);
       return {
         version: r.version,
-        download_url: `${app.publicUrl}/decks/${a.deck_id}/deck.pptx?v=${r.version}&t=${await token(app, user, a.deck_id)}`,
+        download_url: `${app.publicUrl}/decks/${a.deck_id}/deck.pptx?v=${r.version}&${token(app, user, a.deck_id)}`,
         ...(user.local ? { path: r.path } : {}),
       };
     },
@@ -298,11 +300,11 @@ export const TOOLS = {
   share_deck: tool({
     title: "Share deck",
     description:
-      "Owner only. Give a user (their id), a team, or the whole workspace a role on the deck: viewer (read, export, present), commenter (+ comment) or editor (+ change it). Sharing again changes the role. People see the deck only if they see its brand pack.",
+      "Owner only. Give a user (their id) or a team a role on the deck: viewer (read, export, present), commenter (+ comment) or editor (+ change it). Sharing again changes the role. People see the deck only if they see its brand pack.",
     input: z.object({
       deck_id: deckId,
-      principal_type: z.enum(["user", "team", "workspace"]),
-      principal: z.string().optional().describe("The user id or team; none for the workspace."),
+      principal_type: z.enum(["user", "team"]),
+      principal: z.string().min(1).describe("The user id or team."),
       role: z.enum(["viewer", "commenter", "editor"]),
     }),
     role: "owner",
@@ -312,44 +314,43 @@ export const TOOLS = {
   unshare_deck: tool({
     title: "Unshare deck",
     description: "Owner only. Remove a share given with share_deck.",
-    input: z.object({ deck_id: deckId, principal_type: z.enum(["user", "team", "workspace"]), principal: z.string().optional() }),
+    input: z.object({ deck_id: deckId, principal_type: z.enum(["user", "team"]), principal: z.string().min(1) }),
     role: "owner",
     run: (app, user, a) => unshare(app.decks, user, a.deck_id, a.principal_type, a.principal),
   }),
 
   list_shares: tool({
     title: "List shares",
-    description: "Owner only. Who the deck is shared with (users, teams, workspace, with their role) and its live guest links with their URL.",
+    description:
+      "Who has access to the deck: its owner, the people and teams it is shared with (with their role), its general access, and its share link `url` (owner only). The owner, or an admin (who never gets the link).",
     input: z.object({ deck_id: deckId }),
     readOnly: true,
-    role: "owner",
     run: async (app, user, a) => {
-      const r = await shares(app.decks, user, a.deck_id);
-      return { ...r, links: r.links.map((l) => ({ ...l, url: linkUrl(app, l) })) };
+      const { link_key, ...r } = await shares(app.decks, user, a.deck_id);
+      return { ...r, ...(link_key ? { url: shareUrl(app, a.deck_id, link_key) } : {}) };
     },
   }),
 
-  create_link: tool({
-    title: "Create guest link",
-    description: "Owner only. A link that lets whoever holds it view (or comment on) this one deck without an account, until it expires or is revoked.",
+  set_general_access: tool({
+    title: "Set general access",
+    description:
+      "Owner only (an admin may only set private). Who the deck's share link opens for besides the people with access: private (nobody else), workspace (anyone signed in who sees its brand pack) or anyone (anybody with the link, no sign-in), with `role` viewer or commenter.",
     input: z.object({
       deck_id: deckId,
+      access: z.enum(["private", "workspace", "anyone"]),
       role: z.enum(["viewer", "commenter"]).default("viewer"),
-      expires_in_days: z.number().int().min(1).max(90).default(7),
-      label: z.string().max(100).optional().describe("Who it is for; comments through it are signed `guest (<label>)`."),
     }),
-    role: "owner",
-    run: async (app, user, a) => {
-      const l = await createLink(app.decks, user, a.deck_id, a.role, a.expires_in_days, a.label);
-      return { ...l, url: linkUrl(app, l) };
-    },
+    run: (app, user, a) => setGeneralAccess(app.decks, user, a.deck_id, a.access, a.role),
   }),
 
-  revoke_link: tool({
-    title: "Revoke guest link",
-    description: "The deck's owner, or an admin: the link (an id from list_shares) opens nothing from now on.",
-    input: z.object({ deck_id: deckId, link_id: z.string() }),
-    run: (app, user, a) => revokeLink(app.decks, user, a.deck_id, a.link_id),
+  reset_link: tool({
+    title: "Reset share link",
+    description: "The deck's owner, or an admin: a new share link; every copy of the old one stops working. Returns the new `url` to the owner.",
+    input: z.object({ deck_id: deckId }),
+    run: async (app, user, a) => {
+      const r = await resetLink(app.decks, user, a.deck_id);
+      return { deck_id: a.deck_id, ...(r.link_key ? { url: shareUrl(app, a.deck_id, r.link_key) } : {}) };
+    },
   }),
 
   transfer_deck: tool({

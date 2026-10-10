@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
@@ -6,8 +5,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { REPO } from "../src/engine.ts";
 import { createHttp } from "../src/http.ts";
 import { access } from "../src/decks.ts";
-import { linkToken, PREVIEW_TTL_S, previewGuest } from "../src/preview.ts";
-import { previewLink } from "../src/shares.ts";
+import { TOKEN_TTL_S, tokenUser, userToken } from "../src/preview.ts";
 import { sessions } from "../src/session.ts";
 import type { App } from "../src/tools.ts";
 import { fakeModel, fakeOidc, lastResult, toolsCalled } from "./fakes.ts";
@@ -166,7 +164,7 @@ describe("web app routes", { timeout: ENGINE_TIMEOUT }, () => {
     expect(pack).toMatchObject({ name: "NewCo Renamed", visibility: "workspace" });
   });
 
-  it("keeps decks to their owner; the signed preview link reads and comments on one deck", async () => {
+  it("keeps decks to their owner; the per-user preview token reads and comments on one deck", async () => {
     const bob = { bearer: await idp.token("bob") };
     const a = (await json("/api/tools/create_deck", { deck: acmeDeck() })).body;
     const b = (await json("/api/tools/create_deck", { deck: acmeDeck() })).body;
@@ -191,7 +189,7 @@ describe("web app routes", { timeout: ENGINE_TIMEOUT }, () => {
     expect((await req(`/decks/${id}/deck.pptx?t=${t}`)).status).toBe(200);
     const data = (await json(`/decks/${id}/data?t=${t}`, undefined, {})).body;
     expect(data.deck_id).toBe(id);
-    // the PNG URLs carry the same link, not a fresh (longer) one
+    // the PNG URLs carry the same token, not a fresh (longer) one
     expect(new URL(data.slides[0].image_url).searchParams.get("t")).toBe(t);
     expect((await req(new URL(data.slides[0].image_url).pathname + new URL(data.slides[0].image_url).search)).headers.get("content-type")).toBe("image/png");
     const posted = await req(`/decks/${id}/comments?t=${t}`, {
@@ -201,7 +199,7 @@ describe("web app routes", { timeout: ENGINE_TIMEOUT }, () => {
     });
     expect(posted.status).toBe(200);
     const comments = (await json("/api/tools/list_comments", { deck_id: id })).body.comments;
-    expect(comments).toMatchObject([{ text: "Looks good", author: "guest (link from Alice Martin)" }]);
+    expect(comments).toMatchObject([{ text: "Looks good", author: "alice" }]);
 
     // tampered, expired, or for another deck: refused
     const [body, sig] = t.split(".");
@@ -209,21 +207,18 @@ describe("web app routes", { timeout: ENGINE_TIMEOUT }, () => {
     expect((await req(`/decks/${b.deck_id}/deck.pptx?t=${forged}.${sig}`)).status).toBe(401);
     expect((await req(`/decks/${id}/deck.pptx?t=${t}x`)).status).toBe(401);
     expect((await req(`/decks/${b.deck_id}/deck.pptx?t=${t}`)).status).toBe(401);
-    const unstored = { id: randomUUID(), deck_id: id, role: "commenter" as const, label: "x", created_by: "alice", teams: ["sales"], auto: true };
-    const old = linkToken(app.secret, { ...unstored, expires_at: new Date(Date.now() - 1000) });
+    const old = userToken(app.secret, { id: "alice", teams: ["sales"] }, id, Date.now() - TOKEN_TTL_S * 1000 - 7200_000);
     expect((await req(`/decks/${id}/deck.pptx?t=${old}`)).status).toBe(401);
-    // signed but never stored (or since revoked): refused
-    const ghost = linkToken(app.secret, { ...unstored, expires_at: new Date(Date.now() + PREVIEW_TTL_S * 1000) });
-    expect((await req(`/decks/${id}/deck.pptx?t=${ghost}`)).status).toBe(401);
-    // a link minted by someone else for a deck they do not own opens nothing
-    const bobs = linkToken(app.secret, await previewLink(app.db, { id: "bob", teams: [] }, id));
+    // a token for someone with no access to the deck opens nothing
+    const bobs = userToken(app.secret, { id: "bob", teams: [] }, id);
     expect((await req(`/decks/${id}/deck.pptx?t=${bobs}`)).status).toBe(404);
 
-    // the link's role: comment on its deck, never edit it, nothing on another deck
-    const guest = previewGuest(app.secret, t, id) ?? { id: "", teams: [] };
-    expect(guest?.guest?.role).toBe("commenter");
-    await expect(app.decks.patch(guest, id, [{ op: "set", slide: "cover", shape_id: 2, value: "x" }], "x")).rejects.toThrow(/editor access/);
-    expect(await access(app.db, guest, { id: b.deck_id, owner: "alice", pack_id: "acme-test" })).toBeNull();
+    // the token stands for its user on its deck only
+    const user = tokenUser(app.secret, t, id) ?? { id: "", teams: [] };
+    expect(user).toMatchObject({ id: "alice", teams: ["sales", "calque-admins"] });
+    expect(tokenUser(app.secret, t, b.deck_id)).toBeUndefined();
+    const other = { id: b.deck_id, owner: "bob", pack_id: "acme-test", general_access: "private" as const, general_role: "viewer" as const, link_key: "k" };
+    expect(await access(app.db, user, other)).toBeNull();
   });
 
   it("streams the agent's steps as NDJSON", async () => {
