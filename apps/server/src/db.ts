@@ -53,6 +53,10 @@ create table if not exists models (
   updated_by text not null,
   updated_at timestamptz not null default now()
 );
+-- label: tells two configs of one model apart; options: provider settings (JSON); headers: sealed JSON
+alter table models add column if not exists label text;
+alter table models add column if not exists options text;
+alter table models add column if not exists headers text;
 create unique index if not exists one_default_model on models (is_default) where is_default;`;
 
 /** Postgres when `url` is a postgres:// URL, else embedded PGlite (a data dir, or in memory). */

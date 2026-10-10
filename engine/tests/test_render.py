@@ -1,11 +1,13 @@
 """PPTX -> PNG per slide + shape map, incremental, for every pack."""
 
+import re
 import shutil
 from pathlib import Path
 
 import pytest
 from PIL import Image
 
+from calque_engine.api import call
 from calque_engine.build import build
 from calque_engine.pack import load_pack
 from calque_engine.render import font_swaps, render
@@ -86,3 +88,15 @@ def test_missing_pack_fonts_fall_back(neutral_pack, tmp_path):
     deck = tmp_path / "deck.pptx"
     build(_deck(pack, "A title"), pack, deck)
     assert len(render(deck, tmp_path / "out", pack).pngs) == 3
+
+
+def test_export_pdf_one_page_per_slide(neutral_pack, tmp_path):
+    pack = load_pack(neutral_pack)
+    deck = tmp_path / "deck.pptx"
+    build(_deck(pack, "A title"), pack, deck)
+    out = tmp_path / "x" / "deck.pdf"
+    res = call({"op": "pdf", "pack": str(neutral_pack), "pptx": str(deck), "out": str(out)})
+    assert res == {"ok": True, "path": str(out)}
+    data = out.read_bytes()
+    assert data.startswith(b"%PDF")
+    assert len(re.findall(rb"/Type\s*/Page[^s]", data)) == 3

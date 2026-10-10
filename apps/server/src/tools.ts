@@ -258,6 +258,21 @@ export const TOOLS = {
     },
   }),
 
+  export_pdf: tool({
+    title: "Export PDF",
+    description: "Download link for the deck as a PDF, one page per slide, rendered like the previews (and its local path on a stdio server).",
+    input: z.object({ deck_id: deckId, version }),
+    readOnly: true,
+    run: async (app, user, a) => {
+      const r = await app.decks.exportPdf(user, a.deck_id, a.version);
+      return {
+        version: r.version,
+        download_url: `${app.publicUrl}/decks/${a.deck_id}/deck.pdf?v=${r.version}`,
+        ...(user.local ? { path: r.path } : {}),
+      };
+    },
+  }),
+
   import_pack: tool({
     title: "Import brand pack",
     description:

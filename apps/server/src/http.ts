@@ -49,10 +49,16 @@ export async function connect(app: App, user: User): Promise<Client> {
 }
 
 const ModelBody = z.object({
+  id: z.string().optional().describe("Edit this configuration; unset: a new one."),
   provider: z.enum(Object.keys(PROVIDERS) as [ProviderId, ...ProviderId[]]),
   model: z.string().min(1),
+  label: z.string().max(40).optional(),
   api_key: z.string().optional(),
   base_url: z.string().url().optional(),
+  headers: z.record(z.string().regex(/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/, "invalid header name"), z.string()).optional(),
+  resource: z.string().regex(/^[a-z0-9-]+$/i).optional(),
+  api_version: z.string().regex(/^(v1|\d{4}-\d{2}-\d{2}(-preview)?)$/, "api_version: v1 or YYYY-MM-DD[-preview]").optional(),
+  managed_identity: z.boolean().optional(),
   default: z.boolean().optional(),
 });
 const ChatBody = z.object({
@@ -283,6 +289,19 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
           "content-type": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
           "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
         },
+      });
+    } catch (e) {
+      return fail(c, e);
+    }
+  });
+  http.get("/decks/:id/deck.pdf", async (c) => {
+    try {
+      const v = c.req.query("v");
+      const { path, version } = await app.decks.exportPdf(PREVIEW, param(c, "id"), v ? Number(v) : undefined);
+      const deck = await app.decks.deck(PREVIEW, param(c, "id"));
+      const name = `${deck.title.replace(/[^\p{L}\p{N} _-]+/gu, "").trim() || "deck"} v${version}.pdf`;
+      return new Response(Readable.toWeb(createReadStream(path)) as ReadableStream, {
+        headers: { "content-type": "application/pdf", "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(name)}` },
       });
     } catch (e) {
       return fail(c, e);

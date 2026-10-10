@@ -3,7 +3,7 @@ import { Button } from "diametral-ds/button";
 import { Kbd } from "diametral-ds/kbd";
 import { ArrowUp, Check, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { agent } from "../api.ts";
+import { agent, api } from "../api.ts";
 
 /** An AI SDK model message, as the server returns them; the client keeps the conversation. */
 export interface ChatMessage {
@@ -37,6 +37,41 @@ function lines(m: ChatMessage): { text: string; tools: string[] } {
     text: m.content.filter((p) => p.type === "text").map((p) => p.text).join("\n"),
     tools: m.content.filter((p) => p.type === "tool-call").map((p) => p.toolName ?? ""),
   };
+}
+
+interface ModelChoice {
+  id: string;
+  model: string;
+  label: string | null;
+  is_default: boolean;
+}
+const PICKED = "calque:model";
+
+/** The configured models, and the one this viewer picked ("" = the workspace default). */
+function useModelChoice() {
+  const [models, setModels] = useState<ModelChoice[]>([]);
+  const [picked, setPicked] = useState(() => {
+    try {
+      return localStorage.getItem(PICKED) ?? "";
+    } catch {
+      return "";
+    }
+  });
+  useEffect(() => {
+    api<{ models: ModelChoice[] }>("/api/models")
+      .then((r) => setModels(r.models))
+      .catch(() => setModels([]));
+  }, []);
+  const pick = (id: string) => {
+    setPicked(id);
+    try {
+      localStorage.setItem(PICKED, id);
+    } catch {
+      // storage blocked: the choice lasts for this page only
+    }
+  };
+  // a removed model falls back to the default
+  return { models, picked: models.some((m) => m.id === picked) ? picked : "", pick };
 }
 
 /** The tools the agent called, one row each; the last one live while it runs. */
@@ -78,6 +113,7 @@ export function Chat(props: {
   const [steps, setSteps] = useState<string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [model, setModel] = useState<string | null>(null);
+  const choice = useModelChoice();
   const log = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   useEffect(() => saveChat(props.storageKey, messages), [props.storageKey, messages]);
@@ -96,7 +132,7 @@ export function Chat(props: {
     try {
       const r = await agent<AgentResult>(
         "/api/agent/chat",
-        { messages: asked, pack_id: props.pack_id, deck_id: props.deck_id },
+        { messages: asked, pack_id: props.pack_id, deck_id: props.deck_id, ...(choice.picked ? { model: choice.picked } : {}) },
         (tools) => setSteps((s) => [...(s ?? []), ...tools]),
       );
       const conversation = [...asked, ...r.messages];
@@ -192,6 +228,18 @@ export function Chat(props: {
         />
         <div className="cq-composer-foot">
           {props.footer}
+          {choice.models.length > 1 && (
+            <select className="cq-select cq-model-pick" aria-label="AI model" value={choice.picked} onChange={(e) => choice.pick(e.target.value)}>
+              <option value="">Default model</option>
+              {choice.models.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.model}
+                  {m.label ? ` (${m.label})` : ""}
+                  {m.is_default ? " · default" : ""}
+                </option>
+              ))}
+            </select>
+          )}
           {model && <span className="cq-hint">Model: {model}</span>}
           <span className="cq-spacer" />
           <span className="cq-hint cq-keys">

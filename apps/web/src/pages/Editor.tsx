@@ -3,7 +3,7 @@ import { Alert, AlertDescription } from "diametral-ds/alert";
 import { Button } from "diametral-ds/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "diametral-ds/table";
 import { Tag } from "diametral-ds/tag";
-import { CircleCheck, Download, History, Play, Sparkles, TriangleAlert, X } from "lucide-react";
+import { CircleCheck, Download, FileText, History, Play, Sparkles, TriangleAlert, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { agent, tool } from "../api.ts";
 import { Chat } from "../components/Chat.tsx";
@@ -81,6 +81,23 @@ export function Editor({ id }: { id: string }) {
             </Button>
             <Button variant="outline" onClick={() => navigate(`/present/${id}`)}>
               <Play /> Present
+            </Button>
+            <Button
+              variant="outline"
+              disabled={busy !== null}
+              onClick={async () => {
+                setBusy("Exporting PDF");
+                setError(null);
+                try {
+                  location.assign((await tool<{ download_url: string }>("export_pdf", { deck_id: id })).download_url);
+                } catch (e) {
+                  setError((e as Error).message);
+                } finally {
+                  setBusy(null);
+                }
+              }}
+            >
+              <FileText /> Export PDF
             </Button>
             <Button
               onClick={async () => location.assign((await tool<{ download_url: string }>("export_pptx", { deck_id: id })).download_url)}

@@ -9,13 +9,15 @@ import {
   type OAuthTokenVerifier,
 } from "@modelcontextprotocol/server";
 import type { User } from "./packs.ts";
+import { teamsOf, type TeamsConfig } from "./teams.ts";
 
-/** OAuth resource server: tokens come from an external authorization server (Keycloak). */
+/** OAuth resource server: tokens come from an external authorization server (Keycloak, Entra ID). */
 export interface AuthConfig {
   issuer: string; // CALQUE_OIDC_ISSUER, e.g. https://sso.example.com/realms/acme
   audience: string; // CALQUE_OIDC_AUDIENCE: the client id / audience tokens are minted for
   resource: URL; // this server's MCP endpoint, <public url>/mcp
   teamsClaim: string; // CALQUE_TEAMS_CLAIM, default "groups"
+  teams?: Omit<TeamsConfig, "claim"> | undefined; // CALQUE_TEAMS_MAP, CALQUE_TEAMS_MAP_ONLY (Entra group ids)
   keys?: JWTVerifyGetKey; // tests inject a local key set...
   metadata?: OAuthMetadata; // ...and the authorization server metadata
 }
@@ -27,7 +29,6 @@ export function verifier(cfg: AuthConfig, metadata: () => Promise<OAuthMetadata>
       keys ??= createRemoteJWKSet(new URL((await metadata()).jwks_uri as string));
       try {
         const { payload } = await jwtVerify(token, keys, { issuer: cfg.issuer, audience: cfg.audience });
-        const teams = payload[cfg.teamsClaim];
         return {
           token,
           clientId: String(payload.azp ?? payload.client_id ?? payload.sub),
@@ -35,8 +36,7 @@ export function verifier(cfg: AuthConfig, metadata: () => Promise<OAuthMetadata>
           expiresAt: payload.exp ?? 0, // no exp: the SDK refuses the token
           extra: {
             sub: payload.sub,
-            // Keycloak group paths look like "/team-a"
-            teams: Array.isArray(teams) ? teams.map((t) => String(t).replace(/^\//, "")) : [],
+            teams: teamsOf(payload, { ...cfg.teams, claim: cfg.teamsClaim }),
           },
         };
       } catch (e) {

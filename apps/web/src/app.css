@@ -137,7 +137,7 @@
 .cq-composer-foot { display: flex; align-items: center; gap: 8px; }
 .cq-composer-foot .cq-spacer { flex: 1; }
 .cq-keys { display: inline-flex; align-items: center; gap: 4px; }
-.cq-pack-pick { width: auto; height: 30px; font-size: 13px; background-color: var(--cq-surface-2); }
+.cq-pack-pick, .cq-model-pick { width: auto; height: 30px; font-size: 13px; background-color: var(--cq-surface-2); }
 
 /* the new deck: a centred brief */
 .cq-brief { height: 100vh; height: 100dvh; max-width: 780px; margin: 0 auto; padding: 0 16px; display: grid; grid-template-columns: minmax(0, 1fr); }
@@ -197,7 +197,7 @@
   /* briefs: one swipeable row instead of a stack that pushes the composer away */
   .cq-brief .cq-chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
   .cq-brief .cq-chips .cq-chip { flex: none; max-width: 78vw; }
-  .cq-pack-pick { min-width: 0; flex: 1; }
+  .cq-pack-pick, .cq-model-pick { min-width: 0; flex: 1; }
   .cq-composer-foot .cq-spacer, .cq-keys { display: none; }
   .cq-presenter { grid-template: "head" auto "now" auto "side" auto / 1fr; }
 }

@@ -6,6 +6,7 @@ import { fakeModel, lastResult, toolsCalled, type Reply } from "./fakes.ts";
 import { acmeDeck, ENGINE_TIMEOUT, LOCAL, testApp } from "./helpers.ts";
 
 type Json = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+const NO_EXTRAS = { label: null, headers: [], resource: null, api_version: null, managed_identity: false };
 describe("web agent", { timeout: ENGINE_TIMEOUT }, () => {
   let app: App;
   let http: ReturnType<typeof createHttp>;
@@ -33,8 +34,8 @@ describe("web agent", { timeout: ENGINE_TIMEOUT }, () => {
 
   it("configures models: the env gateway is the default, a bad key is refused, a new default applies at once", async () => {
     const listed = (await api("/api/models")).json;
-    expect(listed.providers.map((p: Json) => p.id)).toEqual(["anthropic", "openai", "mistral", "gemini", "ollama", "openai-compatible"]);
-    expect(listed.models).toEqual([{ id: "env", provider: "openai-compatible", model: "gateway-model", base_url: fake.url, has_key: true, is_default: true }]);
+    expect(listed.providers.map((p: Json) => p.id)).toEqual(["anthropic", "openai", "azure", "mistral", "gemini", "ollama", "openai-compatible"]);
+    expect(listed.models).toEqual([{ id: "env", ...NO_EXTRAS, provider: "openai-compatible", model: "gateway-model", base_url: fake.url, has_key: true, is_default: true }]);
 
     const bad = await api("/api/models", { provider: "openai-compatible", model: "other", base_url: fake.url, api_key: "bad-key" });
     expect(bad.status).toBe(422);
@@ -43,7 +44,7 @@ describe("web agent", { timeout: ENGINE_TIMEOUT }, () => {
     expect((await api("/api/models", { provider: "anthropic", model: "x" })).status).toBe(422); // no key
 
     const good = await api("/api/models", { provider: "openai-compatible", model: "other", base_url: fake.url, api_key: "good-key" });
-    expect(good.json).toEqual({ id: "openai-compatible:other", provider: "openai-compatible", model: "other", base_url: fake.url, has_key: true, is_default: false });
+    expect(good.json).toEqual({ id: "openai-compatible:other", ...NO_EXTRAS, provider: "openai-compatible", model: "other", base_url: fake.url, has_key: true, is_default: false });
     const stored = (await app.db.query<Json>("select api_key from models where id = $1", ["openai-compatible:other"])).rows[0];
     expect(stored?.api_key).not.toContain("good-key"); // sealed at rest
 
@@ -56,6 +57,42 @@ describe("web agent", { timeout: ENGINE_TIMEOUT }, () => {
     expect(fake.requests.at(-1)?.model).toBe("other");
 
     await expect(app.models.setDefault({ id: "bob", teams: ["sales"] }, "env")).rejects.toThrow(Forbidden);
+  });
+
+  it("keeps two configurations of one model apart, edits one in place, and the chat picks one", async () => {
+    const other = await fakeModel(() => ({ content: "from the second host" }));
+    try {
+      const again = await api("/api/models", { provider: "openai-compatible", model: "other", base_url: fake.url, api_key: "good-key" });
+      expect(again.json.id).toBe("openai-compatible:other"); // same endpoint: an edit
+      const second = await api("/api/models", { provider: "openai-compatible", model: "other", base_url: other.url, api_key: "good-key" });
+      expect(second.json.id).toBe("openai-compatible:other@2"); // another endpoint: no overwrite
+      const eu = await api("/api/models", {
+        provider: "openai-compatible",
+        model: "other",
+        label: "EU région",
+        base_url: other.url,
+        api_key: "good-key",
+        headers: { "Ocp-Apim-Subscription-Key": "apim-secret" },
+      });
+      expect(eu.json).toMatchObject({ id: "openai-compatible:other@eu-region", label: "EU région", headers: ["Ocp-Apim-Subscription-Key"] });
+      const stored = (await app.db.query<Json>("select headers from models where id = $1", [eu.json.id])).rows[0];
+      expect(stored?.headers).not.toContain("apim-secret"); // sealed at rest
+      expect(JSON.stringify((await api("/api/models")).json)).not.toContain("apim-secret");
+
+      // edit: a new endpoint and label, the stored key and headers kept
+      const edited = await api("/api/models", { id: eu.json.id, provider: "openai-compatible", model: "other", label: "EU", base_url: fake.url });
+      expect(edited.json).toMatchObject({ id: "openai-compatible:other@eu-region", label: "EU", base_url: fake.url, has_key: true, headers: ["Ocp-Apim-Subscription-Key"] });
+      expect((await api("/api/models", { id: "nope", provider: "openai-compatible", model: "x", base_url: fake.url })).status).toBe(404);
+      expect((await api("/api/models", { id: eu.json.id, provider: "anthropic", model: "x", api_key: "k" })).status).toBe(422);
+
+      script = () => ({ content: "from the first host" });
+      const picked = await api("/api/agent/chat", { model: "openai-compatible:other@2", messages: [{ role: "user", content: "hi" }] });
+      expect(picked.json).toMatchObject({ model: "openai-compatible:other@2", text: "from the second host" });
+      expect((await api("/api/models")).json.models.find((m: Json) => m.is_default).id).toBe("openai-compatible:other"); // the default is unchanged
+    } finally {
+      other.server.close();
+      for (const id of ["openai-compatible:other@2", "openai-compatible:other@eu-region"]) await api(`/api/models/${encodeURIComponent(id)}`, undefined, "DELETE");
+    }
   });
 
   it("builds a deck from a brief through the MCP tools, to 0 lint error", async () => {

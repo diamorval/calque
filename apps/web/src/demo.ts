@@ -66,18 +66,25 @@ export async function startDemo() {
     [
       /^POST \/api\/models$/,
       (_, b) => {
+        const prev = models.models.find((x: Json) => x.id === b.id);
         const m = {
-          id: `demo-${Date.now()}`,
+          id: b.id ?? `demo-${Date.now()}`,
           provider: b.provider,
           model: b.model,
+          label: b.label ?? null,
           base_url: b.base_url ?? null,
-          has_key: !!b.api_key,
-          is_default: false,
+          has_key: !!b.api_key || !!prev?.has_key,
+          headers: b.headers ? Object.keys(b.headers) : (prev?.headers ?? []),
+          resource: b.resource ?? null,
+          api_version: b.api_version ?? null,
+          managed_identity: !!b.managed_identity,
+          is_default: !!prev?.is_default,
         };
-        models.models.push(m);
+        const saved = prev ? Object.assign(prev, m) : m;
+        if (!prev) models.models.push(m);
         if (b.default || models.models.length === 1)
-          for (const x of models.models) x.is_default = x === m;
-        return m;
+          for (const x of models.models) x.is_default = x === saved;
+        return saved;
       },
     ],
     [
