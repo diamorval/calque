@@ -425,8 +425,8 @@ const raw = {
   "Test and save": "Tester et enregistrer",
 
   // brand packs
-  "Each company's template, charter and voice. A new pack is visible to your teams only until you share it. Its owner and the admins edit it; every save is a release you can roll back.":
-    "Le modèle, la charte et le ton de chaque entreprise. Un nouveau pack n'est visible que de vos équipes jusqu'à ce que vous le partagiez. Son propriétaire et les administrateurs le modifient ; chaque enregistrement est une publication que vous pouvez annuler.",
+  "Each company's template, charter and voice. A new pack is visible to your teams only; an admin shares it with the whole workspace. Its owner, its co-managers and the admins edit it; every save is a release you can roll back.":
+    "Le modèle, la charte et le ton de chaque entreprise. Un nouveau pack n'est visible que de vos équipes ; un administrateur le partage avec tout l'espace de travail. Son propriétaire, ses cogestionnaires et les administrateurs le modifient ; chaque enregistrement est une publication que vous pouvez annuler.",
   Compliance: "Conformité",
   "Import a template": "Importer un modèle",
   "Opening {id}: rendering its template": "Ouverture de {id} : rendu de son modèle",

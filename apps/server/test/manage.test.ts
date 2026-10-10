@@ -6,7 +6,7 @@ import { createApp } from "../src/app.ts";
 import { REPO } from "../src/engine.ts";
 import { saveFile } from "../src/files.ts";
 import { createHttp } from "../src/http.ts";
-import { archivePack, listPacks, seedPacks, setDefaultPack, type User } from "../src/packs.ts";
+import { archivePack, listPacks, seededPacks, seedPacks, setDefaultPack, type User } from "../src/packs.ts";
 import { TOOLS, type App } from "../src/tools.ts";
 import { fakeOidc } from "./fakes.ts";
 import { acmeDeck, ENGINE_TIMEOUT, testApp } from "./helpers.ts";
@@ -149,6 +149,7 @@ describe("workspace packs: test packs, the default pack, branding", { timeout: E
       expect(fresh).toContain("acme-test"); // the tests' env (vitest.config.ts) seeds it
       await seedPacks(prod.db, join(REPO, "packs"), { tests: false, defaultPack: undefined });
       expect((await listPacks(prod.db, alice)).map((p) => p.id)).toEqual(["diametral"]);
+      expect(await seededPacks(prod.db)).toEqual(["diametral"]); // what main.ts logs at start-up
     } finally {
       await prod.db.close();
     }

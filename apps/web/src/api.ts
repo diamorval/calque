@@ -94,6 +94,8 @@ export interface Pack {
   visibility: "workspace" | "team";
   teams: string[];
   owner: string | null;
+  /** Co-managers besides its owner (user ids). */
+  managers?: string[];
   /** The pack's current release (every publish, edit or restore adds one). */
   pack_version?: number;
   archived?: boolean;
@@ -101,6 +103,6 @@ export interface Pack {
   default?: boolean;
   /** The group pack it inherits voice, storyline, exemplar and slop rules from. */
   extends?: string | null;
-  /** The caller manages it: its owner, or an admin. */
+  /** The caller manages it: its owner, a co-manager, or an admin. */
   editable: boolean;
 }

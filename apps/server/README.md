@@ -85,6 +85,9 @@ A deployment for a client shows neither Diametral nor its pack unless it chooses
   pack is not offered; or import the client's template on the Brand packs page and archive the
   others. Test packs (`test: true`, e.g. `acme-test`) are never seeded unless `CALQUE_TEST_PACKS=1`.
   A pack already seeded stays registered when it leaves `CALQUE_PACKS`: archive it there.
+  `docker-compose.yml` has the `CALQUE_PACKS` line to fill in, and the server logs at start-up the
+  packs every user is offered (`packs seeded for the whole workspace from …: diametral`): check that
+  line on a client deployment.
 - **Default pack**: `CALQUE_DEFAULT_PACK=<id>` (or an admin's "Make default" on the Brand packs
   page) preselects it in New deck and Import PPTX.
 - **App chrome**: the name and logo on the sign-in page, the sidebar and the tab title come from

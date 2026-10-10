@@ -184,7 +184,10 @@ create table if not exists deck_lint (
   at timestamptz not null default now(),
   primary key (deck_id, version)
 );
-alter table decks add column if not exists owner_teams jsonb not null default '[]';`;
+alter table decks add column if not exists owner_teams jsonb not null default '[]';
+-- packs.ts: co-managers of a pack besides its owner (user ids); the pack release a deck version is on
+alter table packs add column if not exists managers jsonb not null default '[]';
+alter table deck_versions add column if not exists pack_version int;`;
 
 /** Postgres when `url` is a postgres:// URL, else embedded PGlite (a data dir, or in memory). */
 export async function openDb(url = process.env.DATABASE_URL): Promise<Db> {

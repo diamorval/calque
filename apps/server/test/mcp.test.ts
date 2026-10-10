@@ -45,6 +45,7 @@ describe("MCP server over Streamable HTTP", { timeout: ENGINE_TIMEOUT }, () => {
         "library_list", "library_insert", "library_add", "library_review",
         "image_library_list", "image_library_add", "image_library_review",
         "m365_list", "m365_import", "m365_save", "m365_teams", "m365_share_teams",
+        "update_pack_release",
       ].sort(),
     );
     const open = tools.find((t) => t.name === "open_deck");

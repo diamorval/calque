@@ -57,6 +57,19 @@ def test_role_slide_in_never_clone_is_refused(neutral_pack):
         load_pack(neutral_pack)
 
 
+def test_slop_rule_that_does_not_compile_is_refused(neutral_pack):
+    manifest = yaml.safe_load((neutral_pack / "pack.yaml").read_text())
+    ok = {"severity": "WARN", "lang": "any", "pattern": "(?-i:ACME)", "note": "fine"}
+    bad = {"severity": "ERROR", "lang": "en", "pattern": "(unclosed", "note": "broken"}
+    manifest["lint"] = {"slop_rules": [ok, bad]}
+    (neutral_pack / "pack.yaml").write_text(yaml.safe_dump(manifest))
+    with pytest.raises(PackError) as e:
+        load_pack(neutral_pack)
+    assert e.value.problems == [
+        "lint.slop_rules[1] pattern '(unclosed': missing ), unterminated subpattern at position 0"
+    ]
+
+
 def _subsidiary(parent: Path, root: Path, pid: str = "sub", **manifest) -> Path:
     """A copy of `parent` under `root` as pack `pid`, extending `parent`, without its docs."""
     d = root / pid

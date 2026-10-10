@@ -110,6 +110,9 @@ async function openDeck(app: App, user: User, id: string, v?: number, render = t
     deck_id: id,
     title: deck.title,
     pack_id: deck.pack_id,
+    // the pack release the deck is on, and the pack's latest (update_pack_release moves it there)
+    pack_version: deck.pack_version,
+    pack_latest: deck.pack.version,
     role: deck.role,
     version: at,
     head: deck.head,
@@ -204,6 +207,22 @@ export const TOOLS = {
     role: "editor",
     run: async (app, user, a) => {
       const r = await app.decks.rebrand(user, a.deck_id, a.pack_id, a.drop_imported);
+      return { ...r, ...links(app, user, a.deck_id) };
+    },
+  }),
+
+  update_pack_release: tool({
+    title: "Update to the latest pack release",
+    description:
+      "Move a deck to the latest release of its brand pack, as a new version. A deck stays on the pack release it was made on (open_deck's `pack_version`; `pack_latest` is the newest) until this is called, so a brand change never alters a deck behind its author's back. With the same template the slides rebuild as they are; a new template moves template slides by role as rebrand_deck does (imported slides cannot follow unless `drop_imported` leaves them out). Lint the result.",
+    input: z.object({
+      deck_id: deckId,
+      drop_imported: z.boolean().default(false).describe("Leave out the imported slides, if the new release changed the template."),
+    }),
+    ui: true,
+    role: "editor",
+    run: async (app, user, a) => {
+      const r = await app.decks.updatePack(user, a.deck_id, a.drop_imported);
       return { ...r, ...links(app, user, a.deck_id) };
     },
   }),

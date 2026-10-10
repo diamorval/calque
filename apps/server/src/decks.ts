@@ -83,7 +83,8 @@ interface DeckRow {
   link_key: string;
   link_expires_at: Date | string | null;
   approval: "draft" | "in_review" | "approved";
-  /** The pack release the deck was created on. */
+  /** The pack release its current version is built on (deck_versions.pack_version of the head):
+  an edit stays on it, `updatePack` moves the deck to the pack's latest release. */
   pack_version: number | null;
 }
 
@@ -205,8 +206,18 @@ export class Decks {
     return path;
   }
 
-  /** Deck `id`, if `user` has at least role `need` on it. */
-  async deck(user: User, id: string, need: Role): Promise<DeckRow & { packDir: string; role: Role }> {
+  /** Where release `version` of `pack` is kept (pack_versions: a release is never overwritten);
+  its current directory for the current release, an unknown one, or one no longer on disk. */
+  async releaseDir(pack: PackRow, version: number | null | undefined): Promise<string> {
+    if (version == null || version === pack.version) return pack.dir;
+    const { rows } = await this.db.query<{ dir: string }>("select dir from pack_versions where pack_id = $1 and version = $2", [pack.id, version]);
+    const dir = rows[0]?.dir;
+    return dir && existsSync(join(dir, "pack.yaml")) ? dir : pack.dir;
+  }
+
+  /** Deck `id`, if `user` has at least role `need` on it. `packDir`: the pack release its current
+  version is on; `pack`: the pack (its `version` is the latest release). */
+  async deck(user: User, id: string, need: Role): Promise<DeckRow & { packDir: string; pack: PackRow; role: Role }> {
     const { rows } = await this.db.query<DeckRow>("select * from decks where id = $1", [id]).catch(() => ({ rows: [] }));
     const row = rows[0];
     const role = row ? await access(this.db, user, row) : null;
@@ -220,7 +231,7 @@ export class Decks {
       user.anonymous || (row.general_access === "anyone" && presents(user, row))
         ? ((await this.db.query<PackRow>("select * from packs where id = $1", [row.pack_id])).rows[0] as PackRow)
         : await getPack(this.db, user, row.pack_id);
-    return { ...row, title: row.name ?? row.title, packDir: pack.dir, role };
+    return { ...row, title: row.name ?? row.title, packDir: await this.releaseDir(pack, row.pack_version), pack, role };
   }
 
   /** The user's decks and the decks shared with them, with their role, newest change first (decks
@@ -310,8 +321,8 @@ export class Decks {
   }
 
   async versions(id: string) {
-    const { rows } = await this.db.query<{ version: number; note: string; author: string; author_name: string | null; created_at: string }>(
-      "select version, note, author, author_name, created_at from deck_versions where deck_id = $1 order by version",
+    const { rows } = await this.db.query<{ version: number; note: string; author: string; author_name: string | null; created_at: string; pack_version: number | null }>(
+      "select version, note, author, author_name, created_at, pack_version from deck_versions where deck_id = $1 order by version",
       [id],
     );
     return rows;
@@ -334,8 +345,8 @@ export class Decks {
       JSON.stringify(user.teams),
     ]);
     await this.db.query(
-      "insert into deck_versions (deck_id, version, spec, note, author, author_name) values ($1, 1, $2, $3, $4, $5)",
-      [id, JSON.stringify(spec), note, user.id, nameOf(user)],
+      "insert into deck_versions (deck_id, version, spec, note, author, author_name, pack_version) values ($1, 1, $2, $3, $4, $5, $6)",
+      [id, JSON.stringify(spec), note, user.id, nameOf(user), pack.version],
     );
     await audit(this.db, user, "create", "deck", id, { title: spec.title, pack_id: spec.pack_id, note });
     return { deck_id: id, version: 1, ...summary(report) };
@@ -349,11 +360,15 @@ export class Decks {
     return run;
   }
 
-  /** Store `spec` as the next version of `id`, if `id` is still at `from` (else Conflict). */
-  async commit(user: User, id: string, from: number, spec: DeckSpec, note: string, undoTo: number | null = from) {
+  /** Store `spec` as the next version of `id`, if `id` is still at `from` (else Conflict). It is
+  built on pack release `packVersion`; by default the release the deck is on, or the latest one of
+  another pack. */
+  async commit(user: User, id: string, from: number, spec: DeckSpec, note: string, undoTo: number | null = from, packVersion?: number | null) {
     const deck = await this.deck(user, id, "editor");
     // a version on another pack is a re-brand (or a restore across one): the caller must see it
-    const packDir = spec.pack_id === deck.pack_id ? deck.packDir : (await getPack(this.db, user, spec.pack_id)).dir;
+    const pack = spec.pack_id === deck.pack_id ? deck.pack : await getPack(this.db, user, spec.pack_id);
+    const release = packVersion ?? (spec.pack_id === deck.pack_id ? deck.pack_version : null) ?? pack.version;
+    const packDir = spec.pack_id === deck.pack_id && release === deck.pack_version ? deck.packDir : await this.releaseDir(pack, release);
     spec = await this.adoptLibraryImages(user, spec);
     await this.ownFiles(user, spec);
     const next = from + 1;
@@ -362,14 +377,14 @@ export class Decks {
     // a commit on another pack (rebrand_deck, or restoring a version from before it) moves the deck
     const { rows } = await this.db.query(
       `update decks set head = $3, title = $4, approval = case when approval = 'approved' then 'draft' else approval end,
-         pack_version = case when pack_id = $5 then pack_version else (select version from packs where id = $5) end, pack_id = $5
+         pack_version = $6, pack_id = $5
        where id = $1 and head = $2 returning head`,
-      [id, from, next, spec.title, spec.pack_id],
+      [id, from, next, spec.title, spec.pack_id, release],
     );
     if (!rows.length) throw new Conflict(`deck ${id} changed since version ${from}: reopen it and retry`);
     await this.db.query(
-      "insert into deck_versions (deck_id, version, spec, note, author, author_name, undo_to) values ($1, $2, $3, $4, $5, $6, $7)",
-      [id, next, JSON.stringify(spec), note, user.id, nameOf(user), undoTo],
+      "insert into deck_versions (deck_id, version, spec, note, author, author_name, undo_to, pack_version) values ($1, $2, $3, $4, $5, $6, $7, $8)",
+      [id, next, JSON.stringify(spec), note, user.id, nameOf(user), undoTo, release],
     );
     await audit(this.db, user, "edit", "deck", id, { version: next, note });
     return { deck_id: id, version: next, ...summary(report) };
@@ -402,13 +417,13 @@ export class Decks {
       if (rows[0]?.undo_to == null) throw new Error("nothing to undo");
       target = rows[0].undo_to;
     }
-    const { rows } = await this.db.query<{ undo_to: number | null }>(
-      "select undo_to from deck_versions where deck_id = $1 and version = $2",
+    const { rows } = await this.db.query<{ undo_to: number | null; pack_version: number | null }>(
+      "select undo_to, pack_version from deck_versions where deck_id = $1 and version = $2",
       [id, target],
     );
     if (!rows[0]) throw new NotFound(`deck ${id} has no version ${target}`);
-    // undoing the restore walks on back from the restored version
-    return this.commit(user, id, deck.head, await this.spec(id, target), `restore v${target}`, rows[0].undo_to);
+    // undoing the restore walks on back from the restored version, on the pack release it was on
+    return this.commit(user, id, deck.head, await this.spec(id, target), `restore v${target}`, rows[0].undo_to, rows[0].pack_version);
   }
 
   /** `spec` with the approved library images it places (images.ts, `file:<id>`) copied to `user`'s
@@ -453,8 +468,14 @@ export class Decks {
     const deck = await this.deck(user, id, "viewer");
     const v = version ?? deck.head;
     const spec = await this.spec(id, v);
-    // a version from before a re-brand builds and lints on its own pack
-    const packDir = spec.pack_id === deck.pack_id ? deck.packDir : (await getPack(this.db, user, spec.pack_id)).dir;
+    // a version builds and lints on the pack release it records (its own pack, before a re-brand);
+    // versions from before releases were recorded: the deck's release for the head, else the latest
+    const { rows } = await this.db.query<{ pack_version: number | null }>("select pack_version from deck_versions where deck_id = $1 and version = $2", [id, v]);
+    const release = rows[0]?.pack_version ?? (v === deck.head ? deck.pack_version : null);
+    const packDir =
+      spec.pack_id === deck.pack_id && release === deck.pack_version
+        ? deck.packDir
+        : await this.releaseDir(spec.pack_id === deck.pack_id ? deck.pack : await getPack(this.db, user, spec.pack_id), release);
     return { deck: { ...deck, packDir }, version: v, spec, report: await this.build(packDir, id, spec, v) };
   }
 
@@ -584,6 +605,30 @@ export class Decks {
     });
     const r = await this.commit(user, id, deck.head, res.deck, `re-brand ${deck.pack_id} -> ${packId}`);
     return { ...r, rebrand: res.report };
+  }
+
+  /** Move deck `id` to the latest release of its pack, as its next version (an edit stays on the
+  release the deck is on). A release with the same template rebuilds the slides as they are; a new
+  template moves template slides by role, as a re-brand does (imported slides cannot follow: the
+  call fails listing them unless `drop` leaves them out). */
+  updatePack(user: User, id: string, drop = false) {
+    return this.serial(id, () => this.updatePackNow(user, id, drop));
+  }
+
+  private async updatePackNow(user: User, id: string, drop: boolean) {
+    const deck = await this.deck(user, id, "editor");
+    const latest = deck.pack.version;
+    if (deck.pack_version === latest) throw new Error(`deck ${id} is already on the latest release of ${deck.pack_id} (${latest})`);
+    let spec = await this.spec(id, deck.head);
+    let rebrand: Record<string, unknown> | undefined;
+    if (!(await sameTemplate(deck.packDir, deck.pack.dir))) {
+      const res = await engine<{ deck: DeckSpec; report: Record<string, unknown> }>("rebrand", { pack: deck.packDir, to_pack: deck.pack.dir, deck: spec, drop });
+      spec = res.deck;
+      rebrand = res.report;
+    }
+    const note = `update to ${deck.pack_id} release ${latest} (from ${deck.pack_version ?? "unrecorded"})`;
+    const r = await this.commit(user, id, deck.head, spec, note, deck.head, latest);
+    return { ...r, pack_version: latest, previous_pack_version: deck.pack_version, ...(rebrand ? { rebrand } : {}) };
   }
 
   /** Copy slides of deck `from` (viewer access) into deck `to` (editor access) at `at`, as the next
@@ -777,6 +822,16 @@ export class Decks {
     if (found.length) await this.db.query("update comments set status = $3 where deck_id = $1 and id = any($2)", [id, found, status]);
     return found;
   }
+}
+
+/** Two pack releases share their template (same file, same map): a deck moves between them as is. */
+async function sameTemplate(a: string, b: string): Promise<boolean> {
+  if (a === b) return true;
+  for (const f of ["template.pptx", "template-map.yaml"]) {
+    const [x, y] = await Promise.all([readFile(join(a, f)), readFile(join(b, f))]);
+    if (!x.equals(y)) return false;
+  }
+  return true;
 }
 
 /** Lowercase, accents off: "Société" finds "societe". */
