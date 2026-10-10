@@ -81,6 +81,15 @@ interface DeckRow {
   pack_version: number | null;
 }
 
+/** What an import recognised: slides kept drawn, imported as clones, demoted (and why), and
+drawn slides changed in Calque after the file was exported (the file wins). */
+export interface ImportReport {
+  drawn: string[];
+  imported: string[];
+  demoted: { slide: string; reason: string }[];
+  conflicts: { slide: string; reason: string }[];
+}
+
 export class Conflict extends Error {}
 
 /** Every `file:<id>` image reference in a DeckSpec's clone values, rewritten by `fn`. */
@@ -269,14 +278,18 @@ export class Decks {
   /** Store `spec` as the next version of `id`, if `id` is still at `from` (else Conflict). */
   async commit(user: User, id: string, from: number, spec: DeckSpec, note: string, undoTo: number | null = from) {
     const deck = await this.deck(user, id, "editor");
-    if (spec.pack_id !== deck.pack_id) throw new Error("a deck stays on its pack");
+    // a version on another pack is a re-brand (or a restore across one): the caller must see it
+    const packDir = spec.pack_id === deck.pack_id ? deck.packDir : (await getPack(this.db, user, spec.pack_id)).dir;
     await this.ownFiles(user, spec);
     const next = from + 1;
-    const report = await this.build(deck.packDir, id, spec, next);
-    // an approval is for the version approved: a change sends the deck back to draft (review.ts)
+    const report = await this.build(packDir, id, spec, next);
+    // an approval is for the version approved: a change sends the deck back to draft (review.ts);
+    // a commit on another pack (rebrand_deck, or restoring a version from before it) moves the deck
     const { rows } = await this.db.query(
-      "update decks set head = $3, title = $4, approval = case when approval = 'approved' then 'draft' else approval end where id = $1 and head = $2 returning head",
-      [id, from, next, spec.title],
+      `update decks set head = $3, title = $4, approval = case when approval = 'approved' then 'draft' else approval end,
+         pack_version = case when pack_id = $5 then pack_version else (select version from packs where id = $5) end, pack_id = $5
+       where id = $1 and head = $2 returning head`,
+      [id, from, next, spec.title, spec.pack_id],
     );
     if (!rows.length) throw new Conflict(`deck ${id} changed since version ${from}: reopen it and retry`);
     await this.db.query(
@@ -355,7 +368,9 @@ export class Decks {
     const deck = await this.deck(user, id, "viewer");
     const v = version ?? deck.head;
     const spec = await this.spec(id, v);
-    return { deck, version: v, spec, report: await this.build(deck.packDir, id, spec, v) };
+    // a version from before a re-brand builds and lints on its own pack
+    const packDir = spec.pack_id === deck.pack_id ? deck.packDir : (await getPack(this.db, user, spec.pack_id)).dir;
+    return { deck: { ...deck, packDir }, version: v, spec, report: await this.build(packDir, id, spec, v) };
   }
 
   async lint(user: User, id: string, version?: number): Promise<{ version: number; findings: Finding[]; safe_checks: string[] }> {
@@ -432,8 +447,116 @@ export class Decks {
     const pack = await getPack(this.db, user, packId);
     const id = randomUUID();
     await mkdir(this.dir(id), { recursive: true });
-    const res = await engine<{ deck: DeckSpec }>("import", { pack: pack.dir, pptx: file, dest: this.dir(id), language });
-    return this.create(user, res.deck, "import", id);
+    const res = await engine<{ deck: DeckSpec; report: ImportReport }>("import", { pack: pack.dir, pptx: file, dest: this.dir(id), language });
+    return { ...(await this.create(user, res.deck, "import", id)), import: res.report };
+  }
+
+  /** Re-import a PPTX edited in PowerPoint into deck `id`, as its next version: slides the engine
+  tagged keep their ids (comments stay anchored), drawn slides stay drawn with the edits merged. */
+  reimport(user: User, id: string, file: string, language?: string) {
+    return this.serial(id, () => this.reimportNow(user, id, file, language));
+  }
+
+  private async reimportNow(user: User, id: string, file: string, language?: string) {
+    const deck = await this.deck(user, id, "editor");
+    const spec = await this.spec(id, deck.head);
+    // a new base per version: older versions keep building on theirs
+    const base = `base-v${deck.head + 1}-${randomUUID().slice(0, 8)}.pptx`;
+    const res = await engine<{ deck: DeckSpec; report: ImportReport }>("import", {
+      pack: deck.packDir,
+      pptx: file,
+      dest: this.dir(id),
+      language: language ?? spec.language,
+      base_id: base,
+      previous: spec,
+    });
+    try {
+      return { ...(await this.commit(user, id, deck.head, res.deck, "re-import from PowerPoint")), import: res.report };
+    } catch (e) {
+      await rm(join(this.dir(id), base), { force: true });
+      throw e;
+    }
+  }
+
+  /** Move deck `id` to pack `packId` as its next version (engine `rebrand`): drawn slides redraw
+  on the new pack, template clones move by role; imported clones cannot move (`drop` leaves them
+  out). Older versions stay on the old pack, and restoring one moves the deck back. */
+  rebrand(user: User, id: string, packId: string, drop = false) {
+    return this.serial(id, () => this.rebrandNow(user, id, packId, drop));
+  }
+
+  private async rebrandNow(user: User, id: string, packId: string, drop: boolean) {
+    const deck = await this.deck(user, id, "editor");
+    if (packId === deck.pack_id) throw new Error(`deck ${id} is already on ${packId}`);
+    const to = await getPack(this.db, user, packId);
+    const spec = await this.spec(id, deck.head);
+    const res = await engine<{ deck: DeckSpec; report: Record<string, unknown> }>("rebrand", {
+      pack: deck.packDir,
+      to_pack: to.dir,
+      deck: spec,
+      drop,
+    });
+    const r = await this.commit(user, id, deck.head, res.deck, `re-brand ${deck.pack_id} -> ${packId}`);
+    return { ...r, rebrand: res.report };
+  }
+
+  /** Copy slides of deck `from` (viewer access) into deck `to` (editor access) at `at`, as the next
+  version of `to`. Drawn slides copy to any pack (they are redrawn on the target's); template and
+  imported clones only to a deck on the same pack. Imported slides are grafted into the target's
+  base file. Ids taken in the target get a `-copy` suffix; the result maps old ids to new ones. */
+  copySlides(user: User, from: string, ids: string[], to: string, at?: number, version?: number) {
+    return this.serial(to, () => this.copyNow(user, from, ids, to, at, version));
+  }
+
+  private async copyNow(user: User, from: string, ids: string[], to: string, at?: number, version?: number) {
+    const src = await this.deck(user, from, "viewer");
+    const srcSpec = await this.spec(from, version ?? src.head);
+    const dst = await this.deck(user, to, "editor");
+    const spec = structuredClone(await this.spec(to, dst.head));
+    const picked = ids.map((sid) => {
+      const s = srcSpec.slides.find((x) => x.id === sid);
+      if (!s) throw new NotFound(`deck ${from} has no slide ${JSON.stringify(sid)}`);
+      return structuredClone(s);
+    });
+    const clones = picked.filter((s) => s.source.kind === "clone");
+    if (clones.length && src.pack_id !== dst.pack_id)
+      throw new Error(
+        `slides ${clones.map((s) => s.id).join(", ")} are cloned from the ${src.pack_id} template or an imported file: ` +
+          `they copy only to a deck on ${src.pack_id} (charts, diagrams and compositions copy to any pack)`,
+      );
+    const taken = new Set(spec.slides.map((s) => s.id));
+    const renamed: Record<string, string> = {};
+    for (const s of picked) {
+      let sid = s.id;
+      for (let k = 1; taken.has(sid); k++) sid = `${s.id}-copy${k > 1 ? k : ""}`;
+      taken.add(sid);
+      renamed[s.id] = sid;
+      s.id = sid;
+    }
+    const grafted = picked.filter((s) => s.source.kind === "clone" && s.source.from === "base");
+    let base: string | undefined;
+    if (grafted.length) {
+      if (!srcSpec.base) throw new Error(`deck ${from} has no imported file`);
+      base = `base-v${dst.head + 1}-${randomUUID().slice(0, 8)}.pptx`;
+      const res = await engine<{ slides: number[] }>("graft", {
+        pack: dst.packDir,
+        base: spec.base ? this.basePath(to, spec.base) : undefined,
+        out: join(this.dir(to), base),
+        sources: grafted.map((s) => ({ pptx: this.basePath(from, srcSpec.base as string), slide: (s.source as { slide: number }).slide })),
+      });
+      grafted.forEach((s, i) => ((s.source as { slide: number }).slide = res.slides[i] as number));
+      spec.base = base;
+    }
+    const last = spec.slides.at(-1);
+    const pos = Math.min(at ?? (last?.message_type === "closing" ? spec.slides.length - 1 : spec.slides.length), spec.slides.length);
+    spec.slides.splice(pos, 0, ...picked);
+    try {
+      const r = await this.commit(user, to, dst.head, spec, `copy ${picked.length} slide(s) from ${src.title}`);
+      return { ...r, copied: renamed };
+    } catch (e) {
+      if (base) await rm(join(this.dir(to), base), { force: true });
+      throw e;
+    }
   }
 
   async exportPath(user: User, id: string, version?: number): Promise<{ version: number; path: string }> {

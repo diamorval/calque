@@ -55,11 +55,52 @@ def op_patch(pack: str, deck: dict[str, Any], ops: list[dict[str, Any]]) -> dict
     return {"deck": out, "warnings": _issues(warnings)}
 
 
-def op_import(pack: str, pptx: str, dest: str, language: str) -> dict[str, Any]:
-    from .importer import import_pptx
+def op_import(
+    pack: str,
+    pptx: str,
+    dest: str,
+    language: str,
+    base_id: str = "base.pptx",
+    previous: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """`previous`: the DeckSpec this file is re-imported into (its slides are recognised by the
+    tags the engine wrote). `report`: slides kept drawn, imported, demoted (why), conflicts."""
+    from .importer import import_deck
 
-    deck, tmap = import_pptx(pptx, load_pack(pack), dest, language)
-    return {"deck": deck, "template_map": tmap}
+    deck, tmap, report = import_deck(pptx, load_pack(pack), dest, language, base_id, previous)
+    return {"deck": deck, "template_map": tmap, "report": report}
+
+
+def op_graft(
+    pack: str, out: str, sources: list[dict[str, Any]], base: str | None = None
+) -> dict[str, Any]:
+    """Copy slides of other decks' files into a deck's base, for copy_slides: `out` = `base`
+    (default: the pack template) + each `{"pptx": path, "slide": n}` appended, its layout matched
+    by name. Returns the appended slides' numbers in `out`."""
+    from pptx import Presentation
+
+    from .slides import duplicate_slide
+
+    prs = Presentation(base or str(load_pack(pack).template))
+    start = len(prs.slides)
+    opened: dict[str, Any] = {}
+    for src in sources:
+        if src["pptx"] not in opened:
+            opened[src["pptx"]] = Presentation(src["pptx"])
+        sp, n = opened[src["pptx"]], src["slide"]
+        if not 1 <= n <= len(sp.slides):
+            raise ValueError(f"slide {n} not in its deck's file (1..{len(sp.slides)})")
+        duplicate_slide(prs, sp.slides[n - 1])
+    prs.save(out)
+    return {"path": out, "slides": list(range(start + 1, start + 1 + len(sources)))}
+
+
+def op_rebrand(pack: str, to_pack: str, deck: dict[str, Any], drop: bool = False) -> dict[str, Any]:
+    """Move `deck` from `pack` to `to_pack` (see `rebrand`): the new DeckSpec and the report."""
+    from .rebrand import rebrand
+
+    out, report = rebrand(deck, load_pack(pack), load_pack(to_pack), drop=drop)
+    return {"deck": out, "report": report}
 
 
 def op_extract(
@@ -155,6 +196,8 @@ OPS = {
     "patch": op_patch,
     "import": op_import,
     "extract": op_extract,
+    "graft": op_graft,
+    "rebrand": op_rebrand,
     "lint": op_lint,
     "fix": op_fix,
     "render": op_render,

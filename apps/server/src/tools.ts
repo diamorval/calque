@@ -161,6 +161,42 @@ export const TOOLS = {
     },
   }),
 
+  copy_slides: tool({
+    title: "Copy slides",
+    description:
+      "Copy slides from one deck into another (or the same) deck, as a new version of the target. Needs view access on the source and edit access on the target. Charts, diagrams and compositions copy to a deck on any pack (redrawn on its pack); template and imported slides only to a deck on the same pack. `at` is the 0-based position (default: before the closing slide, else at the end). `copied` maps source ids to the ids in the target.",
+    input: z.object({
+      from_deck: deckId.describe("The deck to copy from."),
+      slides: z.array(z.string()).min(1).describe("Slide ids in the source deck, in the order to insert them."),
+      deck_id: deckId.describe("The deck to copy into."),
+      at: z.number().int().min(0).optional(),
+      version: version.describe("A past version of the source deck; default: its current one."),
+    }),
+    ui: true,
+    role: "editor",
+    run: async (app, user, a) => {
+      const r = await app.decks.copySlides(user, a.from_deck, a.slides, a.deck_id, a.at, a.version);
+      return { ...r, ...links(app, user, a.deck_id) };
+    },
+  }),
+
+  rebrand_deck: tool({
+    title: "Re-brand deck",
+    description:
+      "Move a deck to another brand pack, as a new version (older versions stay on the old pack; restoring one moves the deck back). Charts, diagrams and compositions are redrawn on the new pack; cover, divider, closing and other template slides move to the new pack's slide for the same role, their text following the slot names (`unmapped` lists what did not follow and shows the missing-value marker). Imported slides cannot be re-branded: the call fails listing them unless `drop_imported` leaves them out. Lint the result.",
+    input: z.object({
+      deck_id: deckId,
+      pack_id: z.string().describe("The pack to move the deck to."),
+      drop_imported: z.boolean().default(false).describe("Leave out the imported slides, which cannot be re-branded."),
+    }),
+    ui: true,
+    role: "editor",
+    run: async (app, user, a) => {
+      const r = await app.decks.rebrand(user, a.deck_id, a.pack_id, a.drop_imported);
+      return { ...r, ...links(app, user, a.deck_id) };
+    },
+  }),
+
   open_deck: tool({
     title: "Open deck",
     description:
@@ -174,11 +210,23 @@ export const TOOLS = {
 
   import_pptx: tool({
     title: "Import PPTX",
-    description: "Import an existing deck to edit it in place: each slide becomes a clone of the imported file, edited by shape_id with patch_deck.",
-    input: z.object({ file: File, pack_id: z.string(), language: z.string().min(2) }),
+    description:
+      "Import a PPTX to edit it in place: each slide becomes a clone of the file, edited by shape_id with patch_deck. With `deck_id`, the file (typically that deck exported and edited in PowerPoint) comes back as the next version of that deck: history and comments are kept, slides keep their ids, and charts, diagrams and compositions stay drawn with the text and data edits merged (set_params keeps working). The `import` report lists the slides kept drawn, those imported as clones, those demoted to clones (with why) and conflicts.",
+    input: z.object({
+      file: File,
+      deck_id: deckId.optional().describe("Re-import into this existing deck as a new version."),
+      pack_id: z.string().optional().describe("Pack of a new deck (required without deck_id)."),
+      language: z.string().min(2).optional().describe("Deck language; required for a new deck."),
+    }),
     ui: true,
     run: async (app, user, a) => {
-      const r = await app.decks.importPptx(user, await materialize(app, user, a.file), a.pack_id, a.language);
+      const file = await materialize(app, user, a.file);
+      if (a.deck_id) {
+        const r = await app.decks.reimport(user, a.deck_id, file, a.language);
+        return { ...r, ...links(app, user, a.deck_id) };
+      }
+      if (!a.pack_id || !a.language) throw new Error("a new deck needs pack_id and language (or pass deck_id)");
+      const r = await app.decks.importPptx(user, file, a.pack_id, a.language);
       return { ...r, ...links(app, user, r.deck_id) };
     },
   }),

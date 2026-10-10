@@ -19,7 +19,9 @@ me a deck" → [build](build.md).
 ## Steps
 
 1. **Load.** `open_deck` (deck already in Calque) or `import_pptx` (a file from the user). Calque
-   always works on its own copy; the user's original is never overwritten.
+   always works on its own copy; the user's original is never overwritten. A Calque deck the
+   client edited in PowerPoint comes back with `import_pptx` + `deck_id`: same deck, new version,
+   charts still charts; read the `import` report and tell the user which slides were demoted.
 2. **Locate the target.** Map the user's "slide 7" to **display order**, and find the exact
    `shape_id` and run(s). If the reference is ambiguous (two slides could be "the figures slide"),
    ask once.

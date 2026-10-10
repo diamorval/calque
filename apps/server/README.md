@@ -79,11 +79,24 @@ Hosts with MCP Apps show the deck UI (`ui://calque/deck.html`) on `create_deck`,
 (`/decks/:id?t=…`, the caller's URL token, see below), the same UI over REST: comments posted there
 are read by `list_comments`.
 
+### PowerPoint round trip
+
+The engine tags every slide it builds (PowerPoint slide tags: the slide id, and the spec of a drawn
+slide). `import_pptx` with `deck_id` brings an exported deck edited in PowerPoint back as the next
+version of that deck: history and comments are kept, tagged slides keep their ids, and charts,
+diagrams and compositions stay drawn with the client's text, notes, table and chart-data edits
+merged into their spec (`set_params` keeps working). A drawn slide whose shapes were added,
+removed, moved, resized or restyled, or whose text the spec cannot hold, becomes an `imported`
+clone kept exactly as the client left it. The result's `import` report lists `drawn`, `imported`,
+`demoted` (with the reason) and `conflicts` (drawn slides changed in Calque after the export: the
+file wins). `copy_slides` copies slides between decks: drawn slides to any pack, template and
+imported clones to the same pack (imported ones are grafted into the target's base file).
+
 ### Sharing
 
 Artifact style: people with access, and one share link per deck. Roles, each including the ones
 before it: **viewer** (open, lint, export, list comments, present), **commenter** (+ comment),
-**editor** (+ `patch_deck`, `add_slides`, `restore_version`, `review_deck`), **owner** (+ manage
+**editor** (+ `patch_deck`, `add_slides`, `copy_slides` (viewer on the source deck), `import_pptx` with `deck_id`, `restore_version`, `review_deck`), **owner** (+ manage
 access, transfer). A deck the caller has no role on does not exist for them (404); a tool needing
 more than their role answers 403. The caller's role is the best of the ones below.
 
