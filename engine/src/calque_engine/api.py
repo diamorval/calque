@@ -188,7 +188,7 @@ def op_pdf(pack: str, pptx: str, out: str) -> dict[str, Any]:
 
 
 def op_text(path: str, name: str, limit: int = 100_000) -> dict[str, Any]:
-    """Plain text of an attached document (txt, md, csv, docx, xlsx, pptx), cut at `limit`."""
+    """Plain text of an attached document (txt, md, csv, docx, xlsx, pptx, pdf), cut at `limit`."""
     from .text import read_text
 
     text = read_text(path, name)

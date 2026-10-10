@@ -2,6 +2,8 @@ import zipfile
 from pathlib import Path
 
 from pptx import Presentation
+from pypdf import PdfWriter
+from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
 from calque_engine.api import call
 
@@ -21,7 +23,7 @@ def test_plain_and_unsupported(tmp_path: Path):
         "text": "# Brief\nNorth led growth.",
         "truncated": False,
     }
-    r = _text(f, "scan.pdf")
+    r = _text(f, "scan.key")
     assert r["ok"] is False and "not supported yet" in r["message"]
 
 
@@ -51,3 +53,41 @@ def test_docx_xlsx_pptx(tmp_path: Path):
     s.shapes.title.text = "Old deck title"
     prs.save(tmp_path / "p")
     assert "Old deck title" in _text(tmp_path / "p", "old.pptx")["text"]
+
+
+def _pdf(path: Path, pages: list[str]) -> None:
+    """A PDF whose pages each draw one line of text in a standard font."""
+    w = PdfWriter()
+    font = DictionaryObject(
+        {
+            NameObject("/Type"): NameObject("/Font"),
+            NameObject("/Subtype"): NameObject("/Type1"),
+            NameObject("/BaseFont"): NameObject("/Helvetica"),
+        }
+    )
+    for line in pages:
+        page = w.add_blank_page(width=300, height=200)
+        page[NameObject("/Resources")] = DictionaryObject(
+            {NameObject("/Font"): DictionaryObject({NameObject("/F1"): w._add_object(font)})}
+        )
+        stream = DecodedStreamObject()
+        stream.set_data(f"BT /F1 12 Tf 20 100 Td ({line}) Tj ET".encode() if line else b"")
+        page[NameObject("/Contents")] = w._add_object(stream)
+    with open(path, "wb") as f:
+        w.write(f)
+
+
+def test_pdf(tmp_path: Path):
+    _pdf(tmp_path / "f", ["Revenue grew 12% in 2024.", "", "North led growth."])
+    r = _text(tmp_path / "f", "report.pdf")
+    assert r == {
+        "ok": True,
+        "text": "# Page 1\nRevenue grew 12% in 2024.\n# Page 2\n# Page 3\nNorth led growth.",
+        "truncated": False,
+    }
+    cut = call({"op": "text", "path": str(tmp_path / "f"), "name": "report.pdf", "limit": 10})
+    assert cut["text"] == "# Page 1\nR" and cut["truncated"] is True
+
+    (tmp_path / "bad").write_bytes(b"%PDF-1.7 not really")
+    r = _text(tmp_path / "bad", "broken.pdf")
+    assert r["ok"] is False and r["error"] == "ValueError"
