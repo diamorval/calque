@@ -139,7 +139,7 @@ Admins read it summed per user, team and model (`usage_report`, `GET /api/admin/
 - **PPTX content checks** (`lint_deck`, run on imported and exported decks): an OLE object or an
   ActiveX control, a remote template, and any picture, media or data fetched from elsewhere when
   the file opens are reported as ERROR. A hyperlink out of the deck is reported as WARN.
-- **Supply chain**: the CI `audit` job runs `pnpm audit --prod` (it fails on critical advisories)
+- **Supply chain**: the CI `audit` job runs `pnpm audit --prod` (it fails on high and critical advisories)
   and `pip-audit --strict` on the engine's locked dependencies. It also builds a CycloneDX SBOM of
   the repository (TypeScript and Python, from `pnpm-lock.yaml` and `uv.lock`), kept as the
   `calque-sbom.cdx.json` build artifact.
