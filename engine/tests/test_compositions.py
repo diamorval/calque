@@ -136,6 +136,21 @@ def test_composition_builds_on_grid(manifest, cid, tmp_path):
 
 
 @pytest.mark.parametrize("manifest", PACKS, ids=lambda p: p.parent.name)
+@pytest.mark.parametrize("cid", sorted(COMPOSITIONS))
+def test_composition_with_source_stays_above_it(manifest, cid, tmp_path):
+    """With `source`, the recipe draws above the source line, which stays above the footer."""
+    pack = load_pack(manifest.parent)
+    mtype, params, minimum, active = COMPOSITIONS[cid]
+    src = {"kind": "composition", "id": cid, "params": {**params, "source": "Source: audit"}}
+    out = tmp_path / f"{cid}.pptx"
+    build(deck(pack, cid, mtype, src), pack, out)
+    shapes = check(pack, out, minimum, active)
+    (line,) = [sh for sh in shapes if sh.name == "Source"]
+    drawn = [sh for sh in shapes if sh.shape_id > line.shape_id]  # drawn after the line
+    assert drawn and all(sh.top + sh.height <= line.top + 1 for sh in drawn), cid
+
+
+@pytest.mark.parametrize("manifest", PACKS, ids=lambda p: p.parent.name)
 def test_variants(manifest, tmp_path):
     """Full-width chart, vertical flow, rail-less funnel, a table too long for the band."""
     pack = load_pack(manifest.parent)

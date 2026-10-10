@@ -3,7 +3,7 @@
 A deck can pass every pack check and still read as machine output. This file lists the generic
 tells so that authoring workflows negate them **while writing**, `lint_deck` blocks the mechanical
 ones, and `review` audits the rest. Brand-specific vocabulary, punctuation preferences and banned
-words live in the active pack (`pack://<id>/voice`, `pack.yaml` `lint.banned_words`), never here.
+words live in the active pack (`pack://<id>/voice`, `pack.yaml` `lint.slop_rules`), never here.
 
 Who reads what: `build` and `draft` run sections 1–4 as a checklist on every slide before lint.
 `lint_deck` parses section 5. `review` treats everything as bugs to flag.
@@ -52,7 +52,7 @@ placeholder rather than a generality.
 A typed bullet glyph inside a run, ellipsis, emoji in a client deck, bullets nested three levels
 deep. Punctuation and casing preferences (dashes as separators, separator glyphs, exclamation
 marks, parentheses, title casing) are charter choices: they live in the pack's `voice` and
-`lint.banned_words`, not here.
+`lint.slop_rules`, not here.
 
 ## 4. Visual tells (checklist, on the render)
 
@@ -73,10 +73,12 @@ The pack's icon set, image treatment and flat fills are the vocabulary (`pack://
 ## 5. Machine rules (parsed by `lint_deck`)
 
 One rule per line: `SEVERITY  LANG  /regex/  note`. Severity `ERROR` or `WARN`; lang `en`, `fr`
-or `any` (informative). The regex runs case-insensitive and multi-line on each text shape;
-`(?-i:…)` opts out of case folding. The note follows the closing slash after two or more spaces.
-`#` starts a comment. Pack rules (`lint.banned_words`, `lint.placeholders`) are appended at run
-time and may raise a WARN here to ERROR; they never lower one.
+or `any`: a rule with a language runs only on decks in that language. The regex runs
+case-insensitive and multi-line on each text shape; `(?-i:…)` opts out of case folding. The note
+follows the closing slash after two or more spaces. `#` starts a comment. Pack rules
+(`lint.slop_rules`, `lint.placeholders`) are appended at run time and may raise a WARN here to
+ERROR; they never lower one. Every hit is reported: one finding per distinct match, per rule and
+shape, with a count when the same match repeats.
 
 Exemption: the text of a slide cloned from the pack `closing` role keeps its signature line, as
 long as it reads exactly as the template writes it. Copy rewritten there is linted like any other.
@@ -105,4 +107,27 @@ WARN   fr   /\w, (et )?(pas|non) (le|la|les|l'|un|une|des|du|seulement)\b/  inve
 WARN   en   /\b(leverag(e|es|ing)|seamless(ly)?|unlock(s|ing)?|empower(s|ing|ment)?|holistic|cutting-edge|state-of-the-art|game[- ]?changer|synerg(y|ies))\b/  buzzword: replace with what it does
 WARN   en   /\b(robust|journey)\b/  vague: robust against what, whose journey
 WARN   fr   /\b(synergie|synergies|clé en main|clés en main|au cœur de|au service de|levier|leviers|pilier|piliers)\b/  consulting tic: name the mechanism instead
+```
+
+## 6. Language typography (parsed by `lint_deck`, check `typography`)
+
+Typography a reader of the deck language expects, whatever the brand. It is not a charter choice,
+so it lives here; a pack never needs to repeat it. Same line format as section 5; a rule runs only
+when the deck language (`--language`, or the DeckSpec `language`) matches. Every hit is a **WARN**:
+a code sample, a URL or a product name may legitimately break the rule.
+
+**French** (`fr`):
+
+| Rule | Write | Not |
+| --- | --- | --- |
+| A non-breaking space (narrow U+202F, or U+00A0) before `:` `;` `?` `!` and `%`, so the sign never starts a line | `Délai : 6 semaines`, `+12 %` | `Délai: 6 semaines`, `Délai : …` with a plain space, `+12%` |
+| French quotes, with a non-breaking space inside | `« donnée produit »` | `"donnée produit"`, `“donnée produit”`, `«donnée produit»` |
+| The decimal comma | `3,5 M€`, `0,8 pt` | `3.5 M€`, `0.8 pt` |
+
+```typography
+# --- French ----------------------------------------------------------------
+WARN   fr   /\S+ ?[:;!?](?=\s|$)|\d+ ?%/  French spacing: a non-breaking space (U+202F or U+00A0) before : ; ? ! and %
+WARN   fr   /« ?[^\s»]+|[^\s«]+ ?»/  French quotes: a non-breaking space inside « and »
+WARN   fr   /"[^"\n]+"|“[^”\n]+”/  straight or English quotes: use « » in French
+WARN   fr   /(?<![\w.,/-])\d+\.\d+(?![\w.,/-])/  decimal point: French writes a decimal comma, 3,5
 ```

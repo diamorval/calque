@@ -33,20 +33,30 @@ class SlopRule:
 _RULE = re.compile(r"^(ERROR|WARN)\s+(\S+)\s+/(.+?)/\s{2,}(\S.*)$")
 
 
-@cache
-def slop_rules() -> tuple[SlopRule, ...]:
-    """Rules from the fenced ```anti-slop block of core/anti-slop.md."""
+def _rule_block(block: str) -> tuple[SlopRule, ...]:
+    """Rules from the fenced ```<block> code block of core/anti-slop.md."""
     text = (core_dir() / "anti-slop.md").read_text(encoding="utf-8")
-    m = re.search(r"```anti-slop\n(.*?)```", text, re.S)
+    m = re.search(rf"```{block}\n(.*?)```", text, re.S)
     if not m:
-        raise ValueError("core/anti-slop.md has no ```anti-slop block")
+        raise ValueError(f"core/anti-slop.md has no ```{block} block")
     out = []
     for n, line in enumerate(m.group(1).splitlines(), 1):
         if not line.strip() or line.lstrip().startswith("#"):
             continue
         r = _RULE.match(line)
         if not r:
-            raise ValueError(f"core/anti-slop.md rule line {n} does not parse: {line!r}")
+            raise ValueError(f"core/anti-slop.md {block} line {n} does not parse: {line!r}")
         sev, lang, pat, note = r.groups()
         out.append(SlopRule(sev, lang, re.compile(pat, re.I | re.M), note))
     return tuple(out)
+
+
+@cache
+def slop_rules() -> tuple[SlopRule, ...]:
+    return _rule_block("anti-slop")
+
+
+@cache
+def typography_rules() -> tuple[SlopRule, ...]:
+    """Language typography (French spacing, quotes, decimal comma): the ```typography block."""
+    return _rule_block("typography")

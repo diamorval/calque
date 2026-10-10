@@ -263,3 +263,85 @@ def test_external_content_and_ole_flagged(clean, tmp_path):
     assert any("beacon.png" in f.message and f.severity == "ERROR" for f in found), found
     assert any("remote template" in f.message and f.slide is None for f in found), found
     assert not [f for f in lint(path, pack, "en", tmap) if f.check in ("external", "ole")]
+
+
+def _with_text(clean, tmp_path, text):
+    pack, path, tmap = clean
+    prs = Presentation(str(path))
+    run = _box(prs.slides[POS - 1], pack, 1, 2, 7, 1.2, text)
+    sid = prs.slides[POS - 1].shapes[-1].shape_id
+    out = tmp_path / "text.pptx"
+    prs.save(str(out))
+    return pack, out, tmap, sid, run
+
+
+def test_every_slop_hit_is_reported(clean, tmp_path):
+    """One finding per distinct match of a rule in a shape, not only the first; repeats counted."""
+    pack, out, tmap, sid, _ = _with_text(
+        clean, tmp_path, "Seamless data, holistic view, seamless again, leveraging it."
+    )
+    hits = [f.message for f in lint(out, pack, "en", tmap) if f.shape_id == sid]
+    buzz = [m for m in hits if "buzzword" in m]
+    assert any(m.startswith("'Seamless' x2") for m in buzz), hits
+    assert any(m.startswith("'holistic'") for m in buzz) and any("'leveraging'" in m for m in buzz)
+
+
+def test_french_typography(clean, tmp_path):
+    """C20: French spacing, quotes and decimal comma, only on a French deck."""
+    text = 'Délai: 6 semaines, marge +12%, "pilote" à 3.5 M€, version 2.1.0, 14:30.'
+    pack, out, tmap, sid, _ = _with_text(clean, tmp_path, text)
+    typo = [f for f in lint(out, pack, "fr", tmap) if f.check == "typography"]
+    assert {f.severity for f in typo} == {"WARN"} and {f.shape_id for f in typo} == {sid}
+    said = " ".join(f.message for f in typo)
+    for hit in ("'Délai:'", "'12%'", "'\"pilote\"'", "'3.5'"):
+        assert hit in said, said
+    assert "2.1" not in said and "14:30" not in said
+    assert not [f for f in lint(out, pack, "en", tmap) if f.check == "typography"]
+
+    good = "Délai : 6 semaines, marge +12 %, « pilote » à 3,5 M€."
+    pack, out, tmap, sid, _ = _with_text(clean, tmp_path, good)
+    assert not [f for f in lint(out, pack, "fr", tmap) if f.check == "typography"]
+
+
+def test_chart_source_is_a_pack_opt_in(clean, tmp_path):
+    """C11: with `lint.chart_source`, a chart with no source line warns; the build's line or a
+    text opening with "Source" satisfies it."""
+    pack = load_pack(clean[0].dir)  # a fresh copy: the manifest is toggled below
+    spec = {
+        "pack_id": pack.id,
+        "language": "en",
+        "title": "Charts",
+        "slides": [
+            {
+                "id": f"c{i}",
+                "message": "North leads",
+                "message_type": "quantity",
+                "form": "bar",
+                "title": "North leads",
+                "source": {"kind": "chart", "type": "bar", "params": params},
+            }
+            for i, params in enumerate(
+                [
+                    {"categories": ["N", "S"], "series": [{"name": "A", "values": [3, 1]}]},
+                    {
+                        "categories": ["N", "S"],
+                        "series": [{"name": "A", "values": [3, 1]}],
+                        "source": "Source: CRM, 2026",
+                    },
+                ]
+            )
+        ],
+    }
+    out = tmp_path / "charts.pptx"
+    report = build(spec, pack, out)
+    tmap = dict(report.slides.values())
+    pack.manifest["lint"]["chart_source"] = False
+    assert not [f for f in lint(out, pack, "en", tmap) if f.check == "source"]
+    pack.manifest["lint"]["chart_source"] = True
+    found = [f for f in lint(out, pack, "en", tmap) if f.check == "source"]
+    assert [(f.slide, f.severity) for f in found] == [(1, "WARN")]
+
+    prs = Presentation(str(out))  # a hand-written source line in an imported deck counts too
+    _box(prs.slides[0], pack, 1, 4, 4, 0.3, "Sources : enquête interne")
+    prs.save(str(tmp_path / "hand.pptx"))
+    assert not [f for f in lint(tmp_path / "hand.pptx", pack, "en", tmap) if f.check == "source"]

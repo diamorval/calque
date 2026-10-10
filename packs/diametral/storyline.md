@@ -1,7 +1,7 @@
 # Narrative archetypes — starter catalog (v1, interim)
 
-Five narrative archetypes keyed to the routing tree's **tone × angle** pair. Pick the best
-fit, then adapt the beats live with the Business Manager — the skeleton is a starting point,
+Seven narrative archetypes: five pre-sales arcs keyed to the routing tree's **tone × angle**
+pair, one event or webinar arc, one offer-launch arc. Pick the best fit, then adapt the beats live with the Business Manager — the skeleton is a starting point,
 never a form to fill.
 
 > **Interim catalog.** This file is superseded by the knowledge-base storyline catalog once
@@ -11,6 +11,37 @@ never a form to fill.
 Every beat names the **evidence it needs**. Deck-type depth applies to all archetypes:
 Scaffold = sector-level evidence, Hybrid = mixed with named gaps, Rich = client-specific
 throughout.
+
+**Which part of this file applies.** Archetypes 1–5 and the routing tree are for a **pre-sales
+meeting deck** (one client in the room). A deck for an **event or webinar** (an audience of
+many companies) uses archetype 6; a deck **launching an offer** (to the market, a partner or
+the sales team) uses archetype 7. Neither of those walks the routing tree.
+
+## Reading the evidence references
+
+Archetypes 1–5 cite the **pre-meeting brief**, a nine-block research dossier on the prospect
+(drafted by the `first-meeting-brief` workflow, blocks 08–09 completed after the first call by
+`first-touch-debrief`). It is not part of this pack. **If the brief exists**, read the block
+named; **if it does not**, the reference tells you what evidence to look for in the material you
+have, and a beat with none becomes a named gap (`[À COMPLÉTER]` / `[TO COMPLETE]`), never an
+invented fact.
+
+| Block | Holds                                                                                                |
+| ----- | ---------------------------------------------------------------------------------------------------- |
+| 01    | Account snapshot: the company, its sector, size, structure, any existing account plan                |
+| 02    | Figures: turnover and business-unit trends, regional market figures, the client-vs-market verdict    |
+| 03    | Sector trends: industry patterns, what peers do, regulatory trends                                   |
+| 04    | The person in the room: role, function, scope, priorities                                            |
+| 05    | Pains: those of the market and those specific to the client                                          |
+| 06    | AI initiatives: public signals of the client's data and AI work, and the maturity verdict            |
+| 07    | Meeting hypotheses: the angle we propose and the objectives we expect the client to hold             |
+| 08    | Commercial context, after the first call: the trigger of the meeting                                 |
+| 09    | Debrief of the first call: key quotes, stated objectives, agreed next steps                          |
+
+Other references: **Diametral positioning** (`strategy.md`, outside the pack: what Diametral
+sells and how it differs; without it, use `exemplar.md` and the voice's four profiles), the
+**case library** (client references; until it is connected, the proof beat is a named gap), and
+`pipeline.md` (the tone and angle definitions, summarised in the routing tree below).
 
 ---
 
@@ -91,6 +122,46 @@ beat 4 can be.
 | 6   | Proof                                                          | case library (or named gap)                                  |
 | 7   | Next step                                                      | block 09 / proposal                                          |
 
+## 6 · Event or webinar: one finding, shared
+
+**Fits:** a talk to an audience of many companies (conference slot, webinar, client breakfast,
+plenary). No brief, no routing tree: the audience is a population, so evidence is sector-level
+by construction. The deck teaches one finding; the offer appears once, at the end, as the next
+step for those who want it.
+
+| #   | Beat                                                | Evidence needed                                                        |
+| --- | --------------------------------------------------- | ---------------------------------------------------------------------- |
+| 1   | The finding, stated as a verdict                    | the event's theme + one sourced figure (study, survey, our own data)   |
+| 2   | Why it matters to this audience now                 | sector trend, regulatory date or market figure, each with its source   |
+| 3   | What the field shows                                | 2–3 anonymised observations from engagements, or a named public case   |
+| 4   | The mechanism: why it happens                       | our method or framework, in builder's vocabulary, no product pitch     |
+| 5   | What to do on Monday                                | 3–5 concrete actions the audience can take without us                  |
+| 6   | Proof                                               | case library (or named gap), or a guest client's own words             |
+| 7   | Next step                                           | the call to action of the event: a diagnostic, a workshop, a resource  |
+
+Rules: one finding per talk; every figure carries its source on the slide; the speaker's
+name and the event date go on the cover; a webinar keeps beat 5 on screen during questions.
+
+## 7 · Offer launch: the problem, then the offer
+
+**Fits:** a deck that launches or relaunches a Diametral offer, to the market (site, LinkedIn
+carousel, event booth), to a partner, or to the sales team. The reader has no meeting with us
+yet: the deck sells the problem before it names the offer.
+
+| #   | Beat                                                    | Evidence needed                                                  |
+| --- | ------------------------------------------------------- | ---------------------------------------------------------------- |
+| 1   | The problem the offer solves, in the buyer's words      | market pains from engagements or a sourced study                 |
+| 2   | Why existing answers fall short                         | the market's usual approaches and where they stall (no names)    |
+| 3   | The offer: what it is, in one sentence                  | the offer sheet: name, scope, format, duration                   |
+| 4   | How it runs: the steps and what each delivers           | the offer's method, step by step, with its deliverables          |
+| 5   | What the client gets, in figures                        | outcomes measured on engagements, as honest ranges with sources  |
+| 6   | Proof                                                   | case library (or named gap)                                      |
+| 7   | Price and entry point, or how to start                  | the offer sheet: pricing or the first step; for sales, the pitch |
+
+Rules: the offer's name appears from beat 3, never in the title of beats 1–2; an internal
+sales-team version adds, after beat 7, the target accounts and the objections with their
+answers; the launch date and the offer owner go in the speaker notes.
+
 ---
 
 ## Choosing between archetypes
@@ -98,9 +169,11 @@ beat 4 can be.
 1. **Angle wins over tone** when they conflict (the `pipeline.md` tie-break) — the trigger is
    why the client took the meeting; the tone adjusts how beats 1–3 are pitched, not which
    story is told.
-2. **One archetype per deck.** If two fit, present the choice to the Business Manager with a
+2. **The audience picks the family first**: one client in the room → 1–5; an audience of
+   many companies → 6; an offer reaching people who have not met us → 7.
+3. **One archetype per deck.** If two fit, present the choice to the Business Manager with a
    one-line trade-off; never blend skeletons.
-3. **Record the runner-up** and why it lost — the storyline document keeps that reasoning.
+4. **Record the runner-up** and why it lost — the storyline document keeps that reasoning.
 
 ---
 
@@ -172,4 +245,4 @@ Map the knowledge level to the **deck type and evidence depth** per `pipeline.md
 
 The walk ends with six answers — knowledge level, sector, function, tone, angle, deck type —
 each with its source. That record opens the storyline document; the archetype is chosen from
-the tone × angle pair (see `archetypes.md`).
+the tone × angle pair (archetypes 1–5 above).

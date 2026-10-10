@@ -127,3 +127,68 @@ def test_chart_has_no_title_and_legend_only_for_several_series(manifest, tmp_pat
         atd = chart._chartSpace.find(qn("c:chart")).find(qn("c:autoTitleDeleted"))
         assert atd is not None and atd.get("val") == "1"
         assert chart.has_legend == (len(chart.plots[0].series) > 1)
+
+
+def _sourced(pack_id: str, source: str | None) -> dict:
+    spec = deck(pack_id, "bar")
+    if source:
+        spec["slides"][1]["source"]["params"] = {**CASES["bar"][1], "source": source}
+    return spec
+
+
+@pytest.mark.parametrize("manifest", PACKS, ids=lambda p: p.parent.name)
+def test_source_line_under_the_chart(manifest, tmp_path):
+    """`params.source` is a caption line above the footer line; the chart stops short of it."""
+    pack = load_pack(manifest.parent)
+    st = Style(pack)
+    build(_sourced(pack.id, "Source: CRM, Sept. 2026"), pack, tmp_path / "s.pptx")
+    shapes = list(Presentation(str(tmp_path / "s.pptx")).slides[1].shapes)
+    (line,) = [sh for sh in shapes if sh.name == "Source"]
+    (frame,) = [sh for sh in shapes if sh.has_chart]
+    assert line.text_frame.text == "Source: CRM, Sept. 2026"
+    run = line.text_frame.paragraphs[0].runs[0]
+    assert run.font.color.rgb == st.rgb("muted") and run.font.size.pt == st.size("caption")
+    footer = pack.manifest["grid"]["footer_top_in"]
+    assert (line.top + line.height) / 914400 <= footer + 1e-6
+    assert frame.top + frame.height <= line.top
+
+    build(_sourced(pack.id, None), pack, tmp_path / "n.pptx")
+    plain = Presentation(str(tmp_path / "n.pptx")).slides[1].shapes
+    assert not [sh for sh in plain if sh.name == "Source"]
+    assert next(sh for sh in plain if sh.has_chart).height > frame.height
+
+
+@pytest.mark.parametrize("manifest", PACKS, ids=lambda p: p.parent.name)
+def test_source_goes_in_the_pack_slot(manifest, tmp_path):
+    """A content slide mapping a `source` slot gets the text there; with no source the slot goes."""
+    pack = load_pack(manifest.parent)
+    n = pack.slides_for("content")[0]
+    tslide = next(s for s in pack.template_map["slides"] if s["number"] == n)
+    if "body" not in tslide.get("slots", {}):
+        pytest.skip("the content slide has no spare text shape to stand in for a source slot")
+    body = tslide["slots"].pop("body")
+    tslide["slots"]["source"] = body  # the body well stands in for a footnote placeholder
+    build(_sourced(pack.id, "Source: survey"), pack, tmp_path / "s.pptx")
+    shapes = Presentation(str(tmp_path / "s.pptx")).slides[1].shapes
+    slot = next(sh for sh in shapes if sh.shape_id == body)
+    assert slot.text_frame.text == "Source: survey" and slot.name == "Source"
+    build(_sourced(pack.id, None), pack, tmp_path / "n.pptx")
+    shapes = Presentation(str(tmp_path / "n.pptx")).slides[1].shapes
+    assert body not in {sh.shape_id for sh in shapes}
+
+
+@pytest.mark.parametrize("manifest", PACKS, ids=lambda p: p.parent.name)
+def test_page_numbers_are_slidenum_fields(manifest, tmp_path):
+    """Every page number is a slidenum field whose cached text is the slide's position, so it
+    stays right after a reorder in PowerPoint."""
+    pack = load_pack(manifest.parent)
+    report = build(deck(pack.id, "bar"), pack, tmp_path / "d.pptx")
+    prs = Presentation(str(tmp_path / "d.pptx"))
+    pages = {s["number"]: s.get("page_number") for s in pack.template_map["slides"]}
+    numbered = [(pos, n) for pos, n in report.slides.values() if pages.get(n) is not None]
+    assert numbered
+    for pos, n in numbered:
+        shape = next(sh for sh in prs.slides[pos - 1].shapes if sh.shape_id == pages[n])
+        fields = shape._element.findall(".//" + qn("a:fld"))
+        assert [f.get("type") for f in fields] == ["slidenum"]
+        assert shape.text_frame.text.strip() == str(pos)

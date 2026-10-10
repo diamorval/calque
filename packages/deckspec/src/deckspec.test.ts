@@ -44,3 +44,17 @@ it("committed deckspec.schema.json matches the Zod source", () => {
   const committed = JSON.parse(readFileSync(join(import.meta.dirname, "../deckspec.schema.json"), "utf8"));
   expect(committed).toEqual(jsonSchema());
 });
+
+it("charts and compositions carry an optional source line, diagrams do not", () => {
+  const slide = (source: unknown) => ({ id: "s", message: "m", message_type: "quantity", form: "bar", title: "t", source });
+  const deck = (source: unknown) => ({ pack_id: "p", language: "fr", title: "T", slides: [slide(source)] });
+  const chart = { categories: ["a"], series: [{ name: "n", values: [1] }] };
+  const ok = [
+    { kind: "chart", type: "bar", params: { ...chart, source: "Source : CRM, sept. 2026" } },
+    { kind: "composition", id: "comparison_table", params: { header: ["a", "b"], rows: [["1", "2"]], source: "Source : devis" } },
+  ];
+  for (const s of ok) expect(DeckSpec.safeParse(deck(s)).success).toBe(true);
+  expect(DeckSpec.safeParse(deck({ ...ok[0], params: { ...chart, source: "" } })).success).toBe(false);
+  const diagram = { kind: "diagram", id: "flow", params: { steps: ["a", "b"], source: "x" } };
+  expect(DeckSpec.safeParse(deck(diagram)).success).toBe(false);
+});

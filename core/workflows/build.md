@@ -45,6 +45,8 @@ do not fill it: signatures are cloned for identity, content slides are derived f
    - Content: `composition`, `chart`, `diagram`, or `clone` of an archetype whose message is this
      slide's message.
    - Copy fitted to capacities; unknowns as `missing_value[<lang>]`; anti-slop checklist applied.
+   - Every chart or composition carrying figures from a source names it in `params.source`
+     (doctrine → Build rules).
 7. **Create.** `create_deck` with the DeckSpec (or `add_slides` to extend a deck being built).
 8. **Lint → render → fix** (doctrine). `lint_deck`; fix every ERROR via `patch_deck`; look at
    each rendered slide; fix and re-check only changed slides.

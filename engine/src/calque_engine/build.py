@@ -3,17 +3,22 @@ diagrams and compositions on the pack's `content` slide, renumbers footers. Dete
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from pptx import Presentation
+from pptx.oxml.ns import qn
+from pptx.util import Emu
 
+from . import draw as d
 from . import slides as sl
 from . import tags
 from .deckspec import DeckSpec, Issue, Slide, resolve_clone_slide, validate
+from .draw import Run
 from .extract import extract
 from .pack import Pack
 from .placeholders import missing_markers, placeholder_hits
@@ -142,11 +147,13 @@ def build(
             n = pack.slides_for("content")[0]
             new = from_template(n)
             tslide = pack_map[n]
-            _prepare_content(new, s, tslide.get("slots", {}), st)
+            slots = tslide.get("slots", {})
+            _prepare_content(new, s, slots, st)
             fn = RENDERERS.get(_render_key(s))
             if fn is None:
                 raise NotImplementedError(f"[{s.id}] no renderer for {_render_key(s)}")
-            fn(new, st, s)
+            with _source_line(new, st, slots, s.source.get("params", {}).get("source")):
+                fn(new, st, s)
         if s.notes:
             new.notes_slide.notes_text_frame.text = s.notes
         tags.mark(new, s.model_dump(exclude_none=True), drawn=src["kind"] != "clone")
@@ -240,13 +247,65 @@ def _prepare_content(slide, s: Slide, slots: dict[str, int], st: Style) -> None:
             sl.delete_shape(eb)
 
 
+SOURCE_NAME = "Source"  # shape name of the source line; lint looks for it
+SOURCE_GAP_IN = 0.08  # between the drawing and the source line under it
+
+
+@contextmanager
+def _source_line(slide, st: Style, slots: dict[str, int], text: str | None) -> Iterator[None]:
+    """The line saying where a slide's figures come from. It goes in the content slide's `source`
+    slot when the pack maps one, else at `grid.source` (pack.yaml), else on the last caption line
+    above the footer line. The drawing rendered inside the block stops short of it."""
+    slot = sl.shape_by_id(slide, slots["source"]) if "source" in slots else None
+    if not text:
+        if slot is not None:
+            sl.delete_shape(slot)
+        yield
+        return
+    g = st.grid
+    if slot is not None:
+        sl.set_text(slot, text)
+        shape, top = slot, Emu(slot.top).inches
+    else:
+        h = st.size("caption") * 1.4 / 72
+        pos = st.pack.manifest["grid"].get("source") or {}
+        top = pos.get("top_in", g.bottom - h)
+        left = pos.get("left_in", g.margin)
+        width = pos.get("width_in", g.width - g.margin - left)
+        run = Run(text, size="caption", color="muted")
+        shape = d.add_text(slide, st, left, top, width, h, run, anchor="bottom")
+    shape.name = SOURCE_NAME
+    bottom = g.bottom
+    if top < bottom:
+        g.bottom = top - SOURCE_GAP_IN
+    try:
+        yield
+    finally:
+        g.bottom = bottom
+
+
+# One GUID for every slide number field, as PowerPoint writes them.
+SLIDENUM_ID = "{B6F15528-21DE-4FAA-801E-634DDDAF4B2B}"
+
+
 def _renumber(slide, shape_id: int, pos: int) -> None:
+    """Make the page number a slidenum field (its cached text is `pos`), so it stays right when
+    slides are reordered in PowerPoint."""
     try:
         shape = sl.shape_by_id(slide, shape_id)
     except KeyError:
         return  # the spec deleted it
-    from pptx.oxml.ns import qn
-
-    if shape._element.find(".//" + qn("a:fld")) is not None:
-        return  # a slidenum field: PowerPoint computes it
+    if not shape.has_text_frame:
+        return
+    fld = shape._element.find(".//" + qn("a:fld"))
+    if fld is not None:  # already a field: PowerPoint computes it, refresh its cached text
+        t = fld.find(qn("a:t"))
+        if fld.get("type") == "slidenum" and t is not None:
+            t.text = str(pos)
+        return
     sl.set_text(shape, str(pos))
+    r = shape.text_frame.paragraphs[0].runs[0]._r
+    fld = r.makeelement(qn("a:fld"), {"id": SLIDENUM_ID, "type": "slidenum"})
+    fld.extend(list(r))  # a:rPr then a:t, the order a:fld wants
+    r.addprevious(fld)
+    r.getparent().remove(r)

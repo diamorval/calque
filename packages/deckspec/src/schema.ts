@@ -28,10 +28,17 @@ export const ChartParams = z.strictObject({
   y_title: z.string().optional(),
 });
 
+/** Where the slide's figures come from, drawn as a small line at the bottom of the slide. */
+const footnote = z
+  .string()
+  .min(1)
+  .optional()
+  .describe("Source line at the bottom of the slide, written in full, e.g. 'Source: CRM, Sept. 2026'.");
+
 export const ChartSource = z.strictObject({
   kind: z.literal("chart"),
   type: z.enum(["line", "bar", "bar_horizontal", "doughnut", "scatter"]),
-  params: ChartParams,
+  params: ChartParams.extend({ source: footnote }),
 });
 
 const Panel = z.strictObject({ title: text, lines: z.array(z.string()) });
@@ -51,13 +58,13 @@ export const DiagramSource = z.discriminatedUnion("id", [
 const Block = z.strictObject({ label: z.string().optional(), lines: z.array(z.string()).min(1).max(4) });
 
 export const CompositionSource = z.discriminatedUnion("id", [
-  z.strictObject({ kind: z.literal("composition"), id: z.literal("chart_takeaway"), params: z.strictObject({ chart_type: ChartSource.shape.type, chart: ChartParams, takeaway: Block.optional(), split: z.enum(["2/1", "3/1", "full"]).optional() }) }),
-  z.strictObject({ kind: z.literal("composition"), id: z.literal("flow_detail"), params: z.strictObject({ steps: z.array(Item).min(3).max(6), active: index, detail: Block, orientation: z.enum(["horizontal", "vertical"]).optional() }) }),
-  z.strictObject({ kind: z.literal("composition"), id: z.literal("matrix_2x2"), params: z.strictObject({ x_axis: Axis, y_axis: Axis, quadrants: z.array(z.string()).length(4), items: z.array(z.strictObject({ label: text, x: z.number().min(0).max(1), y: z.number().min(0).max(1) })).min(1), active: index.optional() }) }),
-  z.strictObject({ kind: z.literal("composition"), id: z.literal("kpi_sparkband"), params: z.strictObject({ figures: z.array(z.strictObject({ value: text, label: text })).min(3).max(4), trend: z.strictObject({ categories: z.array(z.string()).min(2), values: z.array(z.number()).min(2) }) }) }),
-  z.strictObject({ kind: z.literal("composition"), id: z.literal("layers_rail"), params: z.strictObject({ layers: z.array(Item).min(3).max(5), active: index.optional(), annotations: z.array(z.strictObject({ layer: index, icon: z.string().optional(), text })).max(2).optional() }) }),
-  z.strictObject({ kind: z.literal("composition"), id: z.literal("comparison_table"), params: z.strictObject({ header: z.array(z.string()).min(2), rows: z.array(z.array(z.string())).min(1), col_weights: z.array(z.number().positive()).optional(), align: z.array(z.enum(["left", "center", "right"])).optional(), recommend: z.strictObject({ row: index.optional(), col: index.optional() }).optional() }) }),
-  z.strictObject({ kind: z.literal("composition"), id: z.literal("funnel_rail"), params: z.strictObject({ stages: z.array(z.strictObject({ label: text, value: z.number() })).min(2).max(6), conversions: z.array(z.string()).optional(), active: index.optional(), rail: Block.optional() }) }),
+  z.strictObject({ kind: z.literal("composition"), id: z.literal("chart_takeaway"), params: z.strictObject({ chart_type: ChartSource.shape.type, chart: ChartParams, takeaway: Block.optional(), split: z.enum(["2/1", "3/1", "full"]).optional() , source: footnote }) }),
+  z.strictObject({ kind: z.literal("composition"), id: z.literal("flow_detail"), params: z.strictObject({ steps: z.array(Item).min(3).max(6), active: index, detail: Block, orientation: z.enum(["horizontal", "vertical"]).optional() , source: footnote }) }),
+  z.strictObject({ kind: z.literal("composition"), id: z.literal("matrix_2x2"), params: z.strictObject({ x_axis: Axis, y_axis: Axis, quadrants: z.array(z.string()).length(4), items: z.array(z.strictObject({ label: text, x: z.number().min(0).max(1), y: z.number().min(0).max(1) })).min(1), active: index.optional() , source: footnote }) }),
+  z.strictObject({ kind: z.literal("composition"), id: z.literal("kpi_sparkband"), params: z.strictObject({ figures: z.array(z.strictObject({ value: text, label: text })).min(3).max(4), trend: z.strictObject({ categories: z.array(z.string()).min(2), values: z.array(z.number()).min(2) }) , source: footnote }) }),
+  z.strictObject({ kind: z.literal("composition"), id: z.literal("layers_rail"), params: z.strictObject({ layers: z.array(Item).min(3).max(5), active: index.optional(), annotations: z.array(z.strictObject({ layer: index, icon: z.string().optional(), text })).max(2).optional() , source: footnote }) }),
+  z.strictObject({ kind: z.literal("composition"), id: z.literal("comparison_table"), params: z.strictObject({ header: z.array(z.string()).min(2), rows: z.array(z.array(z.string())).min(1), col_weights: z.array(z.number().positive()).optional(), align: z.array(z.enum(["left", "center", "right"])).optional(), recommend: z.strictObject({ row: index.optional(), col: index.optional() }).optional() , source: footnote }) }),
+  z.strictObject({ kind: z.literal("composition"), id: z.literal("funnel_rail"), params: z.strictObject({ stages: z.array(z.strictObject({ label: text, value: z.number() })).min(2).max(6), conversions: z.array(z.string()).optional(), active: index.optional(), rail: Block.optional() , source: footnote }) }),
 ]);
 
 /** A value written into a cloned shape, keyed by shape_id. null deletes the shape. */
