@@ -73,6 +73,11 @@ export function Mark({ size = 28 }: { size?: number }) {
   );
 }
 
+/** The app's logo in the chrome: the deployment's image (white-label), else Calque's mark. */
+export function Logo({ brand, size = 28 }: { brand: { logo: string | null }; size?: number }) {
+  return brand.logo ? <img className="cq-logo-img" data-size={size} src={brand.logo} alt="" /> : <Mark size={size} />;
+}
+
 const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
 /** "3 minutes ago", "yesterday"… */
 export function ago(iso: string): string {

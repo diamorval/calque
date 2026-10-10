@@ -17,7 +17,9 @@ export function NewDeck() {
   useEffect(() => {
     tool<{ packs: Pack[] }>("list_packs").then((r) => {
       setPacks(r.packs);
-      if (r.packs.length === 1) setPack(r.packs[0]?.id ?? "");
+      // the only pack, else the workspace's default (Settings > Brand packs)
+      const pick = r.packs.length === 1 ? r.packs[0] : r.packs.find((p) => p.default);
+      if (pick) setPack(pick.id);
     });
   }, []);
 

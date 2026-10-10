@@ -130,6 +130,22 @@ export async function startDemo() {
       },
     ],
     [/^GET \/api\/packs$/, () => ({ packs })],
+    [/^GET \/api\/branding$/, () => ({ name: "Calque", logo: null })],
+    [
+      // the Decks page's search: titles only here (the server also searches the slides)
+      /^GET \/api\/decks\?(.*)$/,
+      ([, qs]) => {
+        const p = new URLSearchParams(qs);
+        const words = (p.get("q") ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+        return {
+          decks: decks.filter(
+            (d) =>
+              (!p.get("pack_id") || d.pack_id === p.get("pack_id")) &&
+              words.every((w) => String(d.title).toLowerCase().includes(w)),
+          ),
+        };
+      },
+    ],
     [
       /^POST \/api\/packs\/([^/]+)\/archive$/,
       ([, id], b) => {
