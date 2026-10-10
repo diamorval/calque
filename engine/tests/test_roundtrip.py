@@ -250,3 +250,39 @@ def test_a_restyled_drawn_slide_is_kept_as_the_client_left_it(built, tmp_path):
     _, _, report = import_deck(tmp_path / "edited.pptx", pack, tmp_path / "w", "en", "b.pptx", deck)
     assert [d["slide"] for d in report["demoted"]] == ["process"]
     assert "restyled" in report["demoted"][0]["reason"]
+
+
+def test_graft_copies_an_imported_slide_into_another_decks_base(built, tmp_path):
+    from calque_engine.api import call
+
+    pack, deck, out = built
+    r = call(
+        {
+            "op": "graft",
+            "pack": str(pack.dir),
+            "out": str(tmp_path / "grafted.pptx"),
+            "sources": [{"pptx": str(out), "slide": 3}],
+        }
+    )
+    assert r["ok"], r
+    n_template = len(Presentation(str(pack.template)).slides)
+    assert r["slides"] == [n_template + 1]
+    target = {
+        **deck,
+        "base": "grafted.pptx",
+        "slides": [
+            _by_id(deck)["cover"],
+            {
+                "id": "copied",
+                "message": "A copied slide",
+                "message_type": "imported",
+                "form": "imported",
+                "source": {"kind": "clone", "from": "base", "slide": r["slides"][0], "values": {}},
+            },
+        ],
+    }
+    build(target, pack, tmp_path / "t.pptx", base=tmp_path / "grafted.pptx")
+    prs = Presentation(str(tmp_path / "t.pptx"))
+    assert len(prs.slides) == 2
+    _para(prs.slides[1], "Proposal")  # the flow diagram came along, as drawn shapes
+    assert prs.slides[1].notes_slide.notes_text_frame.text == "Say it slowly."

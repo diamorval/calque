@@ -71,6 +71,30 @@ def op_import(
     return {"deck": deck, "template_map": tmap, "report": report}
 
 
+def op_graft(
+    pack: str, out: str, sources: list[dict[str, Any]], base: str | None = None
+) -> dict[str, Any]:
+    """Copy slides of other decks' files into a deck's base, for copy_slides: `out` = `base`
+    (default: the pack template) + each `{"pptx": path, "slide": n}` appended, its layout matched
+    by name. Returns the appended slides' numbers in `out`."""
+    from pptx import Presentation
+
+    from .slides import duplicate_slide
+
+    prs = Presentation(base or str(load_pack(pack).template))
+    start = len(prs.slides)
+    opened: dict[str, Any] = {}
+    for src in sources:
+        if src["pptx"] not in opened:
+            opened[src["pptx"]] = Presentation(src["pptx"])
+        sp, n = opened[src["pptx"]], src["slide"]
+        if not 1 <= n <= len(sp.slides):
+            raise ValueError(f"slide {n} not in its deck's file (1..{len(sp.slides)})")
+        duplicate_slide(prs, sp.slides[n - 1])
+    prs.save(out)
+    return {"path": out, "slides": list(range(start + 1, start + 1 + len(sources)))}
+
+
 def op_extract(
     template: str,
     pack_id: str = "draft",
@@ -157,6 +181,7 @@ OPS = {
     "patch": op_patch,
     "import": op_import,
     "extract": op_extract,
+    "graft": op_graft,
     "lint": op_lint,
     "fix": op_fix,
     "render": op_render,
