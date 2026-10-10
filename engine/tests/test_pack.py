@@ -70,6 +70,23 @@ def test_slop_rule_that_does_not_compile_is_refused(neutral_pack):
     ]
 
 
+@pytest.mark.parametrize("approval", [True, False, ["external", "marketing"]])
+def test_approval_on_every_deck_or_per_deck_type(neutral_pack, approval):
+    manifest = yaml.safe_load((neutral_pack / "pack.yaml").read_text())
+    manifest["approval"] = approval
+    manifest["deck_kinds"] = ["internal", "external", "pitch"]
+    (neutral_pack / "pack.yaml").write_text(yaml.safe_dump(manifest))
+    assert load_pack(neutral_pack).id == "neutral"
+
+
+def test_approval_deck_types_are_ids(neutral_pack):
+    manifest = yaml.safe_load((neutral_pack / "pack.yaml").read_text())
+    manifest["approval"] = ["External decks"]
+    (neutral_pack / "pack.yaml").write_text(yaml.safe_dump(manifest))
+    with pytest.raises(PackError, match="approval"):
+        load_pack(neutral_pack)
+
+
 def _subsidiary(parent: Path, root: Path, pid: str = "sub", **manifest) -> Path:
     """A copy of `parent` under `root` as pack `pid`, extending `parent`, without its docs."""
     d = root / pid

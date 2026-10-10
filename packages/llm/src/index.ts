@@ -160,8 +160,14 @@ export interface Step {
   toolCalls: { toolName: string; input: unknown; error?: string }[];
 }
 
+/** Tokens a run used, as the provider counted them (0 when it does not say). */
+export interface Usage {
+  input_tokens: number;
+  output_tokens: number;
+}
+
 /** A tool-calling loop until the model answers in text (a question, or the end of the job). */
-export async function runTools(i: RunInput): Promise<{ text: string; messages: Message[] }> {
+export async function runTools(i: RunInput): Promise<{ text: string; messages: Message[]; usage: Usage }> {
   const r = await generateText({
     model: languageModel(i.model),
     instructions: i.instructions,
@@ -192,5 +198,5 @@ export async function runTools(i: RunInput): Promise<{ text: string; messages: M
         }
       : {}),
   });
-  return { text: r.text, messages: r.responseMessages };
+  return { text: r.text, messages: r.responseMessages, usage: { input_tokens: r.totalUsage.inputTokens ?? 0, output_tokens: r.totalUsage.outputTokens ?? 0 } };
 }

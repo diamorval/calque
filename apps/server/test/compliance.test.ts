@@ -96,11 +96,12 @@ describe("enterprise compliance", { timeout: ENGINE_TIMEOUT }, () => {
     await call(alice, "share_deck", { deck_id: id, principal_type: "user", principal: "bob", role: "editor" });
     await call(alice, "open_deck", { deck_id: id }); // renders under the deck's folder
     expect(existsSync(app.decks.dir(id))).toBe(true);
+    await app.db.query("insert into chats (id, deck_id, owner, messages) values ($1, $2, 'alice', '[]')", [`deck:${id}`, id]); // its agent conversation
 
     await expect(call(bob, "delete_deck", { deck_id: id })).rejects.toThrow(/owner access needed/);
     expect(await call(alice, "delete_deck", { deck_id: id })).toEqual({ deck_id: id, deleted: true });
     expect(existsSync(app.decks.dir(id))).toBe(false);
-    for (const t of ["decks where id", "deck_versions where deck_id", "comments where deck_id", "deck_shares where deck_id"])
+    for (const t of ["decks where id", "deck_versions where deck_id", "comments where deck_id", "deck_shares where deck_id", "chats where deck_id"])
       expect((await app.db.query(`select 1 from ${t} = $1`, [id])).rows).toEqual([]);
     await expect(call(alice, "open_deck", { deck_id: id })).rejects.toThrow(/no deck/);
     // the log keeps that it existed
@@ -127,8 +128,15 @@ describe("enterprise compliance", { timeout: ENGINE_TIMEOUT }, () => {
     writeFileSync(stray, "x");
     utimesSync(stray, new Date(Date.now() - 40 * 86_400_000), new Date(Date.now() - 40 * 86_400_000));
 
-    expect(await purge(app, 30)).toEqual({ decks: 1, files: 2 });
+    // new-deck chat drafts and usage rows go by age; a deck's conversation goes with its deck
+    await app.db.query("insert into chats (id, owner, updated_at) values ('draft:alice', 'alice', now() - interval '40 days'), ('draft:bob', 'bob', now())");
+    await app.db.query("insert into chats (id, deck_id, owner) values ($1, $2, 'alice')", [`deck:${stale}`, stale]);
+    await app.db.query("insert into usage (user_id, model_id, run, at) values ('alice', 'env', 'chat', now() - interval '40 days'), ('bob', 'env', 'chat', now())");
+
+    expect(await purge(app, 30)).toEqual({ decks: 1, files: 2, chats: 1, usage: 1 });
     expect((await app.db.query("select id from decks where id = any($1::uuid[])", [[stale, fresh]])).rows).toEqual([{ id: fresh }]);
+    expect((await app.db.query("select id from chats order by id")).rows).toEqual([{ id: "draft:bob" }]);
+    expect((await app.db.query("select user_id from usage")).rows).toEqual([{ user_id: "bob" }]);
     expect(readdirSync(join(app.data, "uploads"))).toEqual([]);
     expect((await auditLog(app.db, { actor: "retention" })).map((e) => e.action)).toEqual(["purge", "delete"]);
   });

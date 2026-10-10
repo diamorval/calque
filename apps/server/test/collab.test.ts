@@ -106,7 +106,7 @@ describe("collaboration and review", { timeout: ENGINE_TIMEOUT }, () => {
 
   it("approval: an editor requests it, the pack owner or an admin approves, a new version sends it back to draft", async () => {
     const as = async (u: User) => (await call(u, "open_deck", { deck_id: gated, render: false })).approval;
-    expect(await as(alice)).toEqual({ enabled: true, status: "draft", can_request: true, can_withdraw: false, can_approve: false });
+    expect(await as(alice)).toEqual({ enabled: true, status: "draft", can_request: true, can_withdraw: false, can_approve: false, blocking: [] });
     await expect(call(mona, "set_approval", { deck_id: gated, status: "in_review" })).rejects.toThrow(/an editor requests/);
     await expect(call(alice, "set_approval", { deck_id: gated, status: "approved" })).rejects.toThrow(/pack owner or an admin/);
 
@@ -129,6 +129,44 @@ describe("collaboration and review", { timeout: ENGINE_TIMEOUT }, () => {
     // approval is of a version: a change sends the deck back to draft; exporting never needed it
     await call(alice, "patch_deck", { deck_id: gated, ops: [{ op: "set", slide: "cover", shape_id: 2, value: "Growth" }] });
     expect(await as(alice)).toMatchObject({ status: "draft", can_request: true });
+  });
+
+  it("approval per deck type, and required comments block approving until resolved", async () => {
+    // a pack that reviews external decks only, and offers its own types
+    const dir = join(app.data, "acme-kinds");
+    cpSync(join(REPO, "packs/acme-test"), dir, { recursive: true });
+    const yaml = readFileSync(join(dir, "pack.yaml"), "utf8").replace(/^id: acme-test$/m, "id: acme-kinds");
+    writeFileSync(join(dir, "pack.yaml"), `${yaml}\napproval: [external]\ndeck_kinds: [internal, external, pitch]\n`);
+    await app.db.query("insert into packs (id, dir, visibility, owner) values ('acme-kinds', $1, 'workspace', 'mona')", [dir]);
+    const deck = (await call(alice, "create_deck", { deck: { ...acmeDeck(), pack_id: "acme-kinds" } })).deck_id;
+    await call(alice, "share_deck", { deck_id: deck, principal_type: "user", principal: "mona", role: "commenter" });
+    const opened = () => call(alice, "open_deck", { deck_id: deck, render: false });
+
+    expect(await opened()).toMatchObject({ kind: null, kinds: ["internal", "external", "pitch"], approval: { enabled: false } });
+    await expect(call(alice, "set_approval", { deck_id: deck, status: "in_review" })).rejects.toThrow(/approval is off for this deck/);
+    await expect(call(alice, "set_deck_kind", { deck_id: deck, kind: "marketing" })).rejects.toThrow(/not one of/);
+    await expect(call(mona, "set_deck_kind", { deck_id: deck, kind: "external" })).rejects.toThrow(/editor access/);
+    expect(await call(alice, "set_deck_kind", { deck_id: deck, kind: "internal" })).toEqual({ deck_id: deck, kind: "internal", approval: false });
+    expect(await call(alice, "set_deck_kind", { deck_id: deck, kind: "external" })).toEqual({ deck_id: deck, kind: "external", approval: true });
+    expect((await opened()).approval).toMatchObject({ enabled: true, status: "draft" });
+    expect((await call(alice, "list_decks", { pack_id: "acme-kinds" })).decks[0].kind).toBe("external");
+
+    // the reviewer's required comment blocks approving; a suggestion never does
+    await call(alice, "set_approval", { deck_id: deck, status: "in_review" });
+    const must = (await call(mona, "add_comment", { deck_id: deck, slide_id: "cover", text: "Legal mention missing", type: "required" })).comment;
+    const may = (await call(mona, "add_comment", { deck_id: deck, slide_id: "cover", text: "Maybe a darker blue" })).comment;
+    expect([must.type, may.type]).toEqual(["required", "suggestion"]);
+    const reply = (await call(alice, "add_comment", { deck_id: deck, parent_id: must.id, text: "Adding it", type: "required" })).comment;
+    expect(reply.type).toBe("suggestion"); // a reply is never required
+    expect((await call(mona, "open_deck", { deck_id: deck, render: false })).approval).toMatchObject({ can_approve: false, blocking: [must.id] });
+    await expect(call(mona, "set_approval", { deck_id: deck, status: "approved" })).rejects.toThrow(new RegExp(`required comment\\(s\\) ${must.id} still open`));
+    await call(alice, "resolve_comments", { deck_id: deck, comment_ids: [must.id] });
+    expect((await call(mona, "open_deck", { deck_id: deck, render: false })).approval).toMatchObject({ can_approve: true, blocking: [] });
+    expect(await call(mona, "set_approval", { deck_id: deck, status: "approved" })).toMatchObject({ approval: "approved" });
+    expect((await audit(deck, "kind")).map((r) => r.detail)).toEqual([
+      { from: null, to: "internal" },
+      { from: "internal", to: "external" },
+    ]);
   });
 
   it("export gate: a version with lint ERRORs still exports, the export and its reason are recorded", async () => {

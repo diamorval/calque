@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
 import { tool, type Pack } from "../api.ts";
-import { Chat, saveChat, type AgentResult, type ChatMessage } from "../components/Chat.tsx";
+import { Chat, type AgentResult } from "../components/Chat.tsx";
 import { t } from "../i18n.ts";
 import { navigate } from "../nav.ts";
 
-const KEY = "chat:new";
 const BRIEFS = [
   "Quarterly review for the leadership team: results, wins, risks, next quarter's plan.",
   "Client pitch: their problem, our approach, three proof points, next steps.",
@@ -24,19 +23,15 @@ export function NewDeck() {
     });
   }, []);
 
-  function done(r: AgentResult, conversation: ChatMessage[]) {
-    const created = JSON.stringify(r.messages).match(/"deck_id":"([0-9a-f-]{36})"/)?.[1];
-    if (!created) return;
-    // the conversation follows the deck
-    saveChat(`chat:${created}`, conversation);
-    saveChat(KEY, []);
-    navigate(`/d/${created}`);
+  // the server moved the draft conversation to the deck it created: it follows the deck
+  function done(r: AgentResult) {
+    const created = r.deck_id ?? JSON.stringify(r.messages).match(/"deck_id":"([0-9a-f-]{36})"/)?.[1];
+    if (created) navigate(`/d/${created}`);
   }
 
   return (
     <div className="cq-brief">
       <Chat
-        storageKey={KEY}
         pack_id={pack || undefined}
         disabled={!pack}
         placeholder={t("What is the deck for, who is it for, what must it say?")}

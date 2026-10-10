@@ -53,6 +53,17 @@ describe("DeckViewer", () => {
     expect(onComment).toHaveBeenCalledWith({ slide_id: "cover", text: "Too dense" });
   });
 
+  it("marks a comment required (it blocks approval), and shows required threads", () => {
+    const onComment = vi.fn().mockResolvedValue(undefined);
+    const flagged = { ...deck, open_comments: deck.open_comments.map((c) => ({ ...c, type: "required" as const })) };
+    render(<DeckViewer deck={flagged} onComment={onComment} />);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Legal mention missing" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: /Required/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Comment" }));
+    expect(onComment).toHaveBeenCalledWith({ slide_id: "cover", text: "Legal mention missing", type: "required" });
+    expect(screen.getAllByText("Required", { selector: ".cq-required" }).length).toBe(flagged.open_comments.length);
+  });
+
   it("jumps to a comment's slide and shape from the comments panel", () => {
     render(<DeckViewer deck={deck} onComment={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /Sort bars/ }));

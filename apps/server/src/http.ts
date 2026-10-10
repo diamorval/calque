@@ -9,9 +9,10 @@ import { stream } from "hono/streaming";
 import { Client } from "@modelcontextprotocol/client";
 import { createMcpHandler, InMemoryTransport, oauthMetadataResponse } from "@modelcontextprotocol/server";
 import { applyComments, chat, type Message } from "@calque/agent";
-import { PROVIDERS, type ModelConfig, type ProviderId, type Step } from "@calque/llm";
+import { PROVIDERS, type ModelConfig, type ProviderId, type Step, type Usage } from "@calque/llm";
 import { z } from "zod";
 import { auditLog } from "./audit.ts";
+import { adoptDraft, appendChat, decksIn, getChat, writable } from "./chats.ts";
 import { compliance } from "./compliance.ts";
 import { discovery, gate, identityOf, userOf, type AuthConfig } from "./auth.ts";
 import { Conflict } from "./decks.ts";
@@ -50,6 +51,7 @@ import { scimRoutes } from "./scim.ts";
 import { SESSION, type Sessions } from "./session.ts";
 import { resetLink, setGeneralAccess, shares, transfer } from "./shares.ts";
 import { TOOLS, toolNamed, type App } from "./tools.ts";
+import { recordUsage, usageReport } from "./usage.ts";
 
 const LOCAL: User = { id: "local", name: "Local", teams: [], local: true };
 export const WEB_DIST = join(REPO, "apps/web/dist");
@@ -90,15 +92,21 @@ const ModelBody = z.object({
   api_version: z.string().regex(/^(v1|\d{4}-\d{2}-\d{2}(-preview)?)$/, "api_version: v1 or YYYY-MM-DD[-preview]").optional(),
   managed_identity: z.boolean().optional(),
   default: z.boolean().optional(),
+  teams: z.array(z.string()).optional().describe("Restrict it to these teams ([]: everyone); unset keeps the stored ones."),
 });
 const ChatBody = z.object({
-  messages: z.array(z.record(z.string(), z.unknown())).min(1).describe("The conversation so far (the client keeps it)."),
+  messages: z.array(z.record(z.string(), z.unknown())).min(1).optional().describe("The conversation so far, kept by the client (nothing is stored)."),
+  message: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Instead of `messages`: the new user message; the server holds the conversation (the deck's, else your new-deck draft) and adds this turn to it."),
   workflow: z.enum(["build-presentation", "storyline", "draft-slides", "edit-slides", "review-deck"]).optional(),
   pack_id: z.string().optional(),
   deck_id: z.string().optional(),
   model: z.string().optional().describe("A configured model id; default: the workspace default."),
   files: z.array(z.string()).optional().describe("Uploaded file ids attached to the conversation (POST /api/files)."),
-});
+}).refine((b) => !!b.messages !== (b.message !== undefined), "send either `messages` or `message`");
 const Visibility = z.object({ visibility: z.enum(["workspace", "team"]), teams: z.array(z.string()).optional() });
 
 export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Hono {
@@ -461,24 +469,50 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
   http.get("/api/compliance", route((c, user) => compliance(app.db, app.decks, user, c.req.query("pack_id") || undefined)));
 
   // Settings > AI Models (PipesHub pattern). Keys go in, never out.
-  http.get("/api/models", route(async () => ({ providers: app.models.catalog(), models: await app.models.list() })));
+  // Everyone sees the models they may run (`your_default`: the one the agent runs for them); admins
+  // see them all, and each team's default.
+  http.get(
+    "/api/models",
+    route(async (_, user) => ({
+      providers: app.models.catalog(),
+      models: await app.models.list(user),
+      ...(isAdmin(user) ? { team_defaults: await app.models.teamDefaults() } : {}),
+    })),
+  );
   http.post("/api/models", modelLimit, route(async (c, user) => app.models.configure(user, ModelBody.parse(await body(c)))));
   http.post("/api/models/:id/default", route((c, user) => app.models.setDefault(user, param(c, "id"))));
+  http.post("/api/models/:id/teams", route(async (c, user) => app.models.restrict(user, param(c, "id"), z.object({ teams: z.array(z.string()) }).parse(await body(c)).teams)));
+  http.post(
+    "/api/models/team-defaults",
+    route(async (c, user) => {
+      const b = z.object({ team: z.string().min(1), model_id: z.string().nullable() }).parse(await body(c));
+      return app.models.setTeamDefault(user, b.team, b.model_id);
+    }),
+  );
+  // Usage metering (usage.ts): runs and tokens per user, team and model; ?since=&until= (ISO)
+  http.get("/api/admin/usage", route(async (c, user) => usageReport(app.db, user, { since: c.req.query("since"), until: c.req.query("until") })));
   http.delete("/api/models/:id", route((c, user) => app.models.remove(user, param(c, "id"))));
 
-  /** Run the web agent as `user`. With `Accept: application/x-ndjson`, streams one line per step
-  ({"step": {tools}}), then {"done": result} or {"error": …}; else answers JSON when done. */
+  /** Run the web agent as `user` (a `name` run, metered in usage.ts). With `Accept: application/x-ndjson`,
+  streams one line per step ({"step": {tools}}), then {"done": result} or {"error": …}; else answers JSON when done. */
   const agent =
-    (parse: (b: unknown) => { model?: string | undefined }, run: (client: Client, model: ModelConfig, b: never, onStep: OnStep, user: User) => Promise<object>) =>
+    (
+      name: string,
+      parse: (b: unknown) => { model?: string | undefined; deck_id?: string | undefined },
+      run: (client: Client, model: ModelConfig, b: never, onStep: OnStep, user: User) => Promise<{ usage: Usage }>,
+    ) =>
     async (c: Context) => {
       const user = await who(c);
       if (user instanceof Response) return user;
       const go = async (onStep: OnStep) => {
         const b = parse(await body(c));
-        const model = await app.models.resolve(b.model);
+        const model = await app.models.resolve(b.model, user);
         const client = await connect(app, user);
+        const started = Date.now();
         try {
-          return { model: model.id, ...(await run(client, model, b as never, onStep, user)) };
+          const r = await run(client, model, b as never, onStep, user);
+          await recordUsage(app.db, user, { model_id: model.id, run: name, deck_id: b.deck_id, ...r.usage, duration_ms: Date.now() - started });
+          return { model: model.id, ...r };
         } finally {
           await client.close();
         }
@@ -507,9 +541,31 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
   http.post(
     "/api/agent/chat",
     agentLimit,
-    agent(ChatBody.parse, async (client, model, b: z.infer<typeof ChatBody>, onStep, user) => {
+    agent("chat", (x) => ChatBody.parse(x), async (client, model, b: z.infer<typeof ChatBody>, onStep, user) => {
       const files = await Promise.all((b.files ?? []).map((id) => attachment(app.db, app.data, user, id)));
-      return chat({ client, model, onStep, messages: b.messages as Message[], workflow: b.workflow, pack_id: b.pack_id, deck_id: b.deck_id, files });
+      if (b.message === undefined)
+        return chat({ client, model, onStep, messages: b.messages as Message[], workflow: b.workflow, pack_id: b.pack_id, deck_id: b.deck_id, files });
+      // the conversation held here (chats.ts): the files attached earlier come along, those a
+      // colleague uploaded (theirs only) left out
+      await writable(app.decks, user, b.deck_id);
+      const held = await getChat(app.db, app.decks, user, b.deck_id);
+      const before = await Promise.all(held.files.filter((id) => !b.files?.includes(id)).map((id) => attachment(app.db, app.data, user, id).catch(() => undefined)));
+      const asked: Message = { role: "user", content: b.message };
+      const since = new Date();
+      const r = await chat({
+        client,
+        model,
+        onStep,
+        messages: [...held.messages, asked],
+        workflow: b.workflow,
+        pack_id: b.pack_id,
+        deck_id: b.deck_id,
+        files: [...before.filter((f) => f !== undefined), ...files],
+      });
+      await appendChat(app.db, user, b.deck_id, [asked, ...r.messages], b.files ?? []);
+      // a draft that made a deck becomes that deck's conversation
+      const created = b.deck_id ? undefined : await adoptDraft(app.db, user, decksIn(r.messages), since);
+      return { ...r, ...(created ? { deck_id: created } : {}) };
     }),
   );
   const ApplyBody = z.object({
@@ -520,7 +576,7 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
   http.post(
     "/api/agent/apply-comments",
     agentLimit,
-    agent(ApplyBody.parse, (client, model, b: z.infer<typeof ApplyBody>, onStep) =>
+    agent("apply-comments", ApplyBody.parse, (client, model, b: z.infer<typeof ApplyBody>, onStep) =>
       applyComments({ client, model, onStep, deck_id: b.deck_id, ...(b.comment_ids ? { comment_ids: b.comment_ids } : {}) }),
     ),
   );

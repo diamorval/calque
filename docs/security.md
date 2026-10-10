@@ -63,14 +63,23 @@ session id is checked server-side on every request (see Sessions and deprovision
 `CALQUE_OIDC_ISSUER` is set, the server refuses to start without `CALQUE_SECRET`, so an ephemeral
 data directory cannot silently rotate the key.
 
-The agent's conversation is not stored on the server: the browser keeps it and sends it with
-each turn.
+The web agent's conversation is stored on the server (`chats` table), so it follows the deck to
+another PC and to colleagues: one per deck, readable by whoever may open the deck and continued by
+its editors, and one private new-deck draft per user, which moves to the deck the agent creates.
+It holds the messages (prompts, the model's answers, tool results) and the ids of the attached
+uploads, at most 1 MB per conversation (the oldest turns go first). It is deleted with its deck;
+`clear_chat` (New conversation in the chat) empties it.
+
+Usage metering (`usage` table): per web agent run, the user and their teams, the model id, the
+input and output tokens the provider counted, the duration, and the deck id. Never the content.
+Admins read it summed per user, team and model (`usage_report`, `GET /api/admin/usage`).
 
 ## What is logged
 
 - **The audit log** (`audit` table): who did what, when, never the content itself. Deck create,
   edit (version and note), export, delete, share, unshare, general access change, link reset and
-  transfer; pack publish, edit and visibility change; model add, update, default and remove;
+  transfer, deck type change; pack publish, edit and visibility change; model add, update, default,
+  remove, team restriction and team default;
   sign-in; session revocation by an admin (`revoke_sessions`); SCIM user create, update, activate,
   deactivate and delete (actor `scim`); Microsoft 365 connect, disconnect and saves; slide library
   add, approve and remove; retention purges. Rows outlive what they name: a deleted deck's history stays. Admins
@@ -79,18 +88,20 @@ each turn.
 - **Process output** (stderr): start-up, retention summaries, and the engine's error output when an
   engine call crashes. That output is a Python traceback, which may quote deck text. Send stderr
   to a log store with the same access rules as the data.
-- **No prompt logging.** The server does not log prompts, model answers or DeckSpecs. The model
-  provider's own retention applies to what it receives (see the table above).
+- **No prompt logging.** The server does not log prompts, model answers or DeckSpecs: the only
+  copy is the conversation itself (above), deleted with its deck. The model provider's own
+  retention applies to what it receives (see the table above).
 
 ## Deletion and retention
 
 - `delete_deck`, `DELETE /api/decks/:id`, or Delete on the Decks page: the deck's owner, or an
-  admin, erases the deck with its versions, comments, shares and its folder (built PPTX, renders,
-  imported base). This cannot be undone. The audit log keeps a record that the deck existed and
+  admin, erases the deck with its versions, comments, shares, agent conversation and its folder
+  (built PPTX, renders, imported base). This cannot be undone. The audit log keeps a record that the deck existed and
   who deleted it.
 - `CALQUE_RETENTION_DAYS=N` (off by default) runs at start-up and then daily. It deletes decks
-  whose latest version is more than N days old, and uploads older than N days, including leftover
-  inline imports. An upload that a remaining deck still uses is kept. Slide library entries are
+  whose latest version is more than N days old (with their conversation), uploads older than N
+  days, including leftover inline imports, new-deck chat drafts untouched for N days, and usage
+  rows older than N days. An upload that a remaining deck still uses is kept. Slide library entries are
   kept until a pack manager removes them: an entry is a copy, so deleting its source deck does not
   remove it.
 - Postgres backups and volume snapshots are the operator's to expire.

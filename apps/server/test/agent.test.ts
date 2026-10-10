@@ -6,7 +6,7 @@ import { fakeModel, lastResult, toolsCalled, type Reply } from "./fakes.ts";
 import { acmeDeck, ENGINE_TIMEOUT, LOCAL, testApp } from "./helpers.ts";
 
 type Json = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
-const NO_EXTRAS = { label: null, headers: [], resource: null, api_version: null, managed_identity: false };
+const NO_EXTRAS = { label: null, headers: [], resource: null, api_version: null, managed_identity: false, teams: [] };
 describe("web agent", { timeout: ENGINE_TIMEOUT }, () => {
   let app: App;
   let http: ReturnType<typeof createHttp>;
@@ -36,7 +36,7 @@ describe("web agent", { timeout: ENGINE_TIMEOUT }, () => {
   it("configures models: the env gateway is the default, a bad key is refused, a new default applies at once", async () => {
     const listed = (await api("/api/models")).json;
     expect(listed.providers.map((p: Json) => p.id)).toEqual(["anthropic", "openai", "azure", "mistral", "gemini", "ollama", "openai-compatible"]);
-    expect(listed.models).toEqual([{ id: "env", ...NO_EXTRAS, provider: "openai-compatible", model: "gateway-model", base_url: fake.url, has_key: true, is_default: true }]);
+    expect(listed.models).toEqual([{ id: "env", ...NO_EXTRAS, provider: "openai-compatible", model: "gateway-model", base_url: fake.url, has_key: true, is_default: true, your_default: true }]);
 
     const bad = await api("/api/models", { provider: "openai-compatible", model: "other", base_url: fake.url, api_key: "bad-key" });
     expect(bad.status).toBe(422);
