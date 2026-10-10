@@ -8,7 +8,7 @@ test("alice shares a deck: bob as viewer, anyone with the link may comment, then
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
   await signIn(page, "alice");
   const deck = { ...JSON.parse(readFileSync(DECK, "utf8")), title: "Board update" };
-  const { deck_id: id } = await (await page.request.post("/api/tools/create_deck", { data: { deck } })).json();
+  const { deck_id: id } = await (await page.request.post("/api/tools/create_deck", { data: { deck }, headers: { origin: new URL(page.url()).origin } })).json();
   await page.goto(`/d/${id}`);
   await expect(page.getByRole("heading", { name: "Board update" })).toBeVisible();
 
@@ -41,7 +41,7 @@ test("alice shares a deck: bob as viewer, anyone with the link may comment, then
   await guest.getByRole("button", { name: "Shape 2 (title)" }).click();
   await guest.getByLabel(/Comment on slide 1, shape 2/).fill("Looks good from outside");
   await guest.getByRole("button", { name: "Comment", exact: true }).click();
-  const comments = async () => (await (await page.request.post("/api/tools/list_comments", { data: { deck_id: id } })).json()).comments;
+  const comments = async () => (await (await page.request.post("/api/tools/list_comments", { data: { deck_id: id }, headers: { origin: new URL(page.url()).origin } })).json()).comments;
   await expect.poll(comments).toEqual([expect.objectContaining({ text: "Looks good from outside", author: "guest" })]);
 
   // alice resets the link: the copied one opens nothing any more
@@ -67,6 +67,6 @@ test("alice shares a deck: bob as viewer, anyone with the link may comment, then
   for (const name of ["Add slides", "Review", "Share"]) await expect(page.getByRole("button", { name, exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Comment", exact: true })).toHaveCount(0);
   await expect(page.getByRole("tab", { name: /Agent/ })).toHaveCount(0);
-  const patch = await page.request.post("/api/tools/patch_deck", { data: { deck_id: id, ops: [{ op: "set", slide: "cover", shape_id: 2, value: "x" }] } });
+  const patch = await page.request.post("/api/tools/patch_deck", { data: { deck_id: id, ops: [{ op: "set", slide: "cover", shape_id: 2, value: "x" }] }, headers: { origin: new URL(page.url()).origin } });
   expect(patch.status()).toBe(403);
 });
