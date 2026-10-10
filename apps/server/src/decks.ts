@@ -1,12 +1,12 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { existsSync, statSync } from "node:fs";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import type { DeckSpec, PatchOp } from "@calque/deckspec";
 import { audit } from "./audit.ts";
 import type { Db } from "./db.ts";
 import { engine } from "./engine.ts";
-import { FILE_REF, getFile } from "./files.ts";
+import { FILE_REF, getFile, saveFile, uploadPath } from "./files.ts";
 import { isAdmin } from "./models.ts";
 import { Forbidden, getPack, listPacks, NotFound, visible, type PackRow, type User } from "./packs.ts";
 
@@ -71,7 +71,10 @@ interface DeckRow {
   id: string;
   pack_id: string;
   owner: string;
+  /** The current DeckSpec's title. */
   title: string;
+  /** The name set by rename_deck, shown instead of `title`; null: none. */
+  name: string | null;
   head: number;
   general_access: GeneralAccess;
   general_role: "viewer" | "commenter";
@@ -198,34 +201,84 @@ export class Decks {
       user.anonymous || (row.general_access === "anyone" && presents(user, row))
         ? ((await this.db.query<PackRow>("select * from packs where id = $1", [row.pack_id])).rows[0] as PackRow)
         : await getPack(this.db, user, row.pack_id);
-    return { ...row, packDir: pack.dir, role };
+    return { ...row, title: row.name ?? row.title, packDir: pack.dir, role };
   }
 
   /** The user's decks and the decks shared with them, with their role, newest change first (decks
-  on packs they no longer see are left out). */
-  async list(user: User) {
-    const { rows } = await this.db.query<DeckRow & { updated_at: string }>(
-      `select d.*, v.created_at as updated_at from decks d
+  on packs they no longer see are left out). `pack_id` keeps the decks on that pack; `query` the
+  decks whose name or current slides' text contain every word of it (case and accents ignored), so
+  a client's name finds the decks made for it. */
+  async list(user: User, filter: { query?: string | undefined; pack_id?: string | undefined } = {}) {
+    const { rows } = await this.db.query<DeckRow & { updated_at: string; spec: DeckSpec }>(
+      `select d.*, v.created_at as updated_at, v.spec from decks d
        join deck_versions v on v.deck_id = d.id and v.version = d.head
-       where d.owner = $1 or d.id in (select deck_id from deck_shares
-         where (principal_type = 'user' and principal = $1) or (principal_type = 'team' and principal = any($2::text[])))
+       where (d.owner = $1 or d.id in (select deck_id from deck_shares
+         where (principal_type = 'user' and principal = $1) or (principal_type = 'team' and principal = any($2::text[]))))
+         and ($3::text is null or d.pack_id = $3)
        order by v.created_at desc`,
-      [user.id, user.teams],
+      [user.id, user.teams, filter.pack_id || null],
     );
     const seen = new Set((await listPacks(this.db, user, { archived: true })).map((p) => p.id));
+    const words = fold(filter.query ?? "").split(/\s+/).filter(Boolean);
+    const matches = (r: DeckRow & { spec: DeckSpec }) => {
+      if (!words.length) return true;
+      const text = fold([r.name ?? "", ...strings(r.spec)].join("\n"));
+      return words.every((w) => text.includes(w));
+    };
     const grants = await granted(this.db, user, rows.filter((r) => r.owner !== user.id).map((r) => r.id));
     return rows
-      .filter((r) => seen.has(r.pack_id))
-      .map(({ id, pack_id, pack_version, owner, title, head, updated_at }) => ({
+      .filter((r) => seen.has(r.pack_id) && matches(r))
+      .map(({ id, pack_id, pack_version, owner, title, name, head, updated_at }) => ({
         id,
         pack_id,
         pack_version,
         owner,
-        title,
+        title: name ?? title,
         head,
         updated_at,
         role: owner === user.id ? ("owner" as Role) : (grants.get(id) as Role),
       }));
+  }
+
+  /** Name deck `id` (an editor): lists and the editor show it instead of its DeckSpec title. No new
+  version, the slides do not change. An empty name goes back to the DeckSpec title. */
+  async rename(user: User, id: string, name: string) {
+    const deck = await this.deck(user, id, "editor");
+    const next = name.trim() || null;
+    await this.db.query("update decks set name = $2 where id = $1", [id, next]);
+    await audit(this.db, user, "rename", "deck", id, { from: deck.title, to: next });
+    const { rows } = await this.db.query<{ title: string }>("select coalesce(name, title) as title from decks where id = $1", [id]);
+    return { deck_id: id, title: rows[0]?.title ?? deck.title };
+  }
+
+  /** A new deck owned by `user` (a viewer of `id`): a copy of `id`'s current version, as its v1. The
+  history, comments and shares stay with the original. The imported file comes along, and the
+  uploaded images it places are copied to `user`'s uploads. */
+  async duplicate(user: User, id: string, name?: string) {
+    if (user.anonymous) throw new Forbidden("sign in to duplicate a deck");
+    const src = await this.deck(user, id, "viewer");
+    let spec = await this.spec(id, src.head);
+    const copy = randomUUID();
+    await mkdir(this.dir(copy), { recursive: true });
+    try {
+      if (spec.base) await cp(this.basePath(id, spec.base), join(this.dir(copy), spec.base));
+      const refs = new Map<string, string>();
+      mapFileRefs(spec, (fid) => (refs.set(fid, fid), fid));
+      for (const fid of refs.keys()) {
+        const { rows } = await this.db.query<{ name: string; type: string }>("select name, type from files where id = $1", [fid]);
+        if (!rows[0]) throw new NotFound(`deck ${id} places file ${fid}, which no longer exists`);
+        const f = await saveFile(this.db, this.data, user, rows[0].name, rows[0].type, await readFile(uploadPath(this.data, fid)));
+        refs.set(fid, f.file_id);
+      }
+      spec = mapFileRefs(spec, (fid) => `${FILE_REF}${refs.get(fid) ?? fid}`);
+      const r = await this.create(user, spec, `duplicate of ${src.title} v${src.head}`, copy);
+      const title = name?.trim() || `${src.title} (copy)`;
+      await this.db.query("update decks set name = $2 where id = $1", [copy, title]);
+      return { ...r, title, duplicated_from: id };
+    } catch (e) {
+      await rm(this.dir(copy), { recursive: true, force: true });
+      throw e;
+    }
   }
 
   async spec(id: string, version: number): Promise<DeckSpec> {
@@ -641,6 +694,21 @@ export class Decks {
     if (found.length) await this.db.query("update comments set status = $3 where deck_id = $1 and id = any($2)", [id, found, status]);
     return found;
   }
+}
+
+/** Lowercase, accents off: "Société" finds "societe". */
+const fold = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+
+/** The text a DeckSpec carries: its title and every string in its slides. */
+function strings(spec: DeckSpec): string[] {
+  const out = [spec.title];
+  const walk = (v: unknown): void => {
+    if (typeof v === "string") out.push(v);
+    else if (Array.isArray(v)) v.forEach(walk);
+    else if (v && typeof v === "object") Object.values(v).forEach(walk);
+  };
+  walk(spec.slides);
+  return out;
 }
 
 function summary(r: BuildReport) {

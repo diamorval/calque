@@ -67,6 +67,14 @@ export async function agent<T>(path: string, body: unknown, onStep: (tools: Tool
   return done;
 }
 
+/** The app's name and logo in the chrome, set by the deployment (white-label). */
+export interface Branding {
+  name: string;
+  /** An image URL; null: Calque's mark. */
+  logo: string | null;
+}
+export const NEUTRAL: Branding = { name: "Calque", logo: null };
+
 export interface Me {
   id: string;
   name?: string;
@@ -87,6 +95,8 @@ export interface Pack {
   /** The pack's current release (every publish, edit or restore adds one). */
   pack_version?: number;
   archived?: boolean;
+  /** The workspace's default pack, preselected for a new deck. */
+  default?: boolean;
   /** The caller manages it: its owner, or an admin. */
   editable: boolean;
 }

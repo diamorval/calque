@@ -3,7 +3,7 @@ import { Button } from "diametral-ds/button";
 import { DialogFooter } from "diametral-ds/dialog";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "diametral-ds/empty";
 import { Input } from "diametral-ds/input";
-import { FileUp, LayoutGrid, Plus, Trash2 } from "lucide-react";
+import { Copy, FileUp, LayoutGrid, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { api, fileArg, tool, type Pack } from "../api.ts";
 import { go, navigate } from "../nav.ts";
@@ -21,7 +21,13 @@ interface DeckRow {
 
 const ROLE = { owner: "Owner", editor: "Editor", commenter: "Commenter", viewer: "Viewer" };
 
-function DeckCard({ d, onDelete }: { d: DeckRow; onDelete?: () => void }) {
+interface CardActions {
+  onRename?: (() => void) | undefined;
+  onDuplicate: () => void;
+  onDelete?: (() => void) | undefined;
+}
+
+function DeckCard({ d, onRename, onDuplicate, onDelete }: { d: DeckRow } & CardActions) {
   return (
     <li className="cq-deck-item">
       <a className="cq-deck-card" href={`/d/${d.id}`} onClick={(e) => go(e, `/d/${d.id}`)}>
@@ -40,34 +46,84 @@ function DeckCard({ d, onDelete }: { d: DeckRow; onDelete?: () => void }) {
           )}
         </span>
       </a>
-      {onDelete && (
-        <Button size="icon" variant="outline" className="cq-deck-delete" aria-label={`Delete ${d.title}`} onClick={onDelete}>
-          <Trash2 />
+      <span className="cq-deck-actions">
+        {onRename && (
+          <Button size="icon" variant="outline" aria-label={`Rename ${d.title}`} title="Rename" onClick={onRename}>
+            <Pencil />
+          </Button>
+        )}
+        <Button size="icon" variant="outline" aria-label={`Duplicate ${d.title}`} title="Duplicate" onClick={onDuplicate}>
+          <Copy />
         </Button>
-      )}
+        {onDelete && (
+          <Button size="icon" variant="outline" aria-label={`Delete ${d.title}`} title="Delete" onClick={onDelete}>
+            <Trash2 />
+          </Button>
+        )}
+      </span>
     </li>
   );
 }
 
 export function Decks() {
   const [all, setAll] = useState<DeckRow[] | null>(null);
+  const [packs, setPacks] = useState<Pack[]>([]);
+  const [query, setQuery] = useState("");
+  const [packId, setPackId] = useState("");
   const [importing, setImporting] = useState(false);
+  const [renaming, setRenaming] = useState<DeckRow | null>(null);
   const [deleting, setDeleting] = useState<DeckRow | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const load = () => api<{ decks: DeckRow[] }>("/api/decks").then((r) => setAll(r.decks));
+  const filtered = !!query.trim() || !!packId;
+  const load = () => {
+    const q = new URLSearchParams();
+    if (query.trim()) q.set("q", query.trim());
+    if (packId) q.set("pack_id", packId);
+    return api<{ decks: DeckRow[] }>(`/api/decks${q.size ? `?${q}` : ""}`).then((r) => setAll(r.decks));
+  };
   useEffect(() => {
-    void load();
+    // the search runs on the server (titles and slide text): wait for the typing to pause
+    const t = setTimeout(() => void load(), query ? 250 : 0);
+    return () => clearTimeout(t);
+  }, [query, packId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    tool<{ packs: Pack[] }>("list_packs").then((r) => setPacks(r.packs), () => setPacks([]));
   }, []);
-  async function remove(d: DeckRow) {
-    setDeleting(null);
+
+  async function run(label: string, fn: () => Promise<unknown>) {
     setError(null);
+    setBusy(label);
     try {
-      await api(`/api/decks/${encodeURIComponent(d.id)}`, undefined, "DELETE");
-      await load();
+      await fn();
     } catch (err) {
       setError((err as Error).message);
+    } finally {
+      setBusy(null);
     }
   }
+  const remove = (d: DeckRow) => {
+    setDeleting(null);
+    return run(`Deleting ${d.title}`, async () => {
+      await api(`/api/decks/${encodeURIComponent(d.id)}`, undefined, "DELETE");
+      await load();
+    });
+  };
+  const rename = (d: DeckRow, title: string) => {
+    setRenaming(null);
+    return run(`Renaming ${d.title}`, async () => {
+      await tool("rename_deck", { deck_id: d.id, title });
+      await load();
+    });
+  };
+  // the copy opens in the editor, as a new deck of the caller's
+  const duplicate = (d: DeckRow) =>
+    run(`Duplicating ${d.title}`, async () => navigate(`/d/${(await tool<{ deck_id: string }>("duplicate_deck", { deck_id: d.id })).deck_id}`));
+  const actions = (d: DeckRow): CardActions => ({
+    onRename: d.role === "owner" || d.role === "editor" ? () => setRenaming(d) : undefined,
+    onDuplicate: () => void duplicate(d),
+    onDelete: d.role === "owner" ? () => setDeleting(d) : undefined,
+  });
   const decks = all && all.filter((d) => d.role === "owner");
   const shared = all?.filter((d) => d.role !== "owner") ?? [];
 
@@ -81,13 +137,41 @@ export function Decks() {
           <Plus /> New deck
         </Button>
       </PageHead>
+      {(filtered || !!all?.length) && (
+        <div className="cq-deck-filters" role="search">
+          <span className="cq-deck-search">
+            <Search aria-hidden />
+            <Input type="search" aria-label="Search decks" placeholder="Search by title, client or slide text" value={query} onChange={(e) => setQuery(e.target.value)} />
+          </span>
+          <select className="cq-select" aria-label="Brand pack filter" value={packId} onChange={(e) => setPackId(e.target.value)}>
+            <option value="">All brand packs</option>
+            {packs.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       {error && (
         <Alert variant="destructive">
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
+      {busy && <Spinner label={busy} />}
       {!decks && <Spinner label="Loading decks" />}
-      {decks?.length === 0 && (
+      {filtered && all?.length === 0 && (
+        <Empty className="border">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <Search />
+            </EmptyMedia>
+            <EmptyTitle>No deck matches</EmptyTitle>
+            <EmptyDescription>Try other words, or another brand pack.</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      )}
+      {!filtered && decks?.length === 0 && (
         <Empty className="border">
           <EmptyHeader>
             <EmptyMedia variant="icon">
@@ -108,14 +192,16 @@ export function Decks() {
       )}
       {!!decks?.length && (
         <ul className="cq-deck-grid">
-          <li>
-            <a className="cq-deck-card cq-deck-new" href="/new" onClick={(e) => go(e, "/new")}>
-              <Plus />
-              <span>Start from a brief</span>
-            </a>
-          </li>
+          {!filtered && (
+            <li>
+              <a className="cq-deck-card cq-deck-new" href="/new" onClick={(e) => go(e, "/new")}>
+                <Plus />
+                <span>Start from a brief</span>
+              </a>
+            </li>
+          )}
           {decks.map((d) => (
-            <DeckCard key={d.id} d={d} onDelete={() => setDeleting(d)} />
+            <DeckCard key={d.id} d={d} {...actions(d)} />
           ))}
         </ul>
       )}
@@ -124,12 +210,13 @@ export function Decks() {
           <h2>Shared with me</h2>
           <ul className="cq-deck-grid">
             {shared.map((d) => (
-              <DeckCard key={d.id} d={d} />
+              <DeckCard key={d.id} d={d} {...actions(d)} />
             ))}
           </ul>
         </section>
       )}
       {importing && <ImportPptx onClose={() => setImporting(false)} />}
+      {renaming && <RenameDeck deck={renaming} onClose={() => setRenaming(null)} onRename={(title) => void rename(renaming, title)} />}
       {deleting && (
         <Dialog title={`Delete ${deleting.title}?`} onClose={() => setDeleting(null)}>
           <div className="cq-dialog-body">
@@ -149,6 +236,34 @@ export function Decks() {
   );
 }
 
+/** Rename a deck (rename_deck): the name the lists show; empty goes back to its DeckSpec title. */
+function RenameDeck({ deck, onClose, onRename }: { deck: DeckRow; onClose: () => void; onRename: (title: string) => void }) {
+  const [title, setTitle] = useState(deck.title);
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    onRename(title);
+  };
+  return (
+    <Dialog title="Rename deck" onClose={onClose}>
+      <form onSubmit={submit}>
+        <div className="cq-dialog-body">
+          <Field label="Name" htmlFor="r-title" hint="Shown in the deck lists; the slides do not change. Leave it empty to use the deck's own title.">
+            <Input id="r-title" autoFocus maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} />
+          </Field>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" type="button" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit">
+            <Pencil /> Rename
+          </Button>
+        </DialogFooter>
+      </form>
+    </Dialog>
+  );
+}
+
 /** Import an existing .pptx on a brand pack (import_pptx), then open it in the editor. */
 function ImportPptx({ onClose }: { onClose: () => void }) {
   const [packs, setPacks] = useState<Pack[]>([]);
@@ -165,6 +280,7 @@ function ImportPptx({ onClose }: { onClose: () => void }) {
     tool<{ packs: Pack[] }>("list_packs").then((r) => {
       setPacks(r.packs);
       if (r.packs.length === 1) pick(r.packs[0]);
+      else pick(r.packs.find((p) => p.default));
     });
   }, []);
 

@@ -31,6 +31,7 @@ import {
   replaceTemplate,
   replaceTokens,
   restorePack,
+  setDefaultPack,
   setVisibility,
   type User,
 } from "./packs.ts";
@@ -178,6 +179,10 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
   };
 
   http.get("/api/me", route(async (_, user) => ({ ...user, admin: isAdmin(user), auth: !!check })));
+  // The app's name and logo in the web chrome, before sign-in too: neutral unless the deployment
+  // white-labels it (CALQUE_APP_NAME, CALQUE_APP_LOGO: an image URL).
+  const branding = { name: process.env.CALQUE_APP_NAME || "Calque", logo: process.env.CALQUE_APP_LOGO || null };
+  http.get("/api/branding", (c) => c.json(branding));
 
   // Uploads: a file in (multipart field `file`), its file_id out, usable only by its uploader.
   // `?ticket=` (from the upload_url tool) stands in for the caller's credentials.
@@ -208,7 +213,8 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
     }),
   );
 
-  http.get("/api/decks", route(async (_, user) => ({ decks: await app.decks.list(user) })));
+  // ?q=: words in the title or slides; ?pack_id=: one pack (list_decks' query and pack_id)
+  http.get("/api/decks", route(async (c, user) => ({ decks: await app.decks.list(user, { query: c.req.query("q"), pack_id: c.req.query("pack_id") }) })));
   // the owner, or an admin
   http.delete("/api/decks/:id", route((c, user) => app.decks.remove(user, param(c, "id"))));
 
@@ -307,6 +313,11 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
   http.post(
     "/api/packs/:id/archive",
     route(async (c, user) => archivePack(app.db, user, param(c, "id"), z.object({ archived: z.boolean() }).parse(await body(c)).archived)),
+  );
+  // admins: the pack /new preselects ({default: false} clears it)
+  http.post(
+    "/api/packs/:id/default",
+    route(async (c, user) => setDefaultPack(app.db, user, param(c, "id"), z.object({ default: z.boolean().default(true) }).parse(await body(c)).default)),
   );
   http.get("/api/packs/:id/versions", route((c, user) => packVersions(app.db, user, param(c, "id"))));
   http.post(

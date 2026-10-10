@@ -39,7 +39,7 @@ describe("MCP server over Streamable HTTP", { timeout: ENGINE_TIMEOUT }, () => {
         "add_comment", "add_slides", "copy_slides", "create_deck", "delete_deck", "export_pdf", "export_pptx", "import_pack", "import_pptx", "lint_deck", "rebrand_deck",
         "list_comments", "list_packs", "open_deck", "patch_deck", "restore_version", "review_deck", "upload_url",
         "list_decks", "share_deck", "unshare_deck", "list_shares", "set_general_access", "reset_link", "transfer_deck",
-        "resolve_comments", "set_approval",
+        "resolve_comments", "set_approval", "rename_deck", "duplicate_deck",
       ].sort(),
     );
     const open = tools.find((t) => t.name === "open_deck");

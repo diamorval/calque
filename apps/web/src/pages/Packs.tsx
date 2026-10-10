@@ -7,7 +7,7 @@ import { Stepper, StepperIndicator, StepperItem, StepperSeparator, StepperTitle 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "diametral-ds/table";
 import { Tag } from "diametral-ds/tag";
 import { Textarea } from "diametral-ds/textarea";
-import { Archive, ArchiveRestore, FileUp, Globe, History, Lock, Pencil, Upload, X } from "lucide-react";
+import { Archive, ArchiveRestore, FileUp, Globe, History, Lock, Pencil, Star, Upload, X } from "lucide-react";
 import { Fragment, useCallback, useEffect, useState, type FormEvent } from "react";
 import { api, upload, type Me, type Pack } from "../api.ts";
 import { Field, FileDrop, PageHead, Spinner } from "../ui.tsx";
@@ -52,6 +52,7 @@ export function Packs({ me }: { me: Me }) {
     }
   };
   const archive = (p: Pack, archived: boolean) => act(() => api(`/api/packs/${p.id}/archive`, { archived }));
+  const makeDefault = (p: Pack, on: boolean) => act(() => api(`/api/packs/${p.id}/default`, { default: on }));
   const releases = (p: Pack) => act(async () => setHistory(await api<Releases>(`/api/packs/${p.id}/versions`)));
   const restore = (id: string, version: number) =>
     act(async () => {
@@ -127,6 +128,11 @@ export function Packs({ me }: { me: Me }) {
                         <Archive /> Archived
                       </Tag>
                     )}
+                    {p.default && (
+                      <Tag tone="success">
+                        <Star /> Default
+                      </Tag>
+                    )}
                   </TableCell>
                   <TableCell>{p.owner ?? <span className="cq-muted">Admins</span>}</TableCell>
                   <TableCell>{p.languages.join(", ")}</TableCell>
@@ -160,6 +166,11 @@ export function Packs({ me }: { me: Me }) {
                     {p.editable && (
                       <Button size="sm" variant="ghost" onClick={() => void releases(p)}>
                         <History /> History
+                      </Button>
+                    )}
+                    {me.admin && (p.default || (p.visibility === "workspace" && !p.archived)) && (
+                      <Button size="sm" variant="ghost" title="The pack New deck preselects for everyone" onClick={() => void makeDefault(p, !p.default)}>
+                        <Star /> {p.default ? "Unset default" : "Make default"}
                       </Button>
                     )}
                     {p.editable && (

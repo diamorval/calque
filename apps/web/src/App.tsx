@@ -1,7 +1,7 @@
 import { Avatar, AvatarFallback } from "diametral-ds/avatar";
 import { Cpu, LayoutGrid, LogOut, Moon, Palette, Plus, Sun, type LucideIcon } from "lucide-react";
 import { useEffect, useState } from "react";
-import { api, ApiError, type Me } from "./api.ts";
+import { api, ApiError, NEUTRAL, type Branding, type Me } from "./api.ts";
 import { go, usePath } from "./nav.ts";
 import { Decks } from "./pages/Decks.tsx";
 import { Editor } from "./pages/Editor.tsx";
@@ -10,7 +10,7 @@ import { Models } from "./pages/Models.tsx";
 import { NewDeck } from "./pages/NewDeck.tsx";
 import { Packs } from "./pages/Packs.tsx";
 import { Presenter } from "./pages/Presenter.tsx";
-import { Mark, Spinner } from "./ui.tsx";
+import { Logo, Spinner } from "./ui.tsx";
 
 function page(path: string, me: Me) {
   const deck = path.match(/^\/d\/([^/]+)/)?.[1];
@@ -64,11 +64,17 @@ export function App() {
   const path = usePath();
   const [theme, toggleTheme] = useTheme();
   const [me, setMe] = useState<Me | null | "signed-out">(null);
+  const [brand, setBrand] = useState<Branding>(NEUTRAL);
   useEffect(() => {
     api<Me>("/api/me").then(setMe, (e) => setMe(e instanceof ApiError && e.status === 401 ? "signed-out" : null));
+    // the deployment's name and logo (white-label); the neutral one if it cannot be read
+    api<Branding>("/api/branding").then(setBrand, () => setBrand(NEUTRAL));
   }, []);
+  useEffect(() => {
+    document.title = brand.name;
+  }, [brand.name]);
 
-  if (me === "signed-out") return <Login />;
+  if (me === "signed-out") return <Login brand={brand} />;
   if (!me)
     return (
       <div className="cq-center">
@@ -82,8 +88,8 @@ export function App() {
   return (
     <div className="cq-app">
       <nav className="cq-side" aria-label="Main">
-        <a className="cq-logo" href="/" aria-label="Calque home" onClick={(e) => go(e, "/")}>
-          <Mark />
+        <a className="cq-logo" href="/" aria-label={`${brand.name} home`} title={brand.name} onClick={(e) => go(e, "/")}>
+          <Logo brand={brand} />
         </a>
         <NavItem href="/" label="Decks" short="Decks" icon={LayoutGrid} active={path === "/" || path.startsWith("/d/")} />
         <NavItem href="/new" label="New deck" short="New" icon={Plus} active={path === "/new"} />

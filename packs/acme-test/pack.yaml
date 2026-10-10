@@ -1,6 +1,8 @@
 id: acme-test
 name: Acme Test
 version: 0.1.0
+# a test fixture: seeded only with CALQUE_TEST_PACKS=1 (tests, e2e, dev), never in a client workspace
+test: true
 default_language: en
 missing_value: { en: "[TO COMPLETE]", fr: "[À COMPLÉTER]" }
 roles:
