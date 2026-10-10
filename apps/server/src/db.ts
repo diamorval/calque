@@ -14,6 +14,17 @@ create table if not exists packs (
   teams jsonb not null default '[]',
   owner text
 );
+alter table packs add column if not exists version int not null default 1;
+alter table packs add column if not exists archived boolean not null default false;
+create table if not exists pack_versions (
+  pack_id text not null references packs(id),
+  version int not null,
+  dir text not null,
+  note text not null,
+  author text,
+  created_at timestamptz not null default now(),
+  primary key (pack_id, version)
+);
 create table if not exists decks (
   id uuid primary key,
   pack_id text not null references packs(id),
@@ -22,6 +33,7 @@ create table if not exists decks (
   head int not null,
   created_at timestamptz not null default now()
 );
+alter table decks add column if not exists pack_version int;
 create table if not exists deck_versions (
   deck_id uuid not null references decks(id),
   version int not null,
