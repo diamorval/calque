@@ -158,11 +158,14 @@ def test_source_line_under_the_chart(manifest, tmp_path):
     assert next(sh for sh in plain if sh.has_chart).height > frame.height
 
 
-def test_source_goes_in_the_pack_slot(tmp_path):
+@pytest.mark.parametrize("manifest", PACKS, ids=lambda p: p.parent.name)
+def test_source_goes_in_the_pack_slot(manifest, tmp_path):
     """A content slide mapping a `source` slot gets the text there; with no source the slot goes."""
-    pack = load_pack(REPO / "packs" / "diametral")
+    pack = load_pack(manifest.parent)
     n = pack.slides_for("content")[0]
     tslide = next(s for s in pack.template_map["slides"] if s["number"] == n)
+    if "body" not in tslide.get("slots", {}):
+        pytest.skip("the content slide has no spare text shape to stand in for a source slot")
     body = tslide["slots"].pop("body")
     tslide["slots"]["source"] = body  # the body well stands in for a footnote placeholder
     build(_sourced(pack.id, "Source: survey"), pack, tmp_path / "s.pptx")
