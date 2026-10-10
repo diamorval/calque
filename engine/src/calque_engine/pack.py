@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -122,6 +123,7 @@ def load_pack(pack_dir: str | Path, _children: tuple[str, ...] = ()) -> Pack:
         for e in sorted(_validator().iter_errors(manifest), key=lambda e: list(e.path)):
             where = "/".join(str(p) for p in e.path) or "(root)"
             problems.append(f"pack.yaml {where}: {e.message}")
+        problems += _check_rules(manifest)
 
     raw_tokens = _read(d / "tokens.json", problems, json.loads)
     values: dict[str, Any] = {}
@@ -205,6 +207,22 @@ def describe(pack: Pack) -> dict[str, Any]:
         "docs": {k: str(v) for k, v in pack.docs.items()},
         "exemplar_dir": str(pack.exemplar_dir) if pack.exemplar_dir else None,
     }
+
+
+def _check_rules(manifest: Any) -> list[str]:
+    """Every `lint.slop_rules` pattern compiles as lint compiles it (else every lint fails)."""
+    if not isinstance(manifest, dict):
+        return []
+    rules = (manifest.get("lint") or {}).get("slop_rules") or []
+    out = []
+    for i, r in enumerate(rules):
+        if not isinstance(r, dict) or not isinstance(r.get("pattern"), str):
+            continue  # the schema reports it
+        try:
+            re.compile(r["pattern"], re.I | re.M)
+        except re.error as e:
+            out.append(f"lint.slop_rules[{i}] pattern {r['pattern']!r}: {e}")
+    return out
 
 
 def _check_roles(manifest: dict[str, Any], tmap: dict[str, Any]) -> list[str]:
