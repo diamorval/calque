@@ -3,9 +3,11 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import type { DeckSpec, PatchOp } from "@calque/deckspec";
+import { audit } from "./audit.ts";
 import type { Db } from "./db.ts";
 import { engine } from "./engine.ts";
 import { FILE_REF, getFile } from "./files.ts";
+import { isAdmin } from "./models.ts";
 import { Forbidden, getPack, listPacks, NotFound, visible, type PackRow, type User } from "./packs.ts";
 
 export interface Issue {
@@ -247,6 +249,7 @@ export class Decks {
       "insert into deck_versions (deck_id, version, spec, note, author, author_name) values ($1, 1, $2, $3, $4, $5)",
       [id, JSON.stringify(spec), note, user.id, nameOf(user)],
     );
+    await audit(this.db, user, "create", "deck", id, { title: spec.title, pack_id: spec.pack_id, note });
     return { deck_id: id, version: 1, ...summary(report) };
   }
 
@@ -275,6 +278,7 @@ export class Decks {
       "insert into deck_versions (deck_id, version, spec, note, author, author_name, undo_to) values ($1, $2, $3, $4, $5, $6, $7)",
       [id, next, JSON.stringify(spec), note, user.id, nameOf(user), undoTo],
     );
+    await audit(this.db, user, "edit", "deck", id, { version: next, note });
     return { deck_id: id, version: next, ...summary(report) };
   }
 
@@ -429,7 +433,29 @@ export class Decks {
 
   async exportPath(user: User, id: string, version?: number): Promise<{ version: number; path: string }> {
     const { version: v, report } = await this.report(user, id, version);
+    await audit(this.db, user, "export", "deck", id, { version: v });
     return { version: v, path: report.path };
+  }
+
+  /** Erase deck `id`: its versions, comments, shares and every file under its folder (built PPTX,
+  renders, imported base). The owner, or a signed-in admin. The audit log keeps that it existed. */
+  remove(user: User, id: string) {
+    return this.serial(id, () => this.removeNow(user, id));
+  }
+
+  private async removeNow(user: User, id: string) {
+    const { rows } = await this.db.query<DeckRow>("select * from decks where id = $1", [id]).catch(() => ({ rows: [] as DeckRow[] }));
+    const row = rows[0];
+    const role = row ? await access(this.db, user, row) : null;
+    const admin = !user.anonymous && isAdmin(user);
+    if (!row || (!role && !admin)) throw new NotFound(`no deck ${JSON.stringify(id)}`);
+    if (role !== "owner" && !admin) throw new Forbidden(`owner access needed on deck ${id}`);
+    for (const t of ["comments", "deck_shares", "deck_versions"]) await this.db.query(`delete from ${t} where deck_id = $1`, [id]);
+    await this.db.query("delete from decks where id = $1", [id]);
+    await rm(this.dir(id), { recursive: true, force: true });
+    for (const k of this.renders.keys()) if (k.startsWith(`${id}@`)) this.renders.delete(k);
+    await audit(this.db, user, "delete", "deck", id, { title: row.title, owner: row.owner, pack_id: row.pack_id });
+    return { deck_id: id, deleted: true };
   }
 
   /** A comment on a slide (or one shape), or with `parent_id` a reply in that comment's thread. */

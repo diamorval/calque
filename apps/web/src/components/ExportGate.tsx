@@ -1,5 +1,5 @@
 // The soft export gate: a deck with lint ERRORs still exports, once the user says why. The reason
-// goes to export_pptx, which records it with the export (deck_audit).
+// goes to export_pptx, which records it with the export (audit log).
 import { Alert, AlertDescription } from "diametral-ds/alert";
 import { Button } from "diametral-ds/button";
 import { DialogFooter } from "diametral-ds/dialog";

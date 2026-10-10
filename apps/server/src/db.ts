@@ -80,14 +80,25 @@ create table if not exists deck_shares (
   created_at timestamptz not null default now(),
   primary key (deck_id, principal_type, principal)
 );
-create table if not exists deck_audit (
-  id serial primary key,
-  deck_id uuid not null references decks(id),
+-- audit.ts: who did what, when; no foreign key, a deleted deck's history stays
+create table if not exists audit (
+  id bigserial primary key,
+  at timestamptz not null default now(),
   actor text not null,
   action text not null,
-  detail jsonb not null default '{}',
-  created_at timestamptz not null default now()
+  target_type text not null,
+  target_id text,
+  detail jsonb not null default '{}'
 );
+create index if not exists audit_target on audit (target_type, target_id);
+-- the sharing-only deck_audit, folded into audit
+do $$ begin
+  if to_regclass('deck_audit') is not null then
+    insert into audit (at, actor, action, target_type, target_id, detail)
+      select created_at, actor, action, 'deck', deck_id::text, detail from deck_audit order by id;
+    drop table deck_audit;
+  end if;
+end $$;
 -- replaced by the deck's share link and general access
 drop table if exists deck_links;
 delete from deck_shares where principal_type not in ('user', 'team');

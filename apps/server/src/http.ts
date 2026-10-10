@@ -10,6 +10,7 @@ import { createMcpHandler, InMemoryTransport, oauthMetadataResponse } from "@mod
 import { applyComments, chat, type Message } from "@calque/agent";
 import { PROVIDERS, type ModelConfig, type ProviderId, type Step } from "@calque/llm";
 import { z } from "zod";
+import { auditLog } from "./audit.ts";
 import { discovery, gate, userOf, type AuthConfig } from "./auth.ts";
 import { Conflict } from "./decks.ts";
 import { EngineError, REPO } from "./engine.ts";
@@ -18,6 +19,7 @@ import { buildServer, UI_HTML } from "./mcp.ts";
 import { InvalidModel, isAdmin } from "./models.ts";
 import { addFont, draftDir, draftPack, editPack, Forbidden, NotFound, publishDraft, setVisibility, type User } from "./packs.ts";
 import { tokenUser } from "./preview.ts";
+import { clientAddress, rateLimit } from "./ratelimit.ts";
 import type { Sessions } from "./session.ts";
 import { resetLink, setGeneralAccess, shares, transfer } from "./shares.ts";
 import { TOOLS, toolNamed, type App } from "./tools.ts";
@@ -93,8 +95,21 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
     return user instanceof Response ? { id: "guest", teams: [], anonymous: true, key: k } : { ...user, key: k };
   }
 
+  // Body caps, checked before a body is read: a file upload (multipart), and a JSON call that may
+  // carry a file in base64 (import_pptx, import_pack), 4/3 of its size.
+  const tooLarge = (max: number) => (c: Context) => c.json({ error: "TooLarge", message: `request over ${Math.round(max / 1024 / 1024)} MB` }, 413);
+  const limit = bodyLimit({ maxSize: MAX_UPLOAD + 1024 * 1024, onError: tooLarge(MAX_UPLOAD) }); // + multipart framing; saveFile checks the file itself
+  const jsonLimit = bodyLimit({ maxSize: Math.ceil((MAX_UPLOAD * 4) / 3) + 1024 * 1024, onError: tooLarge(MAX_UPLOAD) });
+  // Throttles (per minute): sign-in per address, agent runs and model tests (a provider call) per caller.
+  const perUser = async (c: Context) => {
+    const u = await who(c);
+    return u instanceof Response ? clientAddress(c) : `user:${u.id}`;
+  };
+  const agentLimit = rateLimit({ max: 30, key: perUser });
+  const modelLimit = rateLimit({ max: 10, key: perUser });
+
   const mcp = createMcpHandler(({ authInfo }) => buildServer(app, userOf(authInfo)));
-  http.all("/mcp", async (c) => {
+  http.all("/mcp", jsonLimit, async (c) => {
     const a = check ? await check(c.req.raw) : undefined;
     if (a instanceof Response) return a;
     return mcp.fetch(c.req.raw, a ? { authInfo: a } : {});
@@ -108,6 +123,7 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
   }
 
   if (sessions) {
+    http.use("/auth/*", rateLimit({ max: 30 }));
     http.get("/auth/login", (c) => sessions.login(c));
     http.get("/auth/callback", async (c) => {
       try {
@@ -143,10 +159,6 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
 
   // Uploads: a file in (multipart field `file`), its file_id out, usable only by its uploader.
   // `?ticket=` (from the upload_url tool) stands in for the caller's credentials.
-  const limit = bodyLimit({
-    maxSize: MAX_UPLOAD + 1024 * 1024, // + multipart framing; saveFile checks the file itself
-    onError: (c) => c.json({ error: "TooLarge", message: `file over ${MAX_UPLOAD / 1024 / 1024} MB` }, 413),
-  });
   http.post("/api/files", limit, async (c) => {
     const ticket = c.req.query("ticket");
     const user = ticket ? await ticketUser(app.secret, ticket) : await who(c);
@@ -166,6 +178,7 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
   );
   http.post(
     "/api/tools/:name",
+    jsonLimit,
     route(async (c, user) => {
       const t = toolNamed(param(c, "name"));
       if (!t) throw new NotFound(`no tool ${param(c, "name")}`);
@@ -174,6 +187,8 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
   );
 
   http.get("/api/decks", route(async (_, user) => ({ decks: await app.decks.list(user) })));
+  // the owner, or an admin
+  http.delete("/api/decks/:id", route((c, user) => app.decks.remove(user, param(c, "id"))));
 
   // Admins (CALQUE_ADMIN_TEAM): who has access to a deck (never its link nor its content), make it
   // private, reset its link, transfer it.
@@ -182,6 +197,14 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
       if (!isAdmin(user)) throw new Forbidden("admins only");
       return fn(c, user);
     });
+  // The audit log, newest first: ?actor=&action=&target_type=&target_id=&since=&until=&limit=
+  http.get(
+    "/api/admin/audit",
+    admin(async (c) => {
+      const q = c.req.query();
+      return { events: await auditLog(app.db, { ...q, limit: q.limit ? Number(q.limit) : undefined }) };
+    }),
+  );
   http.get(
     "/api/admin/decks/:id/access",
     admin(async (c, user) => {
@@ -205,6 +228,7 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
   // Settings > Brand packs: draft from a template, review, publish; visibility per pack.
   http.post(
     "/api/packs/drafts",
+    limit,
     route(async (c, user) => {
       const { form, bytes } = await upload(c, "template");
       // optional: the company's own tokens.json instead of the drafted one
@@ -227,6 +251,7 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
   });
   http.post(
     "/api/packs/drafts/:id/fonts",
+    limit,
     route(async (c, user) => {
       const f = await upload(c, "font");
       return addFont(user, app.data, param(c, "id"), f.name, f.bytes);
@@ -250,7 +275,7 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
 
   // Settings > AI Models (PipesHub pattern). Keys go in, never out.
   http.get("/api/models", route(async () => ({ providers: app.models.catalog(), models: await app.models.list() })));
-  http.post("/api/models", route(async (c, user) => app.models.configure(user, ModelBody.parse(await body(c)))));
+  http.post("/api/models", modelLimit, route(async (c, user) => app.models.configure(user, ModelBody.parse(await body(c)))));
   http.post("/api/models/:id/default", route((c, user) => app.models.setDefault(user, param(c, "id"))));
   http.delete("/api/models/:id", route((c, user) => app.models.remove(user, param(c, "id"))));
 
@@ -294,6 +319,7 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
 
   http.post(
     "/api/agent/chat",
+    agentLimit,
     agent(ChatBody.parse, async (client, model, b: z.infer<typeof ChatBody>, onStep, user) => {
       const files = await Promise.all((b.files ?? []).map((id) => attachment(app.db, app.data, user, id)));
       return chat({ client, model, onStep, messages: b.messages as Message[], workflow: b.workflow, pack_id: b.pack_id, deck_id: b.deck_id, files });
@@ -306,6 +332,7 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
   });
   http.post(
     "/api/agent/apply-comments",
+    agentLimit,
     agent(ApplyBody.parse, (client, model, b: z.infer<typeof ApplyBody>, onStep) =>
       applyComments({ client, model, onStep, deck_id: b.deck_id, ...(b.comment_ids ? { comment_ids: b.comment_ids } : {}) }),
     ),

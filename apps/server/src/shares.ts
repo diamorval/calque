@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { audit as log } from "./audit.ts";
 import type { Db } from "./db.ts";
 import { access, type Decks, type GeneralAccess, type Role } from "./decks.ts";
 import { isAdmin } from "./models.ts";
@@ -10,7 +11,7 @@ per deck (`/decks/:id?k=<link_key>`) whose general access says who else it opens
 general role (viewer or commenter). Resetting the link rotates its key: every copy of the old one
 stops working. The owner manages all of it; an admin (CALQUE_ADMIN_TEAM) may only see who has
 access, transfer the deck, set it Private and reset its link, never read it. Every change is logged
-in deck_audit. */
+in the audit log (audit.ts). */
 
 export type PrincipalType = "user" | "team";
 export interface Share {
@@ -30,9 +31,8 @@ interface SharingRow {
   link_key: string;
 }
 
-export async function audit(db: Db, deckId: string, actor: User, action: string, detail: Record<string, unknown>) {
-  await db.query("insert into deck_audit (deck_id, actor, action, detail) values ($1, $2, $3, $4)", [deckId, actor.id, action, JSON.stringify(detail)]);
-}
+export const audit = (db: Db, deckId: string, actor: User, action: string, detail: Record<string, unknown>) =>
+  log(db, actor, action, "deck", deckId, detail);
 
 function principalOf(type: PrincipalType, principal: string): string {
   const p = principal.trim();

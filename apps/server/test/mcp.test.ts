@@ -36,7 +36,7 @@ describe("MCP server over Streamable HTTP", { timeout: ENGINE_TIMEOUT }, () => {
     const tools = (await client.listTools()).tools;
     expect(tools.map((t) => t.name).sort()).toEqual(
       [
-        "add_comment", "add_slides", "create_deck", "export_pptx", "import_pack", "import_pptx", "lint_deck",
+        "add_comment", "add_slides", "create_deck", "delete_deck", "export_pptx", "import_pack", "import_pptx", "lint_deck",
         "list_comments", "list_packs", "open_deck", "patch_deck", "restore_version", "review_deck", "upload_url",
         "list_decks", "share_deck", "unshare_deck", "list_shares", "set_general_access", "reset_link", "transfer_deck",
         "resolve_comments", "set_approval",

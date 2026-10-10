@@ -15,6 +15,8 @@ export interface SessionConfig {
   publicUrl: string;
   teamsClaim: string;
   secret: string; // CALQUE_SECRET
+  /** Told of each sign-in (the audit log). */
+  onSignIn?: ((user: User) => Promise<void>) | undefined;
 }
 
 const SESSION = "calque_session";
@@ -97,6 +99,7 @@ export function sessions(cfg: SessionConfig): Sessions {
         teams: Array.isArray(groups) ? groups.map((t) => String(t).replace(/^\//, "")) : [],
       };
       setCookie(c, SESSION, await seal(user, `${HOURS}h`), { ...cookie, maxAge: HOURS * 3600 });
+      await cfg.onSignIn?.({ id: user.sub, name: user.name, teams: user.teams });
       return c.redirect(String(login.back));
     },
 

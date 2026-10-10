@@ -3,7 +3,7 @@ import { Button } from "diametral-ds/button";
 import { DialogFooter } from "diametral-ds/dialog";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "diametral-ds/empty";
 import { Input } from "diametral-ds/input";
-import { FileUp, LayoutGrid, Plus } from "lucide-react";
+import { FileUp, LayoutGrid, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { api, fileArg, tool, type Pack } from "../api.ts";
 import { go, navigate } from "../nav.ts";
@@ -21,9 +21,9 @@ interface DeckRow {
 
 const ROLE = { owner: "Owner", editor: "Editor", commenter: "Commenter", viewer: "Viewer" };
 
-function DeckCard({ d }: { d: DeckRow }) {
+function DeckCard({ d, onDelete }: { d: DeckRow; onDelete?: () => void }) {
   return (
-    <li>
+    <li className="cq-deck-item">
       <a className="cq-deck-card" href={`/d/${d.id}`} onClick={(e) => go(e, `/d/${d.id}`)}>
         <span className="cq-deck-cover">
           <img src={`${import.meta.env.BASE_URL}decks/${d.id}/slides/1.png?v=${d.head}`} alt="" loading="lazy" />
@@ -40,6 +40,11 @@ function DeckCard({ d }: { d: DeckRow }) {
           )}
         </span>
       </a>
+      {onDelete && (
+        <Button size="icon" variant="outline" className="cq-deck-delete" aria-label={`Delete ${d.title}`} onClick={onDelete}>
+          <Trash2 />
+        </Button>
+      )}
     </li>
   );
 }
@@ -47,9 +52,22 @@ function DeckCard({ d }: { d: DeckRow }) {
 export function Decks() {
   const [all, setAll] = useState<DeckRow[] | null>(null);
   const [importing, setImporting] = useState(false);
+  const [deleting, setDeleting] = useState<DeckRow | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = () => api<{ decks: DeckRow[] }>("/api/decks").then((r) => setAll(r.decks));
   useEffect(() => {
-    api<{ decks: DeckRow[] }>("/api/decks").then((r) => setAll(r.decks));
+    void load();
   }, []);
+  async function remove(d: DeckRow) {
+    setDeleting(null);
+    setError(null);
+    try {
+      await api(`/api/decks/${encodeURIComponent(d.id)}`, undefined, "DELETE");
+      await load();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
   const decks = all && all.filter((d) => d.role === "owner");
   const shared = all?.filter((d) => d.role !== "owner") ?? [];
 
@@ -63,6 +81,11 @@ export function Decks() {
           <Plus /> New deck
         </Button>
       </PageHead>
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
       {!decks && <Spinner label="Loading decks" />}
       {decks?.length === 0 && (
         <Empty className="border">
@@ -92,7 +115,7 @@ export function Decks() {
             </a>
           </li>
           {decks.map((d) => (
-            <DeckCard key={d.id} d={d} />
+            <DeckCard key={d.id} d={d} onDelete={() => setDeleting(d)} />
           ))}
         </ul>
       )}
@@ -107,6 +130,21 @@ export function Decks() {
         </section>
       )}
       {importing && <ImportPptx onClose={() => setImporting(false)} />}
+      {deleting && (
+        <Dialog title={`Delete ${deleting.title}?`} onClose={() => setDeleting(null)}>
+          <div className="cq-dialog-body">
+            <p>Every version, comment and share goes with it, for everyone it is shared with. This cannot be undone.</p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleting(null)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={() => void remove(deleting)}>
+              <Trash2 /> Delete
+            </Button>
+          </DialogFooter>
+        </Dialog>
+      )}
     </div>
   );
 }

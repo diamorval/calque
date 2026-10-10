@@ -27,7 +27,7 @@ describe("collaboration and review", { timeout: ENGINE_TIMEOUT }, () => {
   };
   const comment = (user: User, args: Json) => call(user, "add_comment", { deck_id: id, ...args });
   const audit = async (deck: string, action: string) =>
-    (await app.db.query<Json>("select actor, detail from deck_audit where deck_id = $1 and action = $2 order by id", [deck, action])).rows;
+    (await app.db.query<Json>("select actor, detail from audit where target_type = 'deck' and target_id = $1 and action = $2 order by id", [deck, action])).rows;
 
   beforeAll(async () => {
     app = await testApp();

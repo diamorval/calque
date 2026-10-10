@@ -6,7 +6,7 @@ import { DeckSpec, PatchOp, Slide } from "@calque/deckspec";
 import type { Db } from "./db.ts";
 import type { Decks, Finding, Role } from "./decks.ts";
 import { REPO } from "./engine.ts";
-import { getFile, MAX_UPLOAD, uploadTicket } from "./files.ts";
+import { getFile, MAX_UPLOAD, TooLarge, uploadTicket } from "./files.ts";
 import type { Models } from "./models.ts";
 import { importPack, listPacks, type User } from "./packs.ts";
 import { userToken } from "./preview.ts";
@@ -62,10 +62,12 @@ async function materialize(app: App, user: User, f: z.infer<typeof File>): Promi
     return f.path;
   }
   if ("file_id" in f) return (await getFile(app.db, app.data, user, f.file_id)).path;
+  const bytes = Buffer.from(f.base64, "base64");
+  if (bytes.length > MAX_UPLOAD) throw new TooLarge(`file over ${MAX_UPLOAD / 1024 / 1024} MB: upload it (upload_url) and pass its file_id`);
   const dir = join(app.data, "uploads");
   await mkdir(dir, { recursive: true });
   const path = join(dir, `${randomUUID()}.pptx`);
-  await writeFile(path, Buffer.from(f.base64, "base64"));
+  await writeFile(path, bytes);
   return path;
 }
 
@@ -345,6 +347,14 @@ export const TOOLS = {
     input: z.object({}),
     readOnly: true,
     run: async (app, user) => ({ decks: await app.decks.list(user) }),
+  }),
+
+  delete_deck: tool({
+    title: "Delete deck",
+    description:
+      "The deck's owner, or an admin: delete the deck for good, with every version, comment, share and file built from it. Cannot be undone: ask the user to confirm first.",
+    input: z.object({ deck_id: deckId }),
+    run: (app, user, a) => app.decks.remove(user, a.deck_id),
   }),
 
   share_deck: tool({
