@@ -299,10 +299,16 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
       return chat({ client, model, onStep, messages: b.messages as Message[], workflow: b.workflow, pack_id: b.pack_id, deck_id: b.deck_id, files });
     }),
   );
-  const ApplyBody = z.object({ deck_id: z.string(), model: z.string().optional() });
+  const ApplyBody = z.object({
+    deck_id: z.string(),
+    model: z.string().optional(),
+    comment_ids: z.array(z.number().int()).min(1).optional().describe("Apply these open comments only; default: every open comment."),
+  });
   http.post(
     "/api/agent/apply-comments",
-    agent(ApplyBody.parse, (client, model, b: z.infer<typeof ApplyBody>, onStep) => applyComments({ client, model, onStep, deck_id: b.deck_id })),
+    agent(ApplyBody.parse, (client, model, b: z.infer<typeof ApplyBody>, onStep) =>
+      applyComments({ client, model, onStep, deck_id: b.deck_id, ...(b.comment_ids ? { comment_ids: b.comment_ids } : {}) }),
+    ),
   );
 
   // Web preview: the same slide UI as the MCP App, talking REST instead of the host bridge.
@@ -325,6 +331,16 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
     try {
       const b = TOOLS.add_comment.input.parse({ ...(await c.req.json()), deck_id: param(c, "id") });
       return c.json(await TOOLS.add_comment.run(app, user, b));
+    } catch (e) {
+      return fail(c, e);
+    }
+  });
+  http.post("/decks/:id/comments/resolve", async (c) => {
+    const user = await viewer(c);
+    if (user instanceof Response) return user;
+    try {
+      const b = TOOLS.resolve_comments.input.parse({ ...(await c.req.json()), deck_id: param(c, "id") });
+      return c.json(await TOOLS.resolve_comments.run(app, user, b));
     } catch (e) {
       return fail(c, e);
     }

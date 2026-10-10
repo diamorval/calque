@@ -114,8 +114,11 @@ export async function chat(i: ChatInput): Promise<{ text: string; messages: Mess
 }
 
 /** Apply a deck's open comments (each anchored on a slide id and shape_id) with patch_deck. */
-export async function applyComments(i: Omit<ChatInput, "messages" | "workflow"> & { deck_id: string }) {
-  const ask = `Apply every open comment on deck ${i.deck_id}. list_comments, open_deck to see the slides and shape_ids,
+export async function applyComments({ comment_ids, ...i }: Omit<ChatInput, "messages" | "workflow"> & { deck_id: string; comment_ids?: number[] }) {
+  const which = comment_ids?.length
+    ? `the open comment${comment_ids.length > 1 ? "s" : ""} ${comment_ids.join(", ")} (only these: leave the others open)`
+    : "every open comment";
+  const ask = `Apply ${which} on deck ${i.deck_id}. list_comments (read each thread's replies), open_deck to see the slides and shape_ids,
 then one patch_deck per comment (or one for all) passing the comment ids in \`resolves\`. A comment you cannot
 apply safely: leave it open and say why. Finish with lint_deck at 0 ERROR, then list what changed.`;
   return chat({ ...i, workflow: "edit-slides", messages: [{ role: "user", content: ask }] });

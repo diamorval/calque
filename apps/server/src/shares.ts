@@ -30,7 +30,7 @@ interface SharingRow {
   link_key: string;
 }
 
-async function audit(db: Db, deckId: string, actor: User, action: string, detail: Record<string, unknown>) {
+export async function audit(db: Db, deckId: string, actor: User, action: string, detail: Record<string, unknown>) {
   await db.query("insert into deck_audit (deck_id, actor, action, detail) values ($1, $2, $3, $4)", [deckId, actor.id, action, JSON.stringify(detail)]);
 }
 

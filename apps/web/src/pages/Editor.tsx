@@ -1,19 +1,21 @@
-import { DeckViewer, type DeckView, type NewComment } from "@calque/slide-ui";
+import { DeckViewer, type DeckView, type NewComment, type NewReply } from "@calque/slide-ui";
 import { Alert, AlertDescription } from "diametral-ds/alert";
 import { Button } from "diametral-ds/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "diametral-ds/table";
 import { Tag } from "diametral-ds/tag";
-import { CircleCheck, Download, History, ListChecks, ListPlus, Play, Share2, Sparkles, TriangleAlert, X } from "lucide-react";
+import { BadgeCheck, CircleCheck, Download, History, ListChecks, ListPlus, Play, Send, Share2, Sparkles, TriangleAlert, Undo2, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { agent, tool } from "../api.ts";
 import { Chat, type Ask } from "../components/Chat.tsx";
 import { AddSlides, ReviewDeck } from "../components/DeckActions.tsx";
+import { ExportWithErrors } from "../components/ExportGate.tsx";
 import { ShareDeck } from "../components/Share.tsx";
 import { bySeverity, type Finding, lintSummary } from "../lint.ts";
 import { navigate } from "../nav.ts";
 import { ago, Dialog, Spinner } from "../ui.tsx";
 
-type Deck = DeckView & { versions: { version: number; note: string; author: string; created_at: string }[] };
+type Deck = DeckView & { versions: { version: number; note: string; author: string; author_name: string | null; created_at: string }[] };
+const APPROVAL = { draft: "Draft", in_review: "In review", approved: "Approved" } as const;
 
 const EDITS = ["Tighten every title to one line", "Add an agenda slide after the cover", "Review the deck against the brand pack"];
 
@@ -27,7 +29,7 @@ export function Editor({ id }: { id: string }) {
   const [history, setHistory] = useState(false);
   // toolbar actions that go through the agent chat, and their dialogs
   const [ask, setAsk] = useState<Ask | null>(null);
-  const [dialog, setDialog] = useState<"add" | "review" | "share" | null>(null);
+  const [dialog, setDialog] = useState<"add" | "review" | "share" | "export" | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -70,6 +72,12 @@ export function Editor({ id }: { id: string }) {
   // a deck shared with the user: viewers read, commenters also comment, editors change it
   const role = deck.role ?? "owner";
   const edits = role === "editor" || role === "owner";
+  const errors = findings?.filter((f) => f.severity === "ERROR") ?? [];
+  const exportPptx = async (reason?: string) =>
+    location.assign((await tool<{ download_url: string }>("export_pptx", { deck_id: id, ...(reason ? { reason } : {}) })).download_url);
+  const approval = deck.approval?.enabled ? deck.approval : null;
+  const setApproval = (status: "draft" | "in_review" | "approved", label: string) =>
+    void run(label, () => tool("set_approval", { deck_id: id, status }));
   return (
     <>
       <DeckViewer
@@ -107,9 +115,33 @@ export function Editor({ id }: { id: string }) {
             <Button variant="outline" onClick={() => navigate(`/present/${id}`)}>
               <Play /> Present
             </Button>
-            <Button
-              onClick={async () => location.assign((await tool<{ download_url: string }>("export_pptx", { deck_id: id })).download_url)}
-            >
+            {approval && (
+              <>
+                <Tag tone={approval.status === "approved" ? "success" : approval.status === "in_review" ? "warning" : "neutral"}>{APPROVAL[approval.status]}</Tag>
+                {approval.can_request && (
+                  <Button variant="ghost" onClick={() => setApproval("in_review", "Requesting review")}>
+                    <Send /> Request review
+                  </Button>
+                )}
+                {approval.can_approve && (
+                  <>
+                    <Button variant="ghost" onClick={() => setApproval("approved", "Approving")}>
+                      <BadgeCheck /> Approve
+                    </Button>
+                    <Button variant="ghost" onClick={() => setApproval("draft", "Requesting changes")}>
+                      <Undo2 /> Request changes
+                    </Button>
+                  </>
+                )}
+                {approval.can_withdraw && !approval.can_approve && (
+                  <Button variant="ghost" onClick={() => setApproval("draft", "Back to draft")}>
+                    <Undo2 /> Back to draft
+                  </Button>
+                )}
+              </>
+            )}
+            {/* the soft gate: lint ERRORs ask for a reason, recorded with the export, never a block */}
+            <Button onClick={() => (errors.length ? setDialog("export") : void exportPptx().catch((e: Error) => setError(e.message)))}>
               <Download /> Export PPTX
             </Button>
             {role === "owner" && (
@@ -145,9 +177,19 @@ export function Editor({ id }: { id: string }) {
                 await tool("add_comment", { deck_id: id, ...c });
                 await reload();
               },
+              onReply: async (r: NewReply) => {
+                await tool("add_comment", { deck_id: id, ...r });
+                await reload();
+              },
             }
           : {})}
-        {...(edits ? { onApply: () => run("Applying comments", () => agent("/api/agent/apply-comments", { deck_id: id }, () => {})) } : {})}
+        {...(edits
+          ? {
+              onApply: (ids?: number[]) =>
+                run("Applying comments", () => agent("/api/agent/apply-comments", { deck_id: id, ...(ids ? { comment_ids: ids } : {}) }, () => {})),
+              onResolve: (ids: number[], status: "open" | "resolved") => run("", () => tool("resolve_comments", { deck_id: id, comment_ids: ids, status })),
+            }
+          : {})}
       />
       {error && (
         <div className="cq-toast" role="alert">
@@ -158,6 +200,7 @@ export function Editor({ id }: { id: string }) {
         </div>
       )}
       {dialog === "share" && <ShareDeck deck_id={id} onClose={() => setDialog(null)} />}
+      {dialog === "export" && <ExportWithErrors errors={errors} onClose={() => setDialog(null)} onExport={exportPptx} />}
       {dialog === "add" && <AddSlides onClose={() => setDialog(null)} onAsk={setAsk} />}
       {dialog === "review" && (
         <ReviewDeck
@@ -192,7 +235,7 @@ export function Editor({ id }: { id: string }) {
                       {v.note}
                       <div className="cq-hint">{ago(v.created_at)}</div>
                     </TableCell>
-                    <TableCell>{v.author}</TableCell>
+                    <TableCell>{v.author_name || v.author}</TableCell>
                     <TableCell>
                       {v.version === deck.head ? (
                         <Tag>Current</Tag>

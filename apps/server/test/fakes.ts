@@ -121,5 +121,6 @@ export async function fakeOidc(audience = "calque") {
     res.end();
   });
   issuer = `${await listen(server)}/realms/test`;
-  return { server, issuer, token: (user: string, groups = USERS[user]?.groups ?? []) => sign({ sub: user, groups }, audience) };
+  const token = (user: string, groups = USERS[user]?.groups ?? []) => sign({ sub: user, ...(USERS[user] ? { name: USERS[user].name } : {}), groups }, audience);
+  return { server, issuer, token };
 }

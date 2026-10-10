@@ -3,13 +3,15 @@ import { App } from "@modelcontextprotocol/ext-apps";
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { DeckViewer } from "../src/DeckViewer.tsx";
-import type { DeckView, NewComment } from "../src/types.ts";
+import type { DeckView, NewComment, NewReply } from "../src/types.ts";
 import "../src/styles.css";
 
 interface Backend {
   load(): Promise<DeckView | null>;
-  comment(c: NewComment): Promise<void>;
-  apply?: () => Promise<void>;
+  comment(c: NewComment | NewReply): Promise<void>;
+  resolve(ids: number[], status: "open" | "resolved"): Promise<void>;
+  /** Hand comments `ids` (default: every open one) to the agent. */
+  apply?: (ids?: number[]) => Promise<void>;
   /** Subscribe to "something new to show" (a tool result, a newer version). */
   watch(changed: () => void): void;
 }
@@ -34,6 +36,14 @@ function web(id: string): Backend {
     },
     async comment(c) {
       const res = await fetch(`${base}/comments${q}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(c) });
+      if (!res.ok) throw new Error((await res.json()).message);
+    },
+    async resolve(comment_ids, status) {
+      const res = await fetch(`${base}/comments/resolve${q}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ comment_ids, status }),
+      });
       if (!res.ok) throw new Error((await res.json()).message);
     },
     watch(changed) {
@@ -63,6 +73,20 @@ function mcp(): Backend {
     }
   };
   const ready = app.connect();
+  /** Tell the model the open comment threads; the host keeps only the last context update, so
+  always send every one. */
+  const share = async () => {
+    if (!deckId) return;
+    const { comments } = (await call("list_comments", { deck_id: deckId })) as { comments: unknown[] };
+    await app.updateModelContext({
+      content: [
+        {
+          type: "text",
+          text: `Open comments on deck "${deck?.title}" (deck_id ${deckId}), anchored on slide id and shape_id, with their replies:\n${JSON.stringify(comments)}`,
+        },
+      ],
+    });
+  };
   return {
     async load() {
       await ready;
@@ -73,21 +97,18 @@ function mcp(): Backend {
     async comment(c) {
       if (!deckId) return;
       await call("add_comment", { deck_id: deckId, ...c });
-      const { comments } = (await call("list_comments", { deck_id: deckId })) as { comments: NewComment[] };
-      // the host keeps only the last context update: always send every open comment
-      await app.updateModelContext({
-        content: [
-          {
-            type: "text",
-            text: `Open comments on deck "${deck?.title}" (deck_id ${deckId}), anchored on slide id and shape_id:\n${JSON.stringify(comments)}`,
-          },
-        ],
-      });
+      await share();
     },
-    async apply() {
+    async resolve(comment_ids, status) {
+      if (!deckId) return;
+      await call("resolve_comments", { deck_id: deckId, comment_ids, status });
+      await share();
+    },
+    async apply(ids) {
+      const which = ids?.length ? `the open comment${ids.length > 1 ? "s" : ""} ${ids.join(", ")} (only these)` : "the open comments";
       await app.sendMessage({
         role: "user",
-        content: [{ type: "text", text: `Apply the open comments on deck ${deckId} with patch_deck, resolving each one.` }],
+        content: [{ type: "text", text: `Apply ${which} on deck ${deckId} with patch_deck, resolving each one.` }],
       });
     },
     watch(cb) {
@@ -123,19 +144,22 @@ function Root({ backend }: { backend: Backend }) {
         <span className="cq-spinner">Loading deck…</span>
       </div>
     );
-  // a viewer reads only; applying comments edits the deck
+  // a viewer reads only; applying comments edits the deck, resolving others' too
   const edits = !deck.role || deck.role === "editor" || deck.role === "owner";
+  const then = (fn: () => Promise<void>) => async () => {
+    await fn();
+    setDeck(await backend.load());
+  };
   return (
     <DeckViewer
       deck={deck}
       {...(deck.role !== "viewer"
         ? {
-            onComment: async (c: NewComment) => {
-              await backend.comment(c);
-              setDeck(await backend.load());
-            },
+            onComment: (c: NewComment) => then(() => backend.comment(c))(),
+            onReply: (r: NewReply) => then(() => backend.comment(r))(),
           }
         : {})}
+      {...(edits ? { onResolve: (ids: number[], status: "open" | "resolved") => then(() => backend.resolve(ids, status))() } : {})}
       {...(backend.apply && edits ? { onApply: backend.apply } : {})}
     />
   );
