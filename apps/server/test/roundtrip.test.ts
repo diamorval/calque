@@ -92,6 +92,28 @@ describe("PowerPoint round trip", { timeout: ENGINE_TIMEOUT }, () => {
     expect((await app.decks.deck(LOCAL, id, "viewer")).head).toBe(3);
   });
 
+  it("rebrand_deck moves a deck to another pack, and restore moves it back", async () => {
+    const deck = (await run(app, "create_deck", { deck: acmeDeck() })).deck_id;
+    const r = await run(app, "rebrand_deck", { deck_id: deck, pack_id: "diametral" });
+    expect(r.version).toBe(2);
+    expect(r.rebrand.redrawn).toEqual(["regions", "process", "mix", "plan"]);
+    expect(r.rebrand.moved).toEqual(["cover", "d1", "end"]);
+    expect((await app.decks.deck(LOCAL, deck, "viewer")).pack_id).toBe("diametral");
+    expect((await app.decks.spec(deck, 2)).pack_id).toBe("diametral");
+    expect((await run(app, "lint_deck", { deck_id: deck })).version).toBe(2);
+    expect((await run(app, "lint_deck", { deck_id: deck, version: 1 })).errors).toBe(0); // still on acme
+
+    const back = await run(app, "restore_version", { deck_id: deck, version: 1 });
+    expect(back.version).toBe(3);
+    expect((await app.decks.deck(LOCAL, deck, "viewer")).pack_id).toBe("acme-test");
+
+    // the re-imported deck has imported clones: refused unless they are dropped
+    await expect(run(app, "rebrand_deck", { deck_id: id, pack_id: "diametral" })).rejects.toThrow(/drop/);
+    const dropped = await run(app, "rebrand_deck", { deck_id: id, pack_id: "diametral", drop_imported: true });
+    expect(dropped.rebrand.dropped).toEqual(["cover", "d1", "end"]);
+    expect(dropped.slides).toEqual(["regions", "process", "mix", "plan"]);
+  });
+
   it("copy_slides needs view access on the source and refuses unknown slides", async () => {
     const bob: User = { id: "bob", teams: [] };
     const mine = (await run(app, "create_deck", { deck: acmeDeck() }, bob)).deck_id;

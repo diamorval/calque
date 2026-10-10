@@ -175,6 +175,23 @@ export const TOOLS = {
     },
   }),
 
+  rebrand_deck: tool({
+    title: "Re-brand deck",
+    description:
+      "Move a deck to another brand pack, as a new version (older versions stay on the old pack; restoring one moves the deck back). Charts, diagrams and compositions are redrawn on the new pack; cover, divider, closing and other template slides move to the new pack's slide for the same role, their text following the slot names (`unmapped` lists what did not follow and shows the missing-value marker). Imported slides cannot be re-branded: the call fails listing them unless `drop_imported` leaves them out. Lint the result.",
+    input: z.object({
+      deck_id: deckId,
+      pack_id: z.string().describe("The pack to move the deck to."),
+      drop_imported: z.boolean().default(false).describe("Leave out the imported slides, which cannot be re-branded."),
+    }),
+    ui: true,
+    role: "editor",
+    run: async (app, user, a) => {
+      const r = await app.decks.rebrand(user, a.deck_id, a.pack_id, a.drop_imported);
+      return { ...r, ...links(app, user, a.deck_id) };
+    },
+  }),
+
   open_deck: tool({
     title: "Open deck",
     description: "A deck's DeckSpec, version history, rendered slides (PNG URL + shape map with shape_id and bbox) and open comments.",

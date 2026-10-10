@@ -95,6 +95,14 @@ def op_graft(
     return {"path": out, "slides": list(range(start + 1, start + 1 + len(sources)))}
 
 
+def op_rebrand(pack: str, to_pack: str, deck: dict[str, Any], drop: bool = False) -> dict[str, Any]:
+    """Move `deck` from `pack` to `to_pack` (see `rebrand`): the new DeckSpec and the report."""
+    from .rebrand import rebrand
+
+    out, report = rebrand(deck, load_pack(pack), load_pack(to_pack), drop=drop)
+    return {"deck": out, "report": report}
+
+
 def op_extract(
     template: str,
     pack_id: str = "draft",
@@ -182,6 +190,7 @@ OPS = {
     "import": op_import,
     "extract": op_extract,
     "graft": op_graft,
+    "rebrand": op_rebrand,
     "lint": op_lint,
     "fix": op_fix,
     "render": op_render,

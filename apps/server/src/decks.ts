@@ -261,13 +261,14 @@ export class Decks {
   /** Store `spec` as the next version of `id`, if `id` is still at `from` (else Conflict). */
   async commit(user: User, id: string, from: number, spec: DeckSpec, note: string, undoTo: number | null = from) {
     const deck = await this.deck(user, id, "editor");
-    if (spec.pack_id !== deck.pack_id) throw new Error("a deck stays on its pack");
+    // a version on another pack is a re-brand (or a restore across one): the caller must see it
+    const packDir = spec.pack_id === deck.pack_id ? deck.packDir : (await getPack(this.db, user, spec.pack_id)).dir;
     await this.ownFiles(user, spec);
     const next = from + 1;
-    const report = await this.build(deck.packDir, id, spec, next);
+    const report = await this.build(packDir, id, spec, next);
     const { rows } = await this.db.query(
-      "update decks set head = $3, title = $4 where id = $1 and head = $2 returning head",
-      [id, from, next, spec.title],
+      "update decks set head = $3, title = $4, pack_id = $5 where id = $1 and head = $2 returning head",
+      [id, from, next, spec.title, spec.pack_id],
     );
     if (!rows.length) throw new Conflict(`deck ${id} changed since version ${from}: reopen it and retry`);
     await this.db.query(
@@ -345,7 +346,9 @@ export class Decks {
     const deck = await this.deck(user, id, "viewer");
     const v = version ?? deck.head;
     const spec = await this.spec(id, v);
-    return { deck, version: v, spec, report: await this.build(deck.packDir, id, spec, v) };
+    // a version from before a re-brand builds and lints on its own pack
+    const packDir = spec.pack_id === deck.pack_id ? deck.packDir : (await getPack(this.db, user, spec.pack_id)).dir;
+    return { deck: { ...deck, packDir }, version: v, spec, report: await this.build(packDir, id, spec, v) };
   }
 
   async lint(user: User, id: string, version?: number): Promise<{ version: number; findings: Finding[]; safe_checks: string[] }> {
@@ -451,6 +454,28 @@ export class Decks {
       await rm(join(this.dir(id), base), { force: true });
       throw e;
     }
+  }
+
+  /** Move deck `id` to pack `packId` as its next version (engine `rebrand`): drawn slides redraw
+  on the new pack, template clones move by role; imported clones cannot move (`drop` leaves them
+  out). Older versions stay on the old pack, and restoring one moves the deck back. */
+  rebrand(user: User, id: string, packId: string, drop = false) {
+    return this.serial(id, () => this.rebrandNow(user, id, packId, drop));
+  }
+
+  private async rebrandNow(user: User, id: string, packId: string, drop: boolean) {
+    const deck = await this.deck(user, id, "editor");
+    if (packId === deck.pack_id) throw new Error(`deck ${id} is already on ${packId}`);
+    const to = await getPack(this.db, user, packId);
+    const spec = await this.spec(id, deck.head);
+    const res = await engine<{ deck: DeckSpec; report: Record<string, unknown> }>("rebrand", {
+      pack: deck.packDir,
+      to_pack: to.dir,
+      deck: spec,
+      drop,
+    });
+    const r = await this.commit(user, id, deck.head, res.deck, `re-brand ${deck.pack_id} -> ${packId}`);
+    return { ...r, rebrand: res.report };
   }
 
   /** Copy slides of deck `from` (viewer access) into deck `to` (editor access) at `at`, as the next
