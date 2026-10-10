@@ -167,6 +167,11 @@
 .cq-icon-grid .cq-hint { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cq-stats { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
 .cq-team-pick { display: grid; gap: 6px; margin: 4px 0 12px; }
+/* pack edit: one lint rule per row (severity, languages, pattern, message), exemplar pages */
+.cq-rule { display: grid; gap: 8px; align-items: center; grid-template-columns: 7rem 5rem minmax(0, 1fr) minmax(0, 1fr) auto; }
+@media (max-width: 720px) { .cq-rule { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+.cq-file-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.cq-file-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 
 /* ---------- login ---------- */
 

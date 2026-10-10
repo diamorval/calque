@@ -7,7 +7,7 @@ import { Stepper, StepperIndicator, StepperItem, StepperSeparator, StepperTitle 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "diametral-ds/table";
 import { Tag } from "diametral-ds/tag";
 import { Textarea } from "diametral-ds/textarea";
-import { Archive, ArchiveRestore, FileUp, GitBranch, Globe, History, Lock, Pencil, ShieldCheck, Star, Upload, X } from "lucide-react";
+import { Archive, ArchiveRestore, Eye, FileUp, GitBranch, Globe, History, Lock, Pencil, Plus, ShieldCheck, Star, Trash2, Upload, Users, X } from "lucide-react";
 import { Fragment, useCallback, useEffect, useState, type FormEvent } from "react";
 import { api, upload, type Me, type Pack } from "../api.ts";
 import { go } from "../nav.ts";
@@ -28,6 +28,7 @@ export function Packs({ me }: { me: Me }) {
   const [opening, setOpening] = useState<string | null>(null);
   const [history, setHistory] = useState<Releases | null>(null);
   const [restricting, setRestricting] = useState<{ pack: Pack; teams: string[] } | null>(null);
+  const [managing, setManaging] = useState<{ pack: Pack; managers: string[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const reload = useCallback(() => api<{ packs: Pack[] }>("/api/packs").then((r) => setPacks(r.packs)), []);
   useEffect(() => {
@@ -54,6 +55,7 @@ export function Packs({ me }: { me: Me }) {
     }
   };
   const archive = (p: Pack, archived: boolean) => act(() => api(`/api/packs/${p.id}/archive`, { archived }));
+  const saveManagers = (p: Pack, managers: string[]) => act(() => api(`/api/packs/${p.id}/managers`, { managers }));
   const makeDefault = (p: Pack, on: boolean) => act(() => api(`/api/packs/${p.id}/default`, { default: on }));
   const releases = (p: Pack) => act(async () => setHistory(await api<Releases>(`/api/packs/${p.id}/versions`)));
   const restore = (id: string, version: number) =>
@@ -91,7 +93,7 @@ export function Packs({ me }: { me: Me }) {
     <div className="cq-page">
       <PageHead
         title="Brand packs"
-        description="Each company's template, charter and voice. A new pack is visible to your teams only until you share it. Its owner and the admins edit it; every save is a release you can roll back."
+        description="Each company's template, charter and voice. A new pack is visible to your teams only; an admin shares it with the whole workspace. Its owner, its co-managers and the admins edit it; every save is a release you can roll back."
       >
         {(me.admin || packs?.some((p) => p.editable)) && (
           <Button variant="outline" onClick={(e) => go(e, "/settings/compliance")}>
@@ -149,7 +151,10 @@ export function Packs({ me }: { me: Me }) {
                       </Tag>
                     )}
                   </TableCell>
-                  <TableCell>{p.owner ?? <span className="cq-muted">Admins</span>}</TableCell>
+                  <TableCell>
+                    {p.owner ?? <span className="cq-muted">Admins</span>}
+                    {p.managers?.length ? <div className="cq-hint">with {p.managers.join(", ")}</div> : null}
+                  </TableCell>
                   <TableCell>{p.languages.join(", ")}</TableCell>
                   <TableCell>
                     {p.visibility === "workspace" ? (
@@ -168,7 +173,7 @@ export function Packs({ me }: { me: Me }) {
                         <Pencil /> Edit
                       </Button>
                     )}
-                    {p.editable && p.visibility === "team" && (
+                    {me.admin && p.visibility === "team" && (
                       <Button size="sm" variant="outline" onClick={() => share(p, "workspace")}>
                         Share with the workspace
                       </Button>
@@ -176,6 +181,11 @@ export function Packs({ me }: { me: Me }) {
                     {p.editable && (
                       <Button size="sm" variant="ghost" onClick={() => setRestricting({ pack: p, teams: p.visibility === "team" ? p.teams : me.teams })}>
                         <Lock /> {p.visibility === "team" ? "Teams" : "Restrict to teams"}
+                      </Button>
+                    )}
+                    {(me.admin || (p.owner !== null && p.owner === me.id)) && (
+                      <Button size="sm" variant="ghost" onClick={() => setManaging({ pack: p, managers: p.managers ?? [] })}>
+                        <Users /> Managers
                       </Button>
                     )}
                     {p.editable && (
@@ -219,6 +229,20 @@ export function Packs({ me }: { me: Me }) {
             }}
           >
             Restrict to {restricting.teams.length ? restricting.teams.join(", ") : "its owner"}
+          </Button>
+        </Dialog>
+      )}
+      {managing && (
+        <Dialog title={`Who manages ${managing.pack.name}`} onClose={() => setManaging(null)}>
+          <p className="cq-hint">Besides its owner{managing.pack.owner ? ` (${managing.pack.owner})` : ""} and the admins: they edit it, restrict it to teams, archive it and roll it back.</p>
+          <TeamPicker options={[]} value={managing.managers} placeholder="A user id, then Enter" onChange={(managers) => setManaging({ ...managing, managers })} />
+          <Button
+            onClick={() => {
+              void saveManagers(managing.pack, managing.managers);
+              setManaging(null);
+            }}
+          >
+            Save managers
           </Button>
         </Dialog>
       )}
@@ -270,8 +294,9 @@ export function Packs({ me }: { me: Me }) {
   );
 }
 
-/** Pick teams: the caller's (`options`), and any other by name (an admin restricts to teams they are not in). */
-function TeamPicker({ options, value, onChange }: { options: string[]; value: string[]; onChange: (teams: string[]) => void }) {
+/** Pick teams: the caller's (`options`), and any other by name (an admin restricts to teams they are not in).
+Also picks a pack's co-managers (user ids, no options). */
+function TeamPicker({ options, value, onChange, placeholder = "Another team, then Enter" }: { options: string[]; value: string[]; onChange: (teams: string[]) => void; placeholder?: string }) {
   const [other, setOther] = useState("");
   const add = () => {
     const t = other.trim();
@@ -287,8 +312,8 @@ function TeamPicker({ options, value, onChange }: { options: string[]; value: st
         </label>
       ))}
       <Input
-        aria-label="Another team"
-        placeholder="Another team, then Enter"
+        aria-label={placeholder.replace(/, then Enter$/, "")}
+        placeholder={placeholder}
         value={other}
         onChange={(e) => setOther(e.target.value)}
         onBlur={add}
@@ -308,7 +333,7 @@ interface Draft {
     roles: Record<string, number[]> & { archetypes?: Record<string, number[]> };
     never_clone: number[];
     default_language: string | null;
-    lint: { placeholders?: string[]; extra_fonts?: string[]; extra_colors?: string[] };
+    lint: { placeholders?: string[]; extra_fonts?: string[]; extra_colors?: string[]; slop_rules?: Rule[] };
   };
   slides: { number: number; layout: string; texts: string[]; image_url: string }[];
   /** Archetype names a slide may be declared as (core/forms.yaml). */
@@ -318,6 +343,19 @@ interface Draft {
   /** Set when the draft edits a published pack. */
   voice?: string;
   fonts?: string[];
+  /** The pack's own exemplar.md and storyline.md ("" when it has none), exemplar pages and logo asset. */
+  exemplar?: string;
+  storyline?: string;
+  exemplar_images?: string[];
+  logo?: string | null;
+}
+
+/** A pack lint rule (pack.yaml lint.slop_rules): a regular expression and the message lint reports. */
+interface Rule {
+  severity: "ERROR" | "WARN";
+  lang: string;
+  pattern: string;
+  note: string;
 }
 
 const ROLES = ["cover", "summary", "divider", "subsection", "content", "closing", "appendix"] as const;
@@ -358,6 +396,12 @@ function Import({ me, editing, packs, onDone }: { me: Me; editing?: Draft | null
   const [parent, setParent] = useState(editing ? String(editing.manifest.extends ?? "") : "");
   const [note, setNote] = useState("");
   const [newTokens, setNewTokens] = useState<string | null>(null);
+  const [rules, setRules] = useState<Rule[]>(editing?.manifest.lint.slop_rules ?? []);
+  const [exemplar, setExemplar] = useState(editing?.exemplar ?? "");
+  const [storyline, setStoryline] = useState(editing?.storyline ?? "");
+  const [pages, setPages] = useState<string[]>(editing?.exemplar_images ?? []);
+  const [logo, setLogo] = useState<string | null>(editing?.logo ?? null);
+  const [preview, setPreview] = useState<{ number: number; image_url: string }[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [problems, setProblems] = useState<string[]>([]);
 
@@ -392,31 +436,45 @@ function Import({ me, editing, packs, onDone }: { me: Me; editing?: Draft | null
     });
   }
 
+  /** The manifest as reviewed on this screen. */
+  function manifestOf(draft: Draft) {
+    const assigned = Object.entries(roles);
+    const declared: Record<string, number[]> = {};
+    for (const [n, a] of Object.entries(archetypes)) if (a !== NONE) (declared[a] ??= []).push(Number(n));
+    const lint = { ...draft.manifest.lint };
+    delete lint.slop_rules;
+    const kept = rules.filter((r) => r.pattern.trim()).map((r) => ({ ...r, lang: r.lang.trim() || "any", note: r.note.trim() || "pack rule" }));
+    return {
+      ...draft.manifest,
+      extends: parent || undefined, // none: left out of the JSON
+      ...(editing ? { name: name || draft.manifest.name } : {}),
+      default_language: language || null,
+      roles: {
+        ...Object.fromEntries(
+          ROLES.map((r) => [r, assigned.filter(([, v]) => v === r).map(([n]) => Number(n))]).filter(([, ns]) => (ns as number[]).length),
+        ),
+        ...(Object.keys(declared).length ? { archetypes: declared } : {}),
+      },
+      never_clone: assigned.filter(([, v]) => v === NEVER).map(([n]) => Number(n)),
+      lint: {
+        ...lint,
+        extra_fonts: families.map((f) => f.trim()).filter(Boolean),
+        placeholders: placeholders.split("\n").map((l) => l.trim()).filter(Boolean),
+        // none: no key, so a subsidiary inherits its group's rules
+        ...(kept.length ? { slop_rules: kept } : {}),
+      },
+    };
+  }
+
   async function publish() {
     if (!draft) return;
     await step("Validating: template lint and a test deck", async () => {
-      const assigned = Object.entries(roles);
-      const declared: Record<string, number[]> = {};
-      for (const [n, a] of Object.entries(archetypes)) if (a !== NONE) (declared[a] ??= []).push(Number(n));
-      const manifest = {
-        ...draft.manifest,
-        extends: parent || undefined, // none: left out of the JSON
-        ...(editing ? { name: name || draft.manifest.name } : {}),
-        default_language: language || null,
-        roles: {
-          ...Object.fromEntries(
-            ROLES.map((r) => [r, assigned.filter(([, v]) => v === r).map(([n]) => Number(n))]).filter(([, ns]) => (ns as number[]).length),
-          ),
-          ...(Object.keys(declared).length ? { archetypes: declared } : {}),
-        },
-        never_clone: assigned.filter(([, v]) => v === NEVER).map(([n]) => Number(n)),
-        lint: { ...draft.manifest.lint, extra_fonts: families.map((f) => f.trim()).filter(Boolean), placeholders: placeholders.split("\n").map((l) => l.trim()).filter(Boolean) },
-      };
       const r = await api<{ status: string; problems?: string[] }>(`/api/packs/drafts/${draft.draft_id}/publish`, {
-        manifest,
+        manifest: manifestOf(draft),
         visibility,
         teams,
         ...(voice.trim() || editing ? { voice } : {}),
+        ...(editing ? { exemplar, storyline } : {}),
         ...(note.trim() ? { note: note.trim() } : {}),
       });
       if (r.status === "published") await onDone();
@@ -446,6 +504,31 @@ function Import({ me, editing, packs, onDone }: { me: Me; editing?: Draft | null
       setNewTokens(file.name);
     });
 
+  /** The change on a sample deck (cover, content, closing) built on the draft, before publishing. */
+  const previewSample = (d: Draft) =>
+    step("Building a sample deck on this draft", async () => {
+      setPreview((await api<{ slides: { number: number; image_url: string }[] }>(`/api/packs/drafts/${d.draft_id}/preview`, { manifest: manifestOf(d) })).slides);
+    });
+  const addPages = (files: File[], d: Draft) =>
+    step("Uploading exemplar pages", async () => {
+      for (const f of files) {
+        const form = new FormData();
+        form.set("image", f);
+        setPages((await upload<{ exemplar_images: string[] }>(`/api/packs/drafts/${d.draft_id}/exemplar`, form)).exemplar_images);
+      }
+    });
+  const removePage = (name: string, d: Draft) =>
+    step("Removing an exemplar page", async () => {
+      setPages((await api<{ exemplar_images: string[] }>(`/api/packs/drafts/${d.draft_id}/exemplar/remove`, { name })).exemplar_images);
+    });
+  const swapLogo = (file: File, d: Draft) =>
+    step("Uploading the logo", async () => {
+      const form = new FormData();
+      form.set("logo", file);
+      setLogo((await upload<{ logo: string }>(`/api/packs/drafts/${d.draft_id}/logo`, form)).logo);
+    });
+  const setRule = (i: number, patch: Partial<Rule>) => setRules(rules.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+
   const stage = !draft ? 0 : 1;
   return (
     <div className="cq-page">
@@ -453,7 +536,7 @@ function Import({ me, editing, packs, onDone }: { me: Me; editing?: Draft | null
         title={editing ? `Edit ${String(editing.manifest.name ?? editing.manifest.id)}` : "Import a template"}
         description={
           editing
-            ? "Change the template, tokens, slide roles, language, placeholders, voice or fonts. The pack must still lint clean and build a clean test deck before it becomes the next release; the current one is kept for rollback."
+            ? "Change the template, tokens, logo, slide roles, language, placeholders, lint rules, voice, exemplar, storyline or fonts. The pack must still lint clean and build a clean test deck before it becomes the next release; the current one is kept for rollback, and decks move to it only when their authors update them."
             : draft ? "Check the role of each slide, then validate: the template must lint clean and a test deck must build clean." : "The company's official template.pptx."
         }
       >
@@ -603,7 +686,7 @@ function Import({ me, editing, packs, onDone }: { me: Me; editing?: Draft | null
               <Field label="Template placeholders" htmlFor="p-ph" hint="Sample copy that must never survive in a deck, one per line.">
                 <Textarea id="p-ph" rows={5} value={placeholders} onChange={(e) => setPlaceholders(e.target.value)} />
               </Field>
-              {!editing && (
+              {!editing && me.admin && (
                 <FieldSet>
                   <FieldLegend variant="label">Visible to</FieldLegend>
                   <label className="cq-check">
@@ -615,6 +698,13 @@ function Import({ me, editing, packs, onDone }: { me: Me; editing?: Draft | null
                     <input type="radio" name="visibility" value="workspace" checked={visibility === "workspace"} onChange={() => setVisibility("workspace")} />
                     The whole workspace
                   </label>
+                </FieldSet>
+              )}
+              {!editing && !me.admin && (
+                <FieldSet>
+                  <FieldLegend variant="label">Visible to</FieldLegend>
+                  <p className="cq-hint">These teams; an admin can share it with the whole workspace later.</p>
+                  <TeamPicker options={me.teams} value={teams} onChange={setTeams} />
                 </FieldSet>
               )}
             </div>
@@ -652,6 +742,15 @@ function Import({ me, editing, packs, onDone }: { me: Me; editing?: Draft | null
                   onFiles={(f) => f[0] && void swapTemplate(f[0], draft)}
                 />
               )}
+              {editing && logo && (
+                <FileDrop
+                  label="Logo"
+                  accept=".png,.svg,.jpg,.jpeg"
+                  title={`Replace ${logo}`}
+                  hint="The pack's logo file. A logo drawn on the template's slides changes with a new template."
+                  onFiles={(f) => f[0] && void swapLogo(f[0], draft)}
+                />
+              )}
               {editing && (
                 <FileDrop
                   label="Design tokens"
@@ -663,7 +762,83 @@ function Import({ me, editing, packs, onDone }: { me: Me; editing?: Draft | null
               )}
             </div>
           </div>
-          <div>
+          <div className="cq-card cq-form" data-rules>
+            <FieldSet>
+              <FieldLegend variant="label">Lint rules</FieldLegend>
+              <p className="cq-hint">
+                What lint flags in every deck on this pack, besides the core rules: a regular expression (case ignored), its severity, the deck languages it applies to (any, en, fr…) and the message shown. Unlike the voice, these are enforced.
+              </p>
+              {rules.map((r, i) => (
+                <div key={i} className="cq-rule">
+                  <select className="cq-select" aria-label={`Severity of rule ${i + 1}`} value={r.severity} onChange={(e) => setRule(i, { severity: e.target.value as Rule["severity"] })}>
+                    <option value="ERROR">ERROR</option>
+                    <option value="WARN">WARN</option>
+                  </select>
+                  <Input aria-label={`Language of rule ${i + 1}`} value={r.lang} onChange={(e) => setRule(i, { lang: e.target.value })} placeholder="any" />
+                  <Input aria-label={`Pattern of rule ${i + 1}`} className="cq-mono" value={r.pattern} onChange={(e) => setRule(i, { pattern: e.target.value })} placeholder="\\bsynergy\\b" />
+                  <Input aria-label={`Message of rule ${i + 1}`} value={r.note} onChange={(e) => setRule(i, { note: e.target.value })} placeholder="What to write instead" />
+                  <Button variant="ghost" size="icon-sm" aria-label={`Remove rule ${i + 1}`} onClick={() => setRules(rules.filter((_, j) => j !== i))}>
+                    <Trash2 />
+                  </Button>
+                </div>
+              ))}
+              <div>
+                <Button variant="outline" size="sm" onClick={() => setRules([...rules, { severity: "WARN", lang: "any", pattern: "", note: "" }])}>
+                  <Plus /> Add a rule
+                </Button>
+              </div>
+            </FieldSet>
+          </div>
+          {editing && (
+            <div className="cq-columns">
+              <div className="cq-card cq-form">
+                <Field label="Exemplar" htmlFor="p-exemplar" hint="exemplar.md: what a good deck of this brand looks like. Empty: none (a subsidiary inherits its group's).">
+                  <Textarea id="p-exemplar" rows={8} value={exemplar} onChange={(e) => setExemplar(e.target.value)} />
+                </Field>
+                <FileDrop
+                  label="Exemplar pages"
+                  accept=".png,.jpg,.jpeg,.svg,.webp"
+                  multiple
+                  title={pages.length ? `${pages.length} page(s)` : "Images of exemplary slides"}
+                  hint="Shown with the exemplar in the brand portal and to the agent."
+                  onFiles={(files) => void addPages(files, draft)}
+                />
+                {pages.length > 0 && (
+                  <ul className="cq-file-list">
+                    {pages.map((name) => (
+                      <li key={name}>
+                        <span className="cq-mono">{name}</span>
+                        <Button variant="ghost" size="icon-sm" aria-label={`Remove ${name}`} onClick={() => void removePage(name, draft)}>
+                          <X />
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div className="cq-card cq-form">
+                <Field label="Storyline" htmlFor="p-storyline" hint="storyline.md: the narrative arcs the agent proposes. Empty: none (a subsidiary inherits its group's).">
+                  <Textarea id="p-storyline" rows={8} value={storyline} onChange={(e) => setStoryline(e.target.value)} />
+                </Field>
+              </div>
+            </div>
+          )}
+          {preview && (
+            <div className="cq-card cq-form" data-preview>
+              <FieldLegend variant="label">Sample deck on this draft</FieldLegend>
+              <ul className="cq-template-grid">
+                {preview.map((s) => (
+                  <li key={s.number} className="cq-template">
+                    <img src={s.image_url} alt={`Sample slide ${s.number}`} />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <div className="cq-row-actions">
+            <Button size="lg" variant="outline" disabled={!!busy} onClick={() => void previewSample(draft)}>
+              <Eye /> Preview on a sample deck
+            </Button>
             <Button size="lg" disabled={!!busy} onClick={() => void publish()}>
               {editing ? "Validate and save" : "Validate and publish"}
             </Button>

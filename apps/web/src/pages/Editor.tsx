@@ -3,7 +3,7 @@ import { Alert, AlertDescription } from "diametral-ds/alert";
 import { Button } from "diametral-ds/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "diametral-ds/table";
 import { Tag } from "diametral-ds/tag";
-import { BadgeCheck, BookMarked, CircleCheck, Cloud, Download, FileText, History, ListChecks, ListPlus, Play, Send, Share2, Sparkles, TriangleAlert, Undo2, X } from "lucide-react";
+import { BadgeCheck, BookMarked, CircleCheck, Cloud, Download, FileText, History, ListChecks, ListPlus, Play, RefreshCw, Send, Share2, Sparkles, TriangleAlert, Undo2, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { agent, api, tool, type Me, type Pack } from "../api.ts";
 import { Chat, type Ask } from "../components/Chat.tsx";
@@ -16,7 +16,12 @@ import { bySeverity, type Finding, lintSummary } from "../lint.ts";
 import { navigate } from "../nav.ts";
 import { ago, Dialog, Spinner } from "../ui.tsx";
 
-type Deck = DeckView & { versions: { version: number; note: string; author: string; author_name: string | null; created_at: string }[] };
+type Deck = DeckView & {
+  versions: { version: number; note: string; author: string; author_name: string | null; created_at: string; pack_version: number | null }[];
+  /** The pack release the deck is built on, and the pack's latest one (update_pack_release). */
+  pack_version?: number | null;
+  pack_latest?: number;
+};
 const APPROVAL = { draft: "Draft", in_review: "In review", approved: "Approved" } as const;
 
 const EDITS = ["Tighten every title to one line", "Add an agenda slide after the cover", "Review the deck against the brand pack"];
@@ -91,6 +96,8 @@ export function Editor({ id }: { id: string }) {
   const setApproval = (status: "draft" | "in_review" | "approved", label: string) =>
     void run(label, () => tool("set_approval", { deck_id: id, status }));
   const manages = packs.find((p) => p.id === deck.pack_id)?.editable ?? false;
+  // the deck stays on its pack release until its author moves it to the latest one
+  const newRelease = edits && deck.pack_version != null && deck.pack_latest !== undefined && deck.pack_latest > deck.pack_version ? deck.pack_latest : null;
   return (
     <>
       <DeckViewer
@@ -125,6 +132,15 @@ export function Editor({ id }: { id: string }) {
             <Button variant="ghost" onClick={() => setHistory(true)}>
               <History /> History
             </Button>
+            {newRelease !== null && (
+              <Button
+                variant="outline"
+                title={`The ${deck.pack_id} pack has a new release: rebuild this deck on it, as a new version (Restore goes back)`}
+                onClick={() => void run("Updating to the latest pack release", () => tool("update_pack_release", { deck_id: id }))}
+              >
+                <RefreshCw /> Update to pack release {newRelease}
+              </Button>
+            )}
             <Button variant="outline" onClick={() => navigate(`/present/${id}`)}>
               <Play /> Present
             </Button>
@@ -289,7 +305,10 @@ export function Editor({ id }: { id: string }) {
                     </TableCell>
                     <TableCell>
                       {v.note}
-                      <div className="cq-hint">{ago(v.created_at)}</div>
+                      <div className="cq-hint">
+                        {ago(v.created_at)}
+                        {v.pack_version != null && ` · pack release ${v.pack_version}`}
+                      </div>
                     </TableCell>
                     <TableCell>{v.author_name || v.author}</TableCell>
                     <TableCell>
