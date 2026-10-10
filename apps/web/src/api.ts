@@ -70,5 +70,9 @@ export interface Pack {
   visibility: "workspace" | "team";
   teams: string[];
   owner: string | null;
+  /** The pack's current release (every publish, edit or restore adds one). */
+  pack_version?: number;
+  archived?: boolean;
+  /** The caller manages it: its owner, or an admin. */
   editable: boolean;
 }

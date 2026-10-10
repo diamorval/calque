@@ -7,19 +7,27 @@ import { Stepper, StepperIndicator, StepperItem, StepperSeparator, StepperTitle 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "diametral-ds/table";
 import { Tag } from "diametral-ds/tag";
 import { Textarea } from "diametral-ds/textarea";
-import { FileUp, Globe, Lock, Pencil, Upload, X } from "lucide-react";
+import { Archive, ArchiveRestore, FileUp, Globe, History, Lock, Pencil, Upload, X } from "lucide-react";
 import { Fragment, useCallback, useEffect, useState, type FormEvent } from "react";
-import { api, tool, upload, type Me, type Pack } from "../api.ts";
+import { api, upload, type Me, type Pack } from "../api.ts";
 import { Field, FileDrop, PageHead, Spinner } from "../ui.tsx";
 
-/** Settings > Brand packs: the packs this user sees, their visibility, and importing a new one. */
+interface Releases {
+  id: string;
+  current: number;
+  versions: { version: number; note: string; author: string | null; created_at: string }[];
+}
+
+/** Settings > Brand packs: the packs this user sees or manages (archived too), their owner and
+visibility, their releases, and importing a new one. Owners and admins manage a pack. */
 export function Packs({ me }: { me: Me }) {
   const [packs, setPacks] = useState<Pack[] | null>(null);
   const [importing, setImporting] = useState(false);
   const [editing, setEditing] = useState<Draft | null>(null);
   const [opening, setOpening] = useState<string | null>(null);
+  const [history, setHistory] = useState<Releases | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const reload = useCallback(() => tool<{ packs: Pack[] }>("list_packs").then((r) => setPacks(r.packs)), []);
+  const reload = useCallback(() => api<{ packs: Pack[] }>("/api/packs").then((r) => setPacks(r.packs)), []);
   useEffect(() => {
     void reload();
   }, [reload]);
@@ -33,6 +41,23 @@ export function Packs({ me }: { me: Me }) {
       setError((e as Error).message);
     }
   };
+
+  const act = async (fn: () => Promise<unknown>) => {
+    setError(null);
+    try {
+      await fn();
+      await reload();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+  const archive = (p: Pack, archived: boolean) => act(() => api(`/api/packs/${p.id}/archive`, { archived }));
+  const releases = (p: Pack) => act(async () => setHistory(await api<Releases>(`/api/packs/${p.id}/versions`)));
+  const restore = (id: string, version: number) =>
+    act(async () => {
+      await api(`/api/packs/${id}/restore`, { version });
+      setHistory(await api<Releases>(`/api/packs/${id}/versions`));
+    });
 
   const edit = async (p: Pack) => {
     setError(null);
@@ -60,7 +85,10 @@ export function Packs({ me }: { me: Me }) {
     );
   return (
     <div className="cq-page">
-      <PageHead title="Brand packs" description="Each company's template, charter and voice. A new pack is visible to your teams only until you share it.">
+      <PageHead
+        title="Brand packs"
+        description="Each company's template, charter and voice. A new pack is visible to your teams only until you share it. Its owner and the admins edit it; every save is a release you can roll back."
+      >
         <Button onClick={() => setImporting(true)}>
           <Upload /> Import a template
         </Button>
@@ -79,6 +107,7 @@ export function Packs({ me }: { me: Me }) {
             <TableHeader>
               <TableRow>
                 <TableHead>Pack</TableHead>
+                <TableHead>Owner</TableHead>
                 <TableHead>Languages</TableHead>
                 <TableHead>Visible to</TableHead>
                 <TableHead />
@@ -86,13 +115,20 @@ export function Packs({ me }: { me: Me }) {
             </TableHeader>
             <TableBody>
               {packs.map((p) => (
-                <TableRow key={p.id} data-pack={p.id}>
+                <TableRow key={p.id} data-pack={p.id} className={p.archived ? "cq-muted" : undefined}>
                   <TableCell>
                     <strong>{p.name}</strong>{" "}
                     <span className="cq-mono cq-muted">
                       {p.id} · v{p.version}
-                    </span>
+                      {p.pack_version ? ` · release ${p.pack_version}` : ""}
+                    </span>{" "}
+                    {p.archived && (
+                      <Tag tone="warning">
+                        <Archive /> Archived
+                      </Tag>
+                    )}
                   </TableCell>
+                  <TableCell>{p.owner ?? <span className="cq-muted">Admins</span>}</TableCell>
                   <TableCell>{p.languages.join(", ")}</TableCell>
                   <TableCell>
                     {p.visibility === "workspace" ? (
@@ -121,6 +157,68 @@ export function Packs({ me }: { me: Me }) {
                           Restrict to my teams
                         </Button>
                       ))}
+                    {p.editable && (
+                      <Button size="sm" variant="ghost" onClick={() => void releases(p)}>
+                        <History /> History
+                      </Button>
+                    )}
+                    {p.editable && (
+                      <Button size="sm" variant="ghost" onClick={() => void archive(p, !p.archived)}>
+                        {p.archived ? (
+                          <>
+                            <ArchiveRestore /> Unarchive
+                          </>
+                        ) : (
+                          <>
+                            <Archive /> Archive
+                          </>
+                        )}
+                      </Button>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Card>
+      )}
+      {history && (
+        <Card className="cq-table-card" data-history={history.id}>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Release of {history.id}</TableHead>
+                <TableHead>Note</TableHead>
+                <TableHead>By</TableHead>
+                <TableHead>When</TableHead>
+                <TableHead className="cq-row-actions">
+                  <Button size="sm" variant="ghost" onClick={() => setHistory(null)}>
+                    <X /> Close
+                  </Button>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {history.versions.map((v) => (
+                <TableRow key={v.version}>
+                  <TableCell>
+                    {v.version}
+                    {v.version === history.current && (
+                      <>
+                        {" "}
+                        <Tag tone="success">Current</Tag>
+                      </>
+                    )}
+                  </TableCell>
+                  <TableCell>{v.note}</TableCell>
+                  <TableCell>{v.author ?? <span className="cq-muted">seeded</span>}</TableCell>
+                  <TableCell>{new Date(v.created_at).toLocaleString()}</TableCell>
+                  <TableCell className="cq-row-actions">
+                    {v.version !== history.current && (
+                      <Button size="sm" variant="outline" onClick={() => void restore(history.id, v.version)}>
+                        Restore
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}
@@ -165,6 +263,8 @@ function Import({ me, editing, onDone }: { me: Me; editing?: Draft | null; onDon
   const [voice, setVoice] = useState(editing?.voice ?? "");
   const [fonts, setFonts] = useState<string[]>(editing?.fonts ?? []);
   const [visibility, setVisibility] = useState<"team" | "workspace">("team");
+  const [note, setNote] = useState("");
+  const [tokens, setTokens] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [problems, setProblems] = useState<string[]>([]);
 
@@ -218,11 +318,32 @@ function Import({ me, editing, onDone }: { me: Me; editing?: Draft | null; onDon
         visibility,
         teams: me.teams,
         ...(voice.trim() || editing ? { voice } : {}),
+        ...(note.trim() ? { note: note.trim() } : {}),
       });
       if (r.status === "published") await onDone();
       else setProblems(r.problems ?? ["the pack did not validate"]);
     });
   }
+
+  /** A new template.pptx: the extractor re-drafts the slides and their roles, to review again. */
+  const swapTemplate = (file: File, d: Draft) =>
+    step("Reading the new template", async () => {
+      const form = new FormData();
+      form.set("template", file);
+      const next = await upload<Draft>(`/api/packs/drafts/${d.draft_id}/template`, form);
+      const t = Date.now(); // same image URLs, new pictures
+      const fresh = { ...next, slides: next.slides.map((s) => ({ ...s, image_url: `${s.image_url}?t=${t}` })) };
+      setDraft(fresh);
+      setRoles(rolesOf(fresh));
+      setPlaceholders((fresh.manifest.lint.placeholders ?? []).join("\n"));
+    });
+  const swapTokens = (file: File, d: Draft) =>
+    step("Uploading tokens.json", async () => {
+      const form = new FormData();
+      form.set("tokens", file);
+      await upload(`/api/packs/drafts/${d.draft_id}/tokens`, form);
+      setTokens(file.name);
+    });
 
   const stage = !draft ? 0 : 1;
   return (
@@ -231,7 +352,7 @@ function Import({ me, editing, onDone }: { me: Me; editing?: Draft | null; onDon
         title={editing ? `Edit ${String(editing.manifest.name ?? editing.manifest.id)}` : "Import a template"}
         description={
           editing
-            ? "Change the slide roles, language, placeholders, voice or fonts. The pack must still lint clean and build a clean test deck before it replaces the current one."
+            ? "Change the template, tokens, slide roles, language, placeholders, voice or fonts. The pack must still lint clean and build a clean test deck before it becomes the next release; the current one is kept for rollback."
             : draft ? "Check the role of each slide, then validate: the template must lint clean and a test deck must build clean." : "The company's official template.pptx."
         }
       >
@@ -312,6 +433,9 @@ function Import({ me, editing, onDone }: { me: Me; editing?: Draft | null; onDon
                   <Input id="p-edit-name" value={name} onChange={(e) => setName(e.target.value)} />
                 </Field>
               )}
+              <Field label="What changed" htmlFor="p-note" hint="One line for the pack's history.">
+                <Input id="p-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder={editing ? "New logo on the cover" : "First release"} />
+              </Field>
               <Field label="Default language" htmlFor="p-lang" hint="Empty: ask for the language of every deck.">
                 <Input id="p-lang" value={language} onChange={(e) => setLanguage(e.target.value)} placeholder="en" />
               </Field>
@@ -351,6 +475,22 @@ function Import({ me, editing, onDone }: { me: Me; editing?: Draft | null; onDon
                     }
                   })
                 }
+              />
+              {editing && (
+                <FileDrop
+                  label="Template"
+                  accept=".pptx"
+                  title="Replace the template.pptx"
+                  hint="Slides and roles are read again from it; review them before saving."
+                  onFiles={(f) => f[0] && void swapTemplate(f[0], draft)}
+                />
+              )}
+              <FileDrop
+                label="Design tokens"
+                accept=".json"
+                title={tokens ?? (editing ? "Replace the tokens.json" : "The company's tokens.json, if any")}
+                hint="DTCG colours and fonts, the pack's source of truth. The template must lint clean against them."
+                onFiles={(f) => f[0] && void swapTokens(f[0], draft)}
               />
             </div>
           </div>

@@ -108,6 +108,30 @@ export async function startDemo() {
         return p;
       },
     ],
+    [/^GET \/api\/packs$/, () => ({ packs })],
+    [
+      /^POST \/api\/packs\/([^/]+)\/archive$/,
+      ([, id], b) => {
+        const p = packs.find((x) => x.id === id);
+        Object.assign(p ?? {}, { archived: b.archived });
+        return { id, archived: b.archived };
+      },
+    ],
+    [
+      /^GET \/api\/packs\/([^/]+)\/versions$/,
+      ([, id]) => ({
+        id,
+        current: 1,
+        versions: [
+          {
+            version: 1,
+            note: "initial version",
+            author: null,
+            created_at: new Date().toISOString(),
+          },
+        ],
+      }),
+    ],
     // any pack, and any uploaded template, opens on the Diametral template's review screen
     [
       /^POST \/api\/packs\/([^/]+)\/edit$/,
