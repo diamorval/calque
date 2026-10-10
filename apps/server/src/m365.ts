@@ -8,7 +8,8 @@ import { Forbidden, NotFound, type User } from "./packs.ts";
 import { sealer } from "./seal.ts";
 
 /** Microsoft 365 in and out (S4, S15): files picked in OneDrive or SharePoint come into Calque's
-uploads (a file_id, as if uploaded), and exported decks go back to a OneDrive or SharePoint folder.
+uploads (a file_id, as if uploaded), exported decks go back to a OneDrive or SharePoint folder, and
+a deck's link is posted to a Teams channel or chat.
 
 Each user connects their own account once ("Connect Microsoft 365"): an OAuth authorization code
 + PKCE flow against Entra ID, separate from Calque's sign-in (whose issuer may not be Entra, and
@@ -34,9 +35,10 @@ export function m365Config(env = process.env): M365Config | undefined {
   };
 }
 
-/** Read and write the files the user can reach (their OneDrive, SharePoint libraries), find sites.
-None needs an admin's consent. */
-export const SCOPES = "offline_access User.Read Files.ReadWrite.All Sites.Read.All";
+/** Read and write the files the user can reach (their OneDrive, SharePoint libraries), find sites;
+list the user's teams, channels and chats and post in them. None needs an admin's consent. */
+export const SCOPES =
+  "offline_access User.Read Files.ReadWrite.All Sites.Read.All Team.ReadBasic.All Channel.ReadBasic.All ChannelMessage.Send Chat.ReadBasic ChatMessage.Send";
 
 /** What can come in: what import_pptx, chat attachments and DeckSpec images take. */
 const ACCEPT = /\.(pptx|potx|docx|xlsx|pdf|csv|txt|md|png|jpe?g|gif|bmp|tiff?|webp|svg)$/i;
@@ -220,6 +222,17 @@ export class M365 {
     return (await (await this.graph(user, path)).json()) as T;
   }
 
+  /** Graph calls as `user`, for the Teams side (M365Teams). */
+  get<T>(user: User, path: string): Promise<T> {
+    return this.json<T>(user, path);
+  }
+  call(user: User, path: string, init: RequestInit): Promise<Response> {
+    return this.graph(user, path, init);
+  }
+  get teams(): M365Teams {
+    return new M365Teams(this);
+  }
+
   /** Browse: SharePoint sites matching `sites`, a site's document libraries, a folder's content
   (default: the user's OneDrive root) or a search in a drive. */
   async list(user: User, a: { sites?: string | undefined; site_id?: string | undefined; drive_id?: string | undefined; folder_id?: string | undefined; search?: string | undefined }) {
@@ -280,6 +293,63 @@ export class M365 {
     if (!done) throw new M365Error(`upload of ${name} did not complete`);
     return { name: done.name, drive_id: done.parentReference?.driveId ?? a.drive_id ?? null, item_id: done.id, web_url: done.webUrl ?? null };
   }
+}
+
+/** Where a Teams message goes: a team's channel, or a chat. */
+export type TeamsTarget = { team_id: string; channel_id: string } | { chat_id: string };
+
+/** The user's teams, a team's channels or their recent chats, and posting a message in one. */
+export class M365Teams {
+  private readonly m: M365;
+  constructor(m: M365) {
+    this.m = m;
+  }
+
+  async list(user: User, a: { team_id?: string | undefined; chats?: boolean | undefined }) {
+    if (a.chats) {
+      const r = await this.m.get<{ value: { id: string; topic?: string | null; chatType?: string; members?: { displayName?: string | null }[] }[] }>(
+        user,
+        "/me/chats?$expand=members&$top=50",
+      );
+      return {
+        chats: r.value.map((c) => ({
+          chat_id: c.id,
+          name: c.topic || (c.members ?? []).map((m) => m.displayName).filter(Boolean).join(", ") || c.chatType || c.id,
+          type: c.chatType ?? null,
+        })),
+      };
+    }
+    if (a.team_id) {
+      const r = await this.m.get<{ value: { id: string; displayName: string; webUrl?: string }[] }>(user, `/teams/${seg(a.team_id)}/channels`);
+      return { channels: r.value.map((c) => ({ team_id: a.team_id, channel_id: c.id, name: c.displayName, web_url: c.webUrl ?? null })) };
+    }
+    const r = await this.m.get<{ value: { id: string; displayName: string; description?: string | null }[] }>(user, "/me/joinedTeams");
+    return { teams: r.value.map((t) => ({ team_id: t.id, name: t.displayName, description: t.description ?? null })) };
+  }
+
+  /** Post `html` as the user in a channel or a chat. */
+  async post(user: User, to: TeamsTarget, html: string) {
+    const path = "chat_id" in to ? `/chats/${seg(to.chat_id)}/messages` : `/teams/${seg(to.team_id)}/channels/${seg(to.channel_id)}/messages`;
+    const res = await this.m.call(user, path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ body: { contentType: "html", content: html } }),
+    });
+    const m = (await res.json()) as { id: string; webUrl?: string | null };
+    return { message_id: m.id, web_url: m.webUrl ?? null };
+  }
+}
+
+const esc = (t: string) => t.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+/** A Teams message announcing a deck: the user's words, the deck's link, the saved file's link. */
+export function teamsMessage(a: { title: string; url: string; message?: string | undefined; file_url?: string | undefined }): string {
+  const file = a.file_url && decodeURIComponent(new URL(a.file_url).pathname.split("/").pop() || "file");
+  return [
+    a.message?.trim() ? `<p>${esc(a.message.trim()).replace(/\n/g, "<br>")}</p>` : "",
+    `<p><a href="${esc(a.url)}">${esc(a.title)}</a></p>`,
+    a.file_url ? `<p>File: <a href="${esc(a.file_url)}">${esc(file || a.file_url)}</a></p>` : "",
+  ].join("");
 }
 
 /** A file name OneDrive and SharePoint accept, from a deck title: reserved characters dropped. */

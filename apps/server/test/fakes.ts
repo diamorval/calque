@@ -136,7 +136,8 @@ interface DriveItem {
 
 /** Microsoft 365: the Entra endpoints (authorize answers at once, token checks PKCE and rotates
 refresh tokens) and the Graph calls Calque makes, over an in-memory OneDrive ("me") and one
-SharePoint site ("Sales", its library "sales-docs"). `requests` records each Graph call. */
+SharePoint site ("Sales", its library "sales-docs"), and Teams: one team ("Sales", channels
+General and Deals), one chat; `messages` records what is posted. `requests` records each Graph call. */
 export async function fakeGraph(account = "alice@contoso.test") {
   let base = "";
   const items = new Map<string, DriveItem>();
@@ -151,6 +152,13 @@ export async function fakeGraph(account = "alice@contoso.test") {
   const refresh = new Set<string>();
   const uploads = new Map<string, { drive: string; parent: string; name: string; chunks: Buffer[]; got: number }>();
   const requests: { method: string; path: string; auth: string | undefined }[] = [];
+  const messages: { to: string; body: { contentType: string; content: string } }[] = [];
+  const channels: Record<string, { id: string; displayName: string }[]> = {
+    "team-sales": [
+      { id: "19:general@thread.tacv2", displayName: "General" },
+      { id: "19:deals@thread.tacv2", displayName: "Deals" },
+    ],
+  };
   let n = 0;
 
   const view = (i: DriveItem) => ({
@@ -226,7 +234,20 @@ export async function fakeGraph(account = "alice@contoso.test") {
     if (g === "/me") return json({ userPrincipalName: account, mail: account });
     if (g === "/sites") return json({ value: /sal/i.test(url.searchParams.get("search") ?? "") ? [{ id: "site-sales", displayName: "Sales", webUrl: "https://contoso.sharepoint.test/sites/sales" }] : [] });
     if (g === "/sites/site-sales/drives") return json({ value: [{ id: "sales-docs", name: "Documents", webUrl: "https://contoso.sharepoint.test/sites/sales/Shared Documents" }] });
-    let m = /^\/drives\/([^/]+)\/(?:root|items\/([^/:]+))\/children$/.exec(g);
+    if (g === "/me/joinedTeams") return json({ value: [{ id: "team-sales", displayName: "Sales", description: "The sales team" }] });
+    if (g === "/me/chats") return json({ value: [{ id: "19:chat-bob@unq.gbl.spaces", topic: null, chatType: "oneOnOne", members: [{ displayName: "Alice Martin" }, { displayName: "Bob Durand" }] }] });
+    let m = /^\/teams\/([^/]+)\/channels(?:\/([^/]+)\/messages)?$/.exec(g) ?? /^\/chats\/([^/]+)\/messages$/.exec(g);
+    if (m) {
+      const chat = g.startsWith("/chats/");
+      if (!chat && !channels[m[1] as string]) return err(404, "No team found with Group Id");
+      if (!chat && !m[2]) return json({ value: (channels[m[1] as string] ?? []).map((c) => ({ ...c, webUrl: `https://teams.test/channel/${c.id}` })) });
+      if (req.method !== "POST") return err(405, "method");
+      if (!chat && !channels[m[1] as string]?.some((c) => c.id === m?.[2])) return err(404, "Channel not found");
+      const id = `msg-${++n}`;
+      messages.push({ to: g, body: JSON.parse(raw.toString()).body });
+      return json({ id, webUrl: `https://teams.test/message/${id}` }, 201);
+    }
+    m = /^\/drives\/([^/]+)\/(?:root|items\/([^/:]+))\/children$/.exec(g);
     if (m) {
       const parent = m[2] ?? `${m[1]}-root`;
       return json({ value: [...items.values()].filter((i) => i.parent === parent).map(view) });
@@ -252,5 +273,5 @@ export async function fakeGraph(account = "alice@contoso.test") {
   base = await listen(server);
   /** Revoke every token, as withdrawing consent does. */
   const revoke = () => (access.clear(), refresh.clear());
-  return { server, items, requests, revoke, authority: base, graph: `${base}/v1.0` };
+  return { server, items, requests, messages, revoke, authority: base, graph: `${base}/v1.0` };
 }

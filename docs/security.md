@@ -21,10 +21,11 @@ To keep deck content away from a third-party model, use only the web door, on a 
 server in Claude clients. The server has no switch that turns the MCP door off: only the
 clients you register reach it.
 
-### Microsoft 365 (OneDrive, SharePoint)
+### Microsoft 365 (OneDrive, SharePoint, Teams)
 
 Off unless `CALQUE_M365_CLIENT_ID` is set. Each user connects their own account (OAuth code +
 PKCE against Entra ID, delegated scopes `User.Read Files.ReadWrite.All Sites.Read.All
+Team.ReadBasic.All Channel.ReadBasic.All ChannelMessage.Send Chat.ReadBasic ChatMessage.Send
 offline_access`); the server then calls Microsoft Graph **as that user**, from its own network:
 
 - **In**: a file the user picks (`m365_import`) is downloaded once into their uploads, like a file
@@ -32,7 +33,10 @@ offline_access`); the server then calls Microsoft Graph **as that user**, from i
   door its text may then reach the configured model as an attachment.
 - **Out**: `m365_save` uploads the built PPTX or PDF into the folder the user picks. It never
   overwrites a file, and is recorded in the audit log (`save_m365`: deck, version, format, file
-  name, drive; a PPTX with lint ERRORs also as an export with its reason).
+  name, drive; a PPTX with lint ERRORs also as an export with its reason). `m365_share_teams`
+  posts, as the user, a message with the deck's link in the channel or chat they pick (`share_teams`
+  in the audit log). It posts the share link only for the owner of a deck whose general access is
+  open; otherwise the app's page, which opens for the people with access only.
 - **Stored**: the user's refresh token (sealed with AES-256-GCM under `CALQUE_SECRET`, deleted on
   disconnect or when Entra refuses it) and their account name. Access tokens stay in memory. The
   server reaches only the files and sites the user can, and only when the user calls a tool.

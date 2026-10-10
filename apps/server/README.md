@@ -33,7 +33,7 @@ node apps/server/src/stdio.ts          # stdio, for a local MCP client (bridge t
 | `CALQUE_LLM_PROVIDER` / `_BASE_URL` / `_API_KEY` | `openai-compatible` / – / – | the gateway's provider, endpoint and key |
 | `CALQUE_LLM_HEADERS` | unset | JSON object of extra request headers (e.g. `{"Ocp-Apim-Subscription-Key": "…"}`), sealed at rest |
 | `CALQUE_LLM_AZURE_RESOURCE` / `_API_VERSION` / `_MANAGED_IDENTITY` | – / `v1` / – | Azure OpenAI (`CALQUE_LLM_PROVIDER=azure`, the model is the deployment): resource name, `api-version`, `1` to sign in with the managed identity |
-| `CALQUE_M365_CLIENT_ID` | unset: no Microsoft 365 | the Entra app registration that lets users connect OneDrive and SharePoint (see [Microsoft 365](#microsoft-365-onedrive-and-sharepoint)) |
+| `CALQUE_M365_CLIENT_ID` | unset: no Microsoft 365 | the Entra app registration that lets users connect OneDrive and SharePoint (see [Microsoft 365](#microsoft-365-onedrive-sharepoint-and-teams)) |
 | `CALQUE_M365_CLIENT_SECRET` | unset: public client | its secret, for a confidential (Web) client |
 | `CALQUE_M365_TENANT` | `organizations` | tenant id or domain to sign in against (`organizations`: any work account) |
 | `CALQUE_M365_AUTHORITY` / `_GRAPH` | `https://login.microsoftonline.com` / `https://graph.microsoft.com/v1.0` | sign-in and Graph endpoints (national clouds, tests) |
@@ -243,10 +243,10 @@ Files are capped at 50 MB, stored under `$CALQUE_DATA/uploads/<file_id>`, and us
 uploader. `{base64}` (and `{path}` on a stdio server) still work.
 
 Outputs: `export_pptx` (`/decks/:id/deck.pptx`) and `export_pdf` (`/decks/:id/deck.pdf`, rendered by
-LibreOffice with the pack's fonts, like the previews; one file per version), and `m365_save` to
-OneDrive or SharePoint (below).
+LibreOffice with the pack's fonts, like the previews; one file per version), `m365_save` to
+OneDrive or SharePoint and `m365_share_teams` to a Teams channel or chat (below).
 
-### Microsoft 365: OneDrive and SharePoint
+### Microsoft 365: OneDrive, SharePoint and Teams
 
 With `CALQUE_M365_CLIENT_ID` set, each user connects their own Microsoft 365 account once, then:
 
@@ -258,14 +258,24 @@ With `CALQUE_M365_CLIENT_ID` set, each user connects their own Microsoft 365 acc
 - `m365_save` saves a deck as PPTX or PDF into a folder (default: their OneDrive root) through an
   upload session, never overwriting (a taken name gets a new one), and returns its `web_url`. A
   PPTX with lint ERRORs takes a `reason`, recorded like `export_pptx`.
+- `m365_teams` lists the user's joined teams, a team's channels (`team_id`) or their recent chats
+  (`chats: true`); `m365_share_teams` posts, as the user, a message with the deck's link in a
+  channel (`team_id`, `channel_id`) or a chat (`chat_id`), with their `message` and the saved file's
+  `web_url` (`file_url`) if given. The link is the share link when the caller owns the deck and its
+  general access is open (not expired); otherwise the app's page of the deck (`/d/:id`), which opens
+  for the people with access only, and the result says so. Logged as `share_teams`.
 
 In the web app: *From Microsoft 365* in the Import PPTX dialog and next to the chat's attach button,
-and *Save to SharePoint* next to Export.
+*Save to SharePoint* and *Share to Teams* next to Export (and *Share to Teams* after a save, with
+the saved file's link).
 
 **Connecting.** This is separate from sign-in (which may use another issuer, and keeps no token):
 OAuth authorization code + PKCE against Entra, scopes `offline_access User.Read
-Files.ReadWrite.All Sites.Read.All` (delegated, no admin consent needed; `Files.ReadWrite.All`
-because saving into a SharePoint library is a write outside the user's OneDrive). The web app links
+Files.ReadWrite.All Sites.Read.All Team.ReadBasic.All Channel.ReadBasic.All ChannelMessage.Send
+Chat.ReadBasic ChatMessage.Send` (delegated, no admin consent needed; `Files.ReadWrite.All`
+because saving into a SharePoint library is a write outside the user's OneDrive). A user connected
+before the Teams scopes were added is asked to connect again (the refresh is refused for the new
+scopes). The web app links
 to `/auth/m365/connect?return=<path>`; an MCP client gets that URL in the tool's error, for the
 user to open in a browser (signed in to Calque first, through `/auth/login`: a bearer link could
 bind a Microsoft account to the wrong Calque user). The callback,
@@ -276,7 +286,8 @@ revoked or expired grant deletes the stored token and asks to connect again.
 
 **App registration.** In Entra, *App registrations > New registration*: redirect URI (Web)
 `<public url>/auth/m365/callback`; *API permissions* > Microsoft Graph > Delegated: `User.Read`,
-`Files.ReadWrite.All`, `Sites.Read.All`, `offline_access`; a client secret for
+`Files.ReadWrite.All`, `Sites.Read.All`, `Team.ReadBasic.All`, `Channel.ReadBasic.All`,
+`ChannelMessage.Send`, `Chat.ReadBasic`, `ChatMessage.Send`, `offline_access`; a client secret for
 `CALQUE_M365_CLIENT_SECRET`. It may be the sign-in registration with this redirect URI added.
 
 | Route | |

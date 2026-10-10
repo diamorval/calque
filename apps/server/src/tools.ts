@@ -7,11 +7,11 @@ import { compliance } from "./compliance.ts";
 import type { Access } from "./access.ts";
 import { audit } from "./audit.ts";
 import type { Db } from "./db.ts";
-import type { Decks, Finding, Role } from "./decks.ts";
+import { linkExpired, type Decks, type Finding, type Role } from "./decks.ts";
 import { REPO } from "./engine.ts";
 import { getFile, MAX_UPLOAD, TooLarge, uploadTicket } from "./files.ts";
 import { libraryAdd, libraryApprove, libraryInsert, libraryList, libraryRemove } from "./library.ts";
-import { fileName, type M365 } from "./m365.ts";
+import { fileName, teamsMessage, type M365 } from "./m365.ts";
 import type { Models } from "./models.ts";
 import { importPack, listPacks, type User } from "./packs.ts";
 import { packPortal } from "./portal.ts";
@@ -682,6 +682,45 @@ export const TOOLS = {
         ...saved,
         ...(a.format === "pptx" ? { lint_errors: errors } : {}),
         ...(errors && !a.reason?.trim() ? { warning: `v${r.version} has ${errors} lint ERROR(s): pass \`reason\` to record why it goes out anyway` } : {}),
+      };
+    },
+  }),
+
+  m365_teams: tool({
+    title: "List Microsoft Teams",
+    description:
+      "Where m365_share_teams can post, as the user: their joined teams (default), a team's channels (`team_id`) or their recent chats (`chats: true`). When Microsoft 365 is not connected, the error gives the URL where the user connects it.",
+    input: z.object({ team_id: z.string().optional(), chats: z.boolean().optional() }),
+    readOnly: true,
+    run: (app, user, a) => m365(app).teams.list(user, a),
+  }),
+
+  m365_share_teams: tool({
+    title: "Share to Microsoft Teams",
+    description:
+      "Post a message with the deck's link, as the user, in a Teams channel (`team_id` + `channel_id`, from m365_teams) or chat (`chat_id`), with the user's `message` and, if given, the link of the file saved with m365_save (`file_url`). The owner posts the share link when its general access lets others in; otherwise the link opens for the people with access only (share the deck first: share_deck, set_general_access). Only post where the user asked.",
+    input: z.object({
+      deck_id: deckId,
+      team_id: z.string().optional(),
+      channel_id: z.string().optional(),
+      chat_id: z.string().optional(),
+      message: z.string().max(4000).optional(),
+      file_url: z.url({ protocol: /^https?$/ }).optional().describe("The saved file's web_url (m365_save)."),
+    }),
+    role: "viewer",
+    run: async (app, user, a) => {
+      const to = a.chat_id ? { chat_id: a.chat_id } : a.team_id && a.channel_id ? { team_id: a.team_id, channel_id: a.channel_id } : undefined;
+      if (!to) throw new Error("post where? a chat_id, or a team_id and channel_id (m365_teams lists them)");
+      const deck = await app.decks.deck(user, a.deck_id, "viewer");
+      // the share link when it lets others in, else the app's page of the deck (people with access)
+      const open = deck.role === "owner" && deck.general_access !== "private" && !linkExpired(deck);
+      const url = open ? shareUrl(app, a.deck_id, deck.link_key) : `${app.publicUrl}/d/${a.deck_id}`;
+      const posted = await m365(app).teams.post(user, to, teamsMessage({ title: deck.title, url, message: a.message, file_url: a.file_url }));
+      await audit(app.db, user, "share_teams", "deck", a.deck_id, { ...to, link: open ? "share_link" : "app", ...(a.file_url ? { file_url: a.file_url } : {}) });
+      return {
+        ...posted,
+        url,
+        ...(open ? {} : { note: "the link opens for the people with access to the deck only: share it with them (share_deck) or open its general access (set_general_access)" }),
       };
     },
   }),
