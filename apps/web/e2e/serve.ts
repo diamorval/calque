@@ -15,7 +15,7 @@ type Json = Record<string, any>; // eslint-disable-line @typescript-eslint/no-ex
 const port = Number(process.argv[2] ?? 4319);
 const publicUrl = `http://localhost:${port}`;
 
-/** A scripted agent: builds the acme deck on the active pack, applies comments, answers "ping". */
+/** A scripted agent: builds the acme deck on the active pack, applies comments, adds a slide, answers "ping". */
 function script(b: Json) {
   const system = String(b.messages[0]?.content ?? "");
   const ask = String(b.messages.findLast((m: Json) => m.role === "user")?.content ?? "");
@@ -32,6 +32,13 @@ function script(b: Json) {
     return { content: `Applied the comments: ${lastResult(b).errors} lint error.` };
   }
   if (/ping/i.test(ask)) return { content: `pong from ${b.model}` };
+  if (ask.startsWith("Add slides to this deck")) {
+    const deck_id = system.match(/The user has deck `([^`]+)` open/)?.[1];
+    if (!system.includes("Workflow: draft")) return { content: "Wrong workflow." };
+    const slide = { ...acmeDeck().slides.find((s) => s.id === "regions"), id: "added" };
+    if (steps === 0) return { tool: { name: "add_slides", args: { deck_id, slides: [slide] } } };
+    return { content: "Added 1 slide before the closing slide." };
+  }
   const pack = system.match(/Active pack: `([^`]+)`/)?.[1];
   if (!pack || system.includes("# Open deck")) return { content: "Noted." };
   if (steps === 0) return { tool: { name: "create_deck", args: { deck: { ...acmeDeck(), pack_id: pack } } } };

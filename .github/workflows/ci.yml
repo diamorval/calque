@@ -32,3 +32,35 @@ jobs:
       - run: uv sync --locked
       - run: uv run ruff check . && uv run ruff format --check .
       - run: uv run pytest
+
+  # supply chain: known vulnerabilities in the locked dependencies, and an SBOM of the repo
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      # the full report; fails on critical only (a high with no patched version sits in UI tooling)
+      - run: pnpm audit --prod --audit-level critical
+      - uses: astral-sh/setup-uv@v5
+      - run: uv export --frozen --no-dev --no-emit-project --format requirements-txt > requirements.txt
+        working-directory: engine
+      - run: uvx pip-audit --strict --disable-pip -r engine/requirements.txt
+      - uses: anchore/sbom-action@v0
+        with: { path: ., format: cyclonedx-json, output-file: calque.cdx.json, artifact-name: calque-sbom.cdx.json }
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - run: docker build -t calque .
+      # no issuer: the server listens on loopback, the runner's with --network host
+      - run: docker run -d --name calque --network host -e CALQUE_SECRET=ci calque
+      - run: until [ "$(docker inspect -f '{{.State.Health.Status}}' calque)" = healthy ]; do sleep 2; done
+        timeout-minutes: 2
+      - run: node scripts/docker-smoke.ts packs/diametral/tests/golden/data-fr.json
+      - if: failure()
+        run: docker logs calque

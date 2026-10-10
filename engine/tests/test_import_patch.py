@@ -54,11 +54,12 @@ def test_import_then_patch_keeps_formatting_and_notes(neutral_pack, tmp_path):
 
     deck, tmap = import_pptx(src, pack, tmp_path / "work", language="en")
     assert [s["form"] for s in deck["slides"]] == ["imported", "imported"]
+    assert [s["id"] for s in deck["slides"]] == ["a", "b"]  # the ids the engine tagged
     assert deck["slides"][0]["message"] == "Original title"
     title_id = tmap["slides"][0]["shapes"][0]["id"]
 
     patched, _ = patch(
-        deck, [{"op": "set", "slide": "s1", "shape_id": title_id, "value": "New title"}], pack
+        deck, [{"op": "set", "slide": "a", "shape_id": title_id, "value": "New title"}], pack
     )
     out = tmp_path / "out.pptx"
     build(patched, pack, out, base=tmp_path / "work" / deck["base"])

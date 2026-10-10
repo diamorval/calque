@@ -11,6 +11,10 @@ import type { App } from "./tools.ts";
 
 /** CALQUE_DATA: decks, renders, uploads, imported packs (and the PGlite database without DATABASE_URL). */
 export async function createApp(opts: { data?: string; db?: string; publicUrl?: string } = {}): Promise<App> {
+  // with sign-in on, a key minted in the data dir rotates with an ephemeral volume: every sealed
+  // model key and session would be lost on restart
+  if (!process.env.CALQUE_SECRET && process.env.CALQUE_OIDC_ISSUER)
+    throw new Error("CALQUE_SECRET is not set: with CALQUE_OIDC_ISSUER on, set it to a stable random key (openssl rand -base64 32); it seals model API keys and sessions");
   const data = opts.data ?? process.env.CALQUE_DATA ?? join(REPO, ".data");
   mkdirSync(data, { recursive: true });
   const db = await openDb(opts.db ?? process.env.DATABASE_URL ?? join(data, "pg"));

@@ -4,8 +4,9 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { jwtVerify, SignJWT } from "jose";
 import * as oidc from "openid-client";
 import type { Access } from "./access.ts";
-import { namesOf, teamsOf } from "./auth.ts";
+import { namesOf } from "./auth.ts";
 import type { User } from "./packs.ts";
+import { teamsOf, type TeamsConfig } from "./teams.ts";
 
 /** Web app sign-in: OIDC authorization code + PKCE against the issuer (Keycloak), then a signed,
 HttpOnly session cookie. The server keeps no IdP token: the web agent runs in process, so the
@@ -17,9 +18,11 @@ export interface SessionConfig {
   clientSecret?: string | undefined; // CALQUE_OIDC_CLIENT_SECRET; unset = public client
   publicUrl: string;
   teamsClaim: string;
-  teamsPrefix?: string | undefined;
+  teams?: Omit<TeamsConfig, "claim"> | undefined; // group id -> team name (Entra ID), prefix filter
   secret: string; // CALQUE_SECRET
   access: Access;
+  /** Told of each sign-in (the audit log). */
+  onSignIn?: ((user: User) => Promise<void>) | undefined;
 }
 
 export const SESSION = "calque_session";
@@ -70,7 +73,9 @@ export function sessions(cfg: SessionConfig): Sessions {
       const verifier = oidc.randomPKCECodeVerifier();
       const state = oidc.randomState();
       const back = c.req.query("return") ?? "/";
-      setCookie(c, LOGIN, await seal({ verifier, state, back: back.startsWith("/") ? back : "/" }, "10m"), { ...cookie, maxAge: 600 });
+      // a path on this site only: "//host" and "/\host" are other sites to a browser, which also drops tabs and newlines
+      const local = /^\/(?![/\\])\P{Cc}*$/u.test(back);
+      setCookie(c, LOGIN, await seal({ verifier, state, back: local ? back : "/" }, "10m"), { ...cookie, maxAge: 600 });
       const url = oidc.buildAuthorizationUrl(await discover(), {
         redirect_uri: redirect,
         scope: "openid profile email",
@@ -97,12 +102,13 @@ export function sessions(cfg: SessionConfig): Sessions {
       const user = {
         sub: claims.sub,
         name: String(claims.name ?? claims.preferred_username ?? claims.sub),
-        teams: teamsOf(claims[cfg.teamsClaim], cfg.teamsPrefix),
+        teams: teamsOf(claims, { ...cfg.teams, claim: cfg.teamsClaim }),
         names,
         sid: randomUUID(),
         at: Date.now(),
       };
       setCookie(c, SESSION, await seal(user, `${HOURS}h`), { ...cookie, maxAge: HOURS * 3600 });
+      await cfg.onSignIn?.({ id: user.sub, name: user.name, teams: user.teams });
       return c.redirect(String(login.back));
     },
 

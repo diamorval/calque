@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { teamsOf } from "../src/auth.ts";
 import { checkEndpoint, isMetadata } from "../src/egress.ts";
 import { createHttp } from "../src/http.ts";
 import { InvalidModel } from "../src/models.ts";
 import { sessions } from "../src/session.ts";
+import { teamsConfig, teamsOf } from "../src/teams.ts";
 import type { App } from "../src/tools.ts";
 import { fakeModel, fakeOidc } from "./fakes.ts";
 import { LOCAL, testApp } from "./helpers.ts";
@@ -57,17 +57,23 @@ describe("model egress policy (SSRF)", () => {
     await expect(app.models.resolve("openai-compatible:m")).rejects.toThrow(InvalidModel); // saved before the policy
     // Ollama's default endpoint is checked too
     await expect(app.models.configure(LOCAL, { provider: "ollama", model: "x" })).rejects.toThrow(/localhost is not allowed/);
+    // without a base URL: the Azure resource's host, a provider's public API
+    await expect(app.models.configure(LOCAL, { provider: "azure", model: "d", resource: "acme", api_key: "k" })).rejects.toThrow(/acme.openai.azure.com is not allowed/);
+    await expect(app.models.configure(LOCAL, { provider: "anthropic", model: "c", api_key: "k" })).rejects.toThrow(/api.anthropic.com is not allowed/);
     vi.stubEnv("CALQUE_MODEL_HOSTS", "127.0.0.1");
     await expect(app.models.resolve("openai-compatible:m")).resolves.toMatchObject({ baseURL: model.url });
   });
 });
 
-describe("teams from the groups claim", () => {
-  it("strips Keycloak's leading slash and keeps only the prefixed groups, plus the admin team", () => {
-    expect(teamsOf(["/sales", "ops"])).toEqual(["sales", "ops"]);
-    expect(teamsOf(["/calque-sales", "/all-staff", "/calque-admins", "Domain Users"], "calque-")).toEqual(["calque-sales", "calque-admins"]);
-    expect(teamsOf(["/team-a", "/all-staff", "/calque-admins"], "team-")).toEqual(["team-a", "calque-admins"]);
-    expect(teamsOf(undefined, "x")).toEqual([]);
+describe("teams prefix filter (CALQUE_TEAMS_PREFIX)", () => {
+  it("keeps only the prefixed teams, plus the admin team, after the Entra map", () => {
+    const groups = (g: string[]) => ({ groups: g });
+    expect(teamsOf(groups(["/calque-sales", "/all-staff", "/calque-admins", "Domain Users"]), { claim: "groups", prefix: "calque-" })).toEqual(["calque-sales", "calque-admins"]);
+    expect(teamsOf(groups(["/team-a", "/all-staff", "/calque-admins"]), { claim: "groups", prefix: "team-" })).toEqual(["team-a", "calque-admins"]);
+    const map = { "3f2a9c1e-0b7d-4c55-9a1e-2f6b8d0c4e11": "team-sales", "9d8e7f6a-5b4c-4d3e-8f2a-1b0c9d8e7f6a": "calque-admins" };
+    expect(teamsOf(groups([...Object.keys(map), "00000000-1111-2222-3333-444444444444"]), { claim: "groups", map, prefix: "team-" })).toEqual(["team-sales", "calque-admins"]);
+    expect(teamsConfig({ CALQUE_TEAMS_PREFIX: "team-" }).prefix).toBe("team-");
+    expect(teamsConfig({}).prefix).toBeUndefined();
   });
 });
 
@@ -133,6 +139,9 @@ describe("web sessions: CSRF, revocation, SCIM deprovisioning", () => {
     expect(await me(alice)).toBe(200);
     expect((await req("/api/tools/list_packs", { method: "POST", bearer: await idp.token("bob"), body: "{}" })).status).toBe(200);
     expect((await req("/api/tools/list_packs", { method: "POST", body: "{}" })).status).toBe(401);
+    // the preview's comment routes too
+    const comment = { slide_id: "cover", text: "x" };
+    expect((await post("/decks/00000000-0000-4000-8000-000000000000/comments", comment, alice, { origin: "https://evil.test" })).status).toBe(403);
   });
 
   it("sign-out revokes that session only; an admin revokes all of a user's sessions", async () => {
@@ -149,6 +158,8 @@ describe("web sessions: CSRF, revocation, SCIM deprovisioning", () => {
     expect(await me(bob2)).toBe(401);
     expect(await me(alice)).toBe(200);
     expect(await me(await session("bob"))).toBe(200); // signing in again works
+    const log = (await app.db.query<Json>("select actor, action, target_id from audit where action = 'revoke_sessions'")).rows;
+    expect(log).toEqual([{ actor: "alice", action: "revoke_sessions", target_id: "bob" }]);
   });
 
   it("SCIM: needs its token, provisions users, deactivation revokes sessions and blocks sign-in", async () => {
@@ -188,5 +199,7 @@ describe("web sessions: CSRF, revocation, SCIM deprovisioning", () => {
     expect((await scim(`/Users/${bob.id}`)).status).toBe(404);
     expect(await me(again)).toBe(401);
     expect(((await signIn("bob")) as Response).status).toBe(403);
+    const actions = (await app.db.query<Json>("select actor, action from audit where actor = 'scim' and target_id = $1 order by id", [bob.id])).rows;
+    expect(actions.map((a) => a.action)).toEqual(["scim_create", "scim_deactivate", "scim_activate", "scim_delete"]);
   });
 });

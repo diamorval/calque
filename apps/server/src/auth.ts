@@ -9,16 +9,16 @@ import {
   type OAuthTokenVerifier,
 } from "@modelcontextprotocol/server";
 import type { Identity } from "./access.ts";
-import { ADMIN_TEAM } from "./models.ts";
 import type { User } from "./packs.ts";
+import { teamsOf, type TeamsConfig } from "./teams.ts";
 
-/** OAuth resource server: tokens come from an external authorization server (Keycloak). */
+/** OAuth resource server: tokens come from an external authorization server (Keycloak, Entra ID). */
 export interface AuthConfig {
   issuer: string; // CALQUE_OIDC_ISSUER, e.g. https://sso.example.com/realms/acme
   audience: string; // CALQUE_OIDC_AUDIENCE: the client id / audience tokens are minted for
   resource: URL; // this server's MCP endpoint, <public url>/mcp
   teamsClaim: string; // CALQUE_TEAMS_CLAIM, default "groups"
-  teamsPrefix?: string | undefined; // CALQUE_TEAMS_PREFIX: keep only the groups starting with it (and the admin team)
+  teams?: Omit<TeamsConfig, "claim"> | undefined; // CALQUE_TEAMS_MAP, CALQUE_TEAMS_MAP_ONLY (Entra group ids), CALQUE_TEAMS_PREFIX
   keys?: JWTVerifyGetKey; // tests inject a local key set...
   metadata?: OAuthMetadata; // ...and the authorization server metadata
 }
@@ -38,7 +38,9 @@ export function verifier(cfg: AuthConfig, metadata: () => Promise<OAuthMetadata>
           extra: {
             sub: payload.sub,
             names: namesOf(payload),
-            teams: teamsOf(payload[cfg.teamsClaim], cfg.teamsPrefix),
+            // shown as the author of versions and comments (S18); the sub stays the id
+            ...(typeof payload.name === "string" ? { name: payload.name } : {}),
+            teams: teamsOf(payload, { ...cfg.teams, claim: cfg.teamsClaim }),
           },
         };
       } catch (e) {
@@ -46,12 +48,6 @@ export function verifier(cfg: AuthConfig, metadata: () => Promise<OAuthMetadata>
       }
     },
   };
-}
-
-/** The teams in a token's groups claim. Keycloak group paths look like "/team-a". */
-export function teamsOf(claim: unknown, prefix?: string): string[] {
-  const teams = Array.isArray(claim) ? claim.map((t) => String(t).replace(/^\//, "")) : [];
-  return prefix ? teams.filter((t) => t.startsWith(prefix) || t === ADMIN_TEAM) : teams;
 }
 
 /** The names SCIM may know the user by (access.ts). */
@@ -65,7 +61,8 @@ export const identityOf = (auth: AuthInfo): Identity => ({
 
 export function userOf(auth: AuthInfo | undefined): User {
   if (!auth) return { id: "local", teams: [], local: true };
-  return { id: String(auth.extra?.sub ?? auth.clientId), teams: (auth.extra?.teams as string[]) ?? [] };
+  const name = auth.extra?.name;
+  return { id: String(auth.extra?.sub ?? auth.clientId), ...(typeof name === "string" ? { name } : {}), teams: (auth.extra?.teams as string[]) ?? [] };
 }
 
 /** The authorization server's metadata (OIDC discovery), fetched once. */

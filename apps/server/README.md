@@ -6,7 +6,7 @@ the same tools (`src/tools.ts`). Every deck change is a new DeckSpec version in 
 ```bash
 pnpm --filter @calque/slide-ui build   # the deck UI (MCP App + web preview)
 node apps/server/src/main.ts           # HTTP on :8787
-node apps/server/src/stdio.ts          # stdio, for a local MCP client
+node apps/server/src/stdio.ts          # stdio, for a local MCP client (bridge to the HTTP server)
 ```
 
 | Variable | Default | |
@@ -19,20 +19,59 @@ node apps/server/src/stdio.ts          # stdio, for a local MCP client
 | `CALQUE_OIDC_ISSUER` | unset: no auth, loopback only | e.g. `https://sso.example.com/realms/<realm>` |
 | `CALQUE_OIDC_AUDIENCE` | `calque` | audience the access tokens carry (Keycloak: audience mapper) |
 | `CALQUE_TEAMS_CLAIM` | `groups` | token claim listing the user's teams (pack visibility) |
+| `CALQUE_TEAMS_MAP` | unset | group id → team name, inline JSON or a JSON file path (Entra ID group GUIDs, see below) |
+| `CALQUE_TEAMS_MAP_ONLY` | unset | `1`: drop the groups the map does not name |
 | `CALQUE_OIDC_CLIENT_ID` | the audience | the web app's OIDC client (authorization code + PKCE) |
 | `CALQUE_OIDC_CLIENT_SECRET` | unset: public client | its secret, for a confidential client |
-| `CALQUE_SECRET` | random, in `$CALQUE_DATA/secret` | seals model API keys at rest (AES-256-GCM): set it in production |
-| `CALQUE_ADMIN_TEAM` | `calque-admins` | team allowed to configure AI models |
+| `CALQUE_SECRET` | random, in `$CALQUE_DATA/secret` | seals model API keys at rest (AES-256-GCM) and sessions: required when `CALQUE_OIDC_ISSUER` is set (the server refuses to start without it) |
+| `CALQUE_ADMIN_TEAM` | `calque-admins` | team allowed to configure AI models, to manage every brand pack (seeded ones included) and, on any deck, see who has access, make it private, reset its link and transfer it (never to read it) |
 | `CALQUE_LLM_MODEL` | unset | preconfigured gateway, saved as model `env`, default unless another is set |
 | `CALQUE_LLM_PROVIDER` / `_BASE_URL` / `_API_KEY` | `openai-compatible` / – / – | the gateway's provider, endpoint and key |
+| `CALQUE_LLM_HEADERS` | unset | JSON object of extra request headers (e.g. `{"Ocp-Apim-Subscription-Key": "…"}`), sealed at rest |
+| `CALQUE_LLM_AZURE_RESOURCE` / `_API_VERSION` / `_MANAGED_IDENTITY` | – / `v1` / – | Azure OpenAI (`CALQUE_LLM_PROVIDER=azure`, the model is the deployment): resource name, `api-version`, `1` to sign in with the managed identity |
+| `CALQUE_RETENTION_DAYS` | unset: keep everything | delete decks untouched for that many days and uploads older than that, at start and daily (the audit log is kept) |
+| `CALQUE_RATE_LIMIT` | on | `off` lifts the per-minute limits on `/auth/*` (30 per address), agent runs (30 per user) and model tests (10 per user) |
+| `CALQUE_TRUST_PROXY` | unset | `1`: rate-limit by the first `X-Forwarded-For` hop (behind your reverse proxy) instead of the socket address |
 | `CALQUE_MODEL_HOSTS` | unset: any host | allow-list of model endpoint hosts (`api.example.com,.openai.azure.com`); metadata addresses are always refused ([security](../../docs/security.md)) |
-| `CALQUE_TEAMS_PREFIX` | unset: every group | keep only the groups starting with it (and `CALQUE_ADMIN_TEAM`) as teams |
+| `CALQUE_TEAMS_PREFIX` | unset: every group | keep only the teams starting with it (after `CALQUE_TEAMS_MAP`), and `CALQUE_ADMIN_TEAM` |
 | `CALQUE_SCIM_TOKEN` | unset: no SCIM | bearer token of the SCIM 2.0 endpoint `/scim/v2/Users` (deprovisioning) |
+
+## Deploy
+
+One image (`Dockerfile` at the repo root): this server, the built web app and deck UI, the Python
+engine (locked dependencies) and LibreOffice + pdftoppm for renders. Not one image each for web,
+agent and engine: the web app is static files served here, the agent runs in this process and the
+engine is a subprocess per call (`src/engine.ts`), so they ship together. It runs as `node`, keeps
+its state in the `/data` volume (`CALQUE_DATA`) and serves the packs baked in `/app/packs`
+(`CALQUE_PACKS`; brand fonts in `packs/<id>/fonts/` are baked too when present at build time).
+
+```bash
+docker compose up -d --build   # calque + Postgres; needs CALQUE_SECRET, CALQUE_OIDC_ISSUER,
+                               # CALQUE_PUBLIC_URL, POSTGRES_PASSWORD (URL-safe) in .env
+docker compose logs -f calque
+```
+
+The compose file refuses to start without those. Without an issuer the server only listens on
+loopback, so a bare `docker run` is for a smoke test only:
+
+```bash
+docker build -t calque .
+docker run -d --name calque --network host -e CALQUE_SECRET=dev calque
+node scripts/docker-smoke.ts   # a deck built and rendered end to end (also run in CI)
+```
+
+Put an HTTPS reverse proxy in front of `:8787` at `CALQUE_PUBLIC_URL`; the health check is
+`GET /api/tools`.
 
 ## Connect
 
-- **Claude Code, local:** `.mcp.json` at the repo root starts the stdio server; the prompts show as
-  `/calque:build-presentation`, `/calque:review-deck`… Previews need `main.ts` running too.
+- **Claude Code, local:** `.mcp.json` at the repo root starts `stdio.ts`; the prompts show as
+  `/calque:build-presentation`, `/calque:review-deck`… `stdio.ts` is a bridge to `/mcp` of the
+  server on `127.0.0.1:$PORT` (no-auth mode), so previews, browser comments and MCP share one
+  database. If no server answers, it starts `main.ts` in its own process (previews then live as long
+  as that session; run `main.ts` yourself to keep them up). Only one process may open a PGlite
+  directory: a second one fails with the owner's pid instead of corrupting it. On a fresh checkout
+  `stdio.ts` runs `pnpm install` first (logs on stderr).
 - **Claude Code, remote:** `claude mcp add --transport http calque https://<host>/mcp`.
 - **Claude and Cowork:** custom connector on `https://<host>/mcp`. The server is an OAuth resource
   server: it advertises `/.well-known/oauth-protected-resource/mcp`, pointing at the issuer, and
@@ -40,7 +79,113 @@ node apps/server/src/stdio.ts          # stdio, for a local MCP client
 
 Hosts with MCP Apps show the deck UI (`ui://calque/deck.html`) on `create_deck`, `open_deck`,
 `import_pptx`, `patch_deck`, `add_slides`, `restore_version`. The others get `preview_url`
-(`/decks/:id`), the same UI over REST: comments posted there are read by `list_comments`.
+(`/decks/:id?t=…`, the caller's URL token, see below), the same UI over REST: comments posted there
+are read by `list_comments`.
+
+### PowerPoint round trip
+
+The engine tags every slide it builds (PowerPoint slide tags: the slide id, and the spec of a drawn
+slide). `import_pptx` with `deck_id` brings an exported deck edited in PowerPoint back as the next
+version of that deck: history and comments are kept, tagged slides keep their ids, and charts,
+diagrams and compositions stay drawn with the client's text, notes, table and chart-data edits
+merged into their spec (`set_params` keeps working). A drawn slide whose shapes were added,
+removed, moved, resized or restyled, or whose text the spec cannot hold, becomes an `imported`
+clone kept exactly as the client left it. The result's `import` report lists `drawn`, `imported`,
+`demoted` (with the reason) and `conflicts` (drawn slides changed in Calque after the export: the
+file wins). `copy_slides` copies slides between decks: drawn slides to any pack, template and
+imported clones to the same pack (imported ones are grafted into the target's base file).
+
+### Sharing
+
+Artifact style: people with access, and one share link per deck. Roles, each including the ones
+before it: **viewer** (open, lint, export, list comments, present), **commenter** (+ comment),
+**editor** (+ `patch_deck`, `add_slides`, `copy_slides` (viewer on the source deck), `import_pptx` with `deck_id`, `restore_version`, `review_deck`), **owner** (+ manage
+access, transfer). A deck the caller has no role on does not exist for them (404); a tool needing
+more than their role answers 403. The caller's role is the best of the ones below.
+
+- **People with access** (`deck_shares`): the owner gives a user id or a team viewer, commenter or
+  editor (`share_deck`, `unshare_deck`). A grant counts only while the user sees the deck's pack.
+  `list_decks` (and `GET /api/decks`) returns the caller's decks and the decks shared with them,
+  each with `role` and `owner` ("Shared with me" in the web app).
+- **Share link**: each deck has exactly one, `/decks/:id?k=<link_key>`, a random secret stored on
+  the deck. Its **general access** (`set_general_access {access, role}`) says who else it opens for:
+  `private` (default: only the owner and people with access, signed in), `workspace` (anyone signed
+  in who sees the deck's pack gets the general role) or `anyone` (no sign-in, no pack gate), with the
+  general role `viewer` or `commenter`, never editor. No expiry: `reset_link` rotates the key, and
+  every copy of the old link stops working at once. Comments through an anonymous link are signed
+  `guest`. `list_shares` returns the owner, the people, the general access and, for the owner, the
+  link `url`.
+- **URL tokens** (internal): the URLs in tool results (`preview_url`, `image_url`, `download_url`)
+  and the MCP App's PNGs must work with no browser session, so they carry `?t=`, a per-user token
+  (HMAC with `CALQUE_SECRET`, 24 h, bound to the user and the deck). It is no grant: every request
+  re-checks that user's current access, so removing their access kills it, and it never gives more
+  than they have. A caller who came through the share link gets URLs with that link instead. Never
+  shown in the Share dialog. Without `CALQUE_OIDC_ISSUER` (local only) neither `?k=` nor `?t=` is
+  checked.
+- **Transfer** (`transfer_deck`): the owner, or an admin, gives the deck to another user id; the
+  former owner keeps editor access through a grant.
+- **Admins** (`CALQUE_ADMIN_TEAM`) have no access to deck content. On any deck they see who has
+  access (never the link), set general access to private, reset the link and transfer it:
+  `list_shares`, `set_general_access {access: "private"}`, `reset_link`, `transfer_deck`, or
+  `GET /api/admin/decks/:id/access`, `POST /api/admin/decks/:id/private`,
+  `POST /api/admin/decks/:id/reset-link`, `POST /api/admin/decks/:id/transfer` `{to}`.
+
+Every grant, revocation, general access change, link reset and transfer is logged in the `audit` table
+(deck, actor, action, detail).
+
+### Review
+
+- **Comment threads**: `add_comment {parent_id, text}` replies in a thread (one level, on the
+  first comment's slide and shape). `list_comments {status: open | resolved | all}` and `open_deck`
+  (`open_comments`, `resolved_comments`) return threads with their `replies`. `resolve_comments
+  {comment_ids, status}` resolves or reopens threads one by one without editing the deck: an editor
+  any thread, a signed-in commenter only their own. `patch_deck {resolves}` still resolves what it
+  applied. The slide UI applies the selected threads or all of them
+  (`POST /api/agent/apply-comments {deck_id, comment_ids?}` in the web app).
+- **Authors**: versions and comments keep the author's id (`author`, the token's `sub`) and store
+  their display name (`author_name`, the `name` claim of the session or bearer token); the UIs show
+  the name. Comments through an anonymous link stay `guest`.
+- **Approval** (opt-in, M9): only on packs whose `pack.yaml` sets `approval: true` (default off, so
+  consultants are never blocked). A deck is `draft`, `in_review` or `approved` (`set_approval`,
+  status and allowed moves in `open_deck`'s `approval`). An editor requests the review and may
+  withdraw it; the approver is the pack's owner or an admin, with at least view access to the deck
+  (share it with them), who approves or sends it back to draft. A new version of an approved deck
+  is a draft again. Approval never gates an export. Each move is logged in the `audit` table.
+- **Export gate** (soft, M18): `export_pptx` always exports. When the version has lint ERRORs it
+  answers `lint_errors` (and a `warning` without `reason`) and logs `export_with_errors` (version,
+  error count, `reason` or null) in the `audit` table. The web app asks for the reason before exporting.
+
+### Audit log and deletion
+
+The `audit` table records who did what, never the content: deck `create`, `edit` (version, note),
+`export`, `delete`, the sharing actions above; pack `publish`, `edit`, `visibility`; model `add`,
+`update`, `default`, `remove`; `sign_in`; retention `purge`. Rows outlive what they name. Admins
+read it at `GET /api/admin/audit?actor=&action=&target_type=&target_id=&since=&until=&limit=`
+(newest first, at most 1000).
+
+`delete_deck` (or `DELETE /api/decks/:id`, the Delete action on the Decks page): the owner, or an
+admin, erases a deck with its versions, comments, shares and its folder under `$CALQUE_DATA/decks`
+(built PPTX, renders, imported base). Uploads are the uploader's: `CALQUE_RETENTION_DAYS` removes
+them by age. See [docs/security.md](../../docs/security.md).
+
+### Files in
+
+A template or deck is too big for a tool argument in base64 (a corporate template is ~14 MB).
+Upload it, then pass its `file_id`:
+
+1. The `upload_url` tool returns a one-time URL (signed ticket, 15 minutes) that uploads as the
+   calling user, so a client without its own token (Claude Code's shell) can post the file:
+   `curl -F file=@template.pptx '<upload_url>'`. A client holding a bearer token can also
+   `POST /api/files` with it directly.
+2. The answer is `{file_id, name, size, type}`. Pass `{"file_id": …}` as `file` to `import_pptx` or as
+   `template` to `import_pack`, or place an image with `"image": "file:<file_id>"` in a clone value.
+
+Files are capped at 50 MB, stored under `$CALQUE_DATA/uploads/<file_id>`, and usable only by their
+uploader. `{base64}` (and `{path}` on a stdio server) still work.
+
+Outputs: `export_pptx` (`/decks/:id/deck.pptx`) and `export_pdf` (`/decks/:id/deck.pdf`, rendered by
+LibreOffice with the pack's fonts, like the previews; one file per version). Saving to
+SharePoint/OneDrive/Teams is not built: it needs Microsoft Graph credentials.
 
 ## Web app
 
@@ -53,17 +198,56 @@ design system: `node_modules/@diametral/design-system/keycloak/diametral`.
 Sessions are checked server-side on each request: sign-out revokes the session, the
 `revoke_sessions` tool (admins) revokes all of a user's sessions, and a user deactivated over SCIM
 (`/scim/v2/Users`, with `CALQUE_SCIM_TOKEN`) can neither sign in nor use a session or a token. A
-cookie-authenticated write (`POST`, `DELETE`… on `/api`) must come from `CALQUE_PUBLIC_URL`'s origin
+cookie-authenticated write (`POST`, `DELETE`… on `/api` and `/decks`) must come from `CALQUE_PUBLIC_URL`'s origin
 (`Origin`, else `Referer`): 403 otherwise. Details in [docs/security.md](../../docs/security.md).
+
+### Microsoft Entra ID
+
+Entra ID works as the issuer for both doors, next to Keycloak:
+
+1. **App registration** (single tenant). Web redirect URI `<public url>/auth/callback`; a client
+   secret for `CALQUE_OIDC_CLIENT_SECRET`. *Expose an API* with a scope (e.g. `access_as_user`), and
+   set `"accessTokenAcceptedVersion": 2` in the manifest so access tokens carry the v2 issuer.
+2. **Groups claim.** *Token configuration > Add groups claim*, and prefer *Groups assigned to the
+   application*: past 200 groups Entra leaves `groups` out of the token (the overage claim). Calque
+   makes no Graph call: it logs a warning naming the user, who then has no teams.
+3. **Environment.**
+
+   ```bash
+   CALQUE_OIDC_ISSUER=https://login.microsoftonline.com/<tenant id>/v2.0
+   CALQUE_OIDC_AUDIENCE=<application (client) id>   # the aud of v2 access tokens
+   CALQUE_OIDC_CLIENT_ID=<application (client) id>
+   CALQUE_OIDC_CLIENT_SECRET=<secret>
+   CALQUE_TEAMS_MAP=/etc/calque/teams.json            # or inline: {"<group object id>": "sales", …}
+   CALQUE_TEAMS_MAP_ONLY=1                            # unmapped GUIDs never show as teams
+   CALQUE_ADMIN_TEAM=calque-admins                    # a mapped team name
+   ```
+
+   Entra sends group object ids (GUIDs): `CALQUE_TEAMS_MAP` names them, so pack visibility reads
+   `sales` rather than `3f2a…`.
+
+Limits: Entra has no dynamic client registration, so an MCP client that relies on it cannot sign in
+on its own (pre-register a client for it, or broker Entra through Keycloak). To cut a removed user's
+access before their 8-hour cookie expires, provision the enterprise application over SCIM to
+`<public url>/scim/v2` with `CALQUE_SCIM_TOKEN` as the secret token, and map `userName` to the
+`preferred_username` (UPN) the tokens carry.
 
 | Route | |
 | --- | --- |
 | `GET /api/me` | the signed-in user, their teams, `admin` |
-| `GET /api/decks` | the user's decks |
-| `POST /api/packs/drafts` | multipart `template`, `id`, `name`: extracted draft (manifest with guessed roles, one PNG per template slide) |
-| `POST /api/packs/drafts/:id/fonts` | multipart `font` (.ttf, .otf) |
-| `POST /api/packs/drafts/:id/publish` | `{manifest, voice?, visibility, teams?}`: validated (template lint, test deck), then published |
-| `POST /api/packs/:id/visibility` | `{visibility, teams?}`, owner only |
+| `GET /api/decks` | the user's decks and the decks shared with them, each with `role` and `owner` |
+| `POST /api/files` | multipart `file` (50 MB max, else 413) → `{file_id, name, size, type}`, owned by the caller; `?ticket=` from `upload_url` instead of credentials |
+| `POST /api/packs/drafts` | multipart `template` (.pptx or .potx), `id`, `name`, optional `tokens` (tokens.json): extracted draft (manifest with guessed roles and the fonts/colours the slides use, resolved colours and fonts to review, archetype names, one PNG per template slide) |
+| `POST /api/packs/drafts/:id/fonts` | multipart `font` (.ttf, .otf): its family is allowed by lint (`lint.extra_fonts`) on publish |
+| `POST /api/packs/drafts/:id/template` | multipart `template`: a new template.pptx; the map and template-bound manifest fields are re-extracted |
+| `POST /api/packs/drafts/:id/tokens` | multipart `tokens`: a new tokens.json (DTCG), checked at publish |
+| `POST /api/packs/drafts/:id/publish` | `{manifest, voice?, note?, visibility, teams?}`: validated (template lint, test deck), DESIGN.md regenerated, then published as the pack's next release |
+| `GET /api/packs` | the Brand packs page: packs the user sees or manages, archived ones included, with `owner`, `pack_version`, `archived`, `editable` |
+| `POST /api/packs/:id/edit` | an edit draft of the current release, owner or admin |
+| `POST /api/packs/:id/visibility` | `{visibility, teams?}`, owner or admin |
+| `POST /api/packs/:id/archive` | `{archived}`: hidden from pickers and new decks, its decks still open; owner or admin |
+| `GET /api/packs/:id/versions` | the pack's releases (changelog), newest first; owner or admin |
+| `POST /api/packs/:id/restore` | `{version, note?}`: that release becomes current again, as a new release; owner or admin |
 
 ## Web agent (API door)
 
@@ -74,10 +258,19 @@ prompts as Claude. Models go through `@calque/llm` only.
 | Route | |
 | --- | --- |
 | `GET /api/models` | provider catalog + configured models (never their keys) |
-| `POST /api/models` | `{provider, model, api_key?, base_url?, default?}`: tested with a 1-token call, refused (422) if the provider refuses |
-| `POST /api/models/:id/default`, `DELETE /api/models/:id` | the default is read on every call: no restart |
-| `POST /api/agent/chat` | `{messages, workflow?, pack_id?, deck_id?, model?}` → `{model, text, messages}`; the client keeps the conversation. `Accept: application/x-ndjson` streams `{step}` lines, then `{done}` |
+| `POST /api/models` | `{id?, provider, model, label?, api_key?, base_url?, headers?, resource?, api_version?, managed_identity?, default?}`: tested with a 1-token call, refused (422) if the provider refuses. With `id`: edits that configuration (an unset key or `headers` keeps the stored ones). Without: id `provider:model`, `@<label>` if labelled; the same model on another endpoint gets `@2`, `@3`… instead of overwriting |
+| `POST /api/models/:id/default`, `DELETE /api/models/:id` | the default is read on every call: no restart; removing the default promotes the most recently configured model |
+| `POST /api/agent/chat` | `{messages, workflow?, pack_id?, deck_id?, model?, files?}` → `{model, text, messages}`; the client keeps the conversation. `files`: uploaded file ids; documents (txt, md, csv, docx, xlsx, pptx; not PDF yet) reach the model as text, images as `file:<id>` references. `Accept: application/x-ndjson` streams `{step: {text, tools: [{name, error?}]}}` lines, then `{done}` |
 | `POST /api/agent/apply-comments` | `{deck_id, model?}`: the open comments become `patch_deck` calls |
+
+**Azure OpenAI.** The model is the deployment name. Give the resource name (or a base URL: an APIM
+gateway, a private endpoint). An empty API version uses the v1 API; a dated one (`2024-10-21`) calls
+`/openai/deployments/<deployment>/chat/completions?api-version=…`. Gateway headers such as
+`Ocp-Apim-Subscription-Key` go in the custom headers, sealed like the keys. Instead of a key, the
+server can sign in with its managed identity (App Service, Container Apps via `IDENTITY_ENDPOINT`;
+VMs and AKS nodes via the instance metadata endpoint; `AZURE_CLIENT_ID` for a user-assigned
+identity), which needs the *Cognitive Services OpenAI User* role on the resource. Not covered: AKS
+workload identity (federated tokens) and service-principal secrets: use a key or a gateway for those.
 
 `node apps/server/eval/agent.ts anthropic:<model> openai:<model>` runs the Phase 4 checks on real models
 (same brief → 0 lint ERROR, then 5 comments applied → 0 lint ERROR). Needs the providers' keys.

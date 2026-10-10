@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { audit } from "./audit.ts";
 import type { Db } from "./db.ts";
-import { isAdmin } from "./models.ts";
-import { Forbidden, NotFound, type User } from "./packs.ts";
+import { Forbidden, isAdmin, NotFound, type User } from "./packs.ts";
 
 /** Server-side session control on top of the stateless session cookie: a signed-out session id is
 revoked until it expires, a user's sessions issued before `sessions_after` are revoked, and an
@@ -29,6 +29,9 @@ export interface UserRow {
 }
 
 export class Conflict extends Error {}
+
+/** The audit log's actor for what the IdP does over SCIM. */
+const SCIM = "scim";
 
 const MATCH = "(id = $1 or external_id = $1 or lower(user_name) in (select jsonb_array_elements_text($2::jsonb)))";
 const keys = (who: Identity) => [who.sub, ...who.names].map((n) => n.toLowerCase());
@@ -73,6 +76,7 @@ export class Access {
       at,
     ]);
     if (!updated.rows.length) await this.db.query("insert into users (id, sessions_after) values ($1, $2)", [user, at]);
+    await audit(this.db, admin, "revoke_sessions", "user", user);
     return { user, sessions_revoked_at: at.toISOString() };
   }
 
@@ -102,6 +106,7 @@ export class Access {
       "insert into users (id, user_name, external_id, display_name, active, sessions_after) values ($1, $2, $3, $4, $5, $6)",
       [id, u.userName, u.externalId ?? null, u.displayName ?? null, u.active ?? true, taken?.sessions_after ?? null],
     );
+    await audit(this.db, SCIM, "scim_create", "user", id, { userName: u.userName, active: u.active ?? true });
     return this.get(id);
   }
 
@@ -114,12 +119,15 @@ export class Access {
        sessions_after = case when $5 then sessions_after else now() end, updated_at = now() where id = $1`,
       [id, u.userName ?? r.user_name, u.externalId ?? r.external_id, u.displayName ?? r.display_name, active],
     );
+    const changed = Object.fromEntries(Object.entries(u).filter(([, v]) => v !== undefined));
+    await audit(this.db, SCIM, active === r.active ? "scim_update" : active ? "scim_activate" : "scim_deactivate", "user", id, { userName: u.userName ?? r.user_name, ...changed });
     return this.get(id);
   }
 
   /** Deleted for SCIM (404 from now on), still blocked here. */
   async remove(id: string) {
-    await this.get(id);
+    const r = await this.get(id);
     await this.db.query("update users set active = false, deleted = true, sessions_after = now(), updated_at = now() where id = $1", [id]);
+    await audit(this.db, SCIM, "scim_delete", "user", id, { userName: r.user_name });
   }
 }

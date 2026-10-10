@@ -7,19 +7,27 @@ import { Stepper, StepperIndicator, StepperItem, StepperSeparator, StepperTitle 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "diametral-ds/table";
 import { Tag } from "diametral-ds/tag";
 import { Textarea } from "diametral-ds/textarea";
-import { FileUp, Globe, Lock, Pencil, Upload, X } from "lucide-react";
+import { Archive, ArchiveRestore, FileUp, Globe, History, Lock, Pencil, Upload, X } from "lucide-react";
 import { Fragment, useCallback, useEffect, useState, type FormEvent } from "react";
-import { api, tool, upload, type Me, type Pack } from "../api.ts";
+import { api, upload, type Me, type Pack } from "../api.ts";
 import { Field, FileDrop, PageHead, Spinner } from "../ui.tsx";
 
-/** Settings > Brand packs: the packs this user sees, their visibility, and importing a new one. */
+interface Releases {
+  id: string;
+  current: number;
+  versions: { version: number; note: string; author: string | null; created_at: string }[];
+}
+
+/** Settings > Brand packs: the packs this user sees or manages (archived too), their owner and
+visibility, their releases, and importing a new one. Owners and admins manage a pack. */
 export function Packs({ me }: { me: Me }) {
   const [packs, setPacks] = useState<Pack[] | null>(null);
   const [importing, setImporting] = useState(false);
   const [editing, setEditing] = useState<Draft | null>(null);
   const [opening, setOpening] = useState<string | null>(null);
+  const [history, setHistory] = useState<Releases | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const reload = useCallback(() => tool<{ packs: Pack[] }>("list_packs").then((r) => setPacks(r.packs)), []);
+  const reload = useCallback(() => api<{ packs: Pack[] }>("/api/packs").then((r) => setPacks(r.packs)), []);
   useEffect(() => {
     void reload();
   }, [reload]);
@@ -33,6 +41,23 @@ export function Packs({ me }: { me: Me }) {
       setError((e as Error).message);
     }
   };
+
+  const act = async (fn: () => Promise<unknown>) => {
+    setError(null);
+    try {
+      await fn();
+      await reload();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+  const archive = (p: Pack, archived: boolean) => act(() => api(`/api/packs/${p.id}/archive`, { archived }));
+  const releases = (p: Pack) => act(async () => setHistory(await api<Releases>(`/api/packs/${p.id}/versions`)));
+  const restore = (id: string, version: number) =>
+    act(async () => {
+      await api(`/api/packs/${id}/restore`, { version });
+      setHistory(await api<Releases>(`/api/packs/${id}/versions`));
+    });
 
   const edit = async (p: Pack) => {
     setError(null);
@@ -60,7 +85,10 @@ export function Packs({ me }: { me: Me }) {
     );
   return (
     <div className="cq-page">
-      <PageHead title="Brand packs" description="Each company's template, charter and voice. A new pack is visible to your teams only until you share it.">
+      <PageHead
+        title="Brand packs"
+        description="Each company's template, charter and voice. A new pack is visible to your teams only until you share it. Its owner and the admins edit it; every save is a release you can roll back."
+      >
         <Button onClick={() => setImporting(true)}>
           <Upload /> Import a template
         </Button>
@@ -79,6 +107,7 @@ export function Packs({ me }: { me: Me }) {
             <TableHeader>
               <TableRow>
                 <TableHead>Pack</TableHead>
+                <TableHead>Owner</TableHead>
                 <TableHead>Languages</TableHead>
                 <TableHead>Visible to</TableHead>
                 <TableHead />
@@ -86,13 +115,20 @@ export function Packs({ me }: { me: Me }) {
             </TableHeader>
             <TableBody>
               {packs.map((p) => (
-                <TableRow key={p.id} data-pack={p.id}>
+                <TableRow key={p.id} data-pack={p.id} className={p.archived ? "cq-muted" : undefined}>
                   <TableCell>
                     <strong>{p.name}</strong>{" "}
                     <span className="cq-mono cq-muted">
                       {p.id} · v{p.version}
-                    </span>
+                      {p.pack_version ? ` · release ${p.pack_version}` : ""}
+                    </span>{" "}
+                    {p.archived && (
+                      <Tag tone="warning">
+                        <Archive /> Archived
+                      </Tag>
+                    )}
                   </TableCell>
+                  <TableCell>{p.owner ?? <span className="cq-muted">Admins</span>}</TableCell>
                   <TableCell>{p.languages.join(", ")}</TableCell>
                   <TableCell>
                     {p.visibility === "workspace" ? (
@@ -121,6 +157,68 @@ export function Packs({ me }: { me: Me }) {
                           Restrict to my teams
                         </Button>
                       ))}
+                    {p.editable && (
+                      <Button size="sm" variant="ghost" onClick={() => void releases(p)}>
+                        <History /> History
+                      </Button>
+                    )}
+                    {p.editable && (
+                      <Button size="sm" variant="ghost" onClick={() => void archive(p, !p.archived)}>
+                        {p.archived ? (
+                          <>
+                            <ArchiveRestore /> Unarchive
+                          </>
+                        ) : (
+                          <>
+                            <Archive /> Archive
+                          </>
+                        )}
+                      </Button>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Card>
+      )}
+      {history && (
+        <Card className="cq-table-card" data-history={history.id}>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Release of {history.id}</TableHead>
+                <TableHead>Note</TableHead>
+                <TableHead>By</TableHead>
+                <TableHead>When</TableHead>
+                <TableHead className="cq-row-actions">
+                  <Button size="sm" variant="ghost" onClick={() => setHistory(null)}>
+                    <X /> Close
+                  </Button>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {history.versions.map((v) => (
+                <TableRow key={v.version}>
+                  <TableCell>
+                    {v.version}
+                    {v.version === history.current && (
+                      <>
+                        {" "}
+                        <Tag tone="success">Current</Tag>
+                      </>
+                    )}
+                  </TableCell>
+                  <TableCell>{v.note}</TableCell>
+                  <TableCell>{v.author ?? <span className="cq-muted">seeded</span>}</TableCell>
+                  <TableCell>{new Date(v.created_at).toLocaleString()}</TableCell>
+                  <TableCell className="cq-row-actions">
+                    {v.version !== history.current && (
+                      <Button size="sm" variant="outline" onClick={() => void restore(history.id, v.version)}>
+                        Restore
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}
@@ -134,8 +232,17 @@ export function Packs({ me }: { me: Me }) {
 
 interface Draft {
   draft_id: string;
-  manifest: Record<string, unknown> & { roles: Record<string, number[]>; never_clone: number[]; default_language: string | null; lint: { placeholders?: string[] } };
+  manifest: Record<string, unknown> & {
+    roles: Record<string, number[]> & { archetypes?: Record<string, number[]> };
+    never_clone: number[];
+    default_language: string | null;
+    lint: { placeholders?: string[]; extra_fonts?: string[]; extra_colors?: string[] };
+  };
   slides: { number: number; layout: string; texts: string[]; image_url: string }[];
+  /** Archetype names a slide may be declared as (core/forms.yaml). */
+  archetypes: string[];
+  /** Resolved token values, on import: token path -> hex colour or font family. */
+  review?: { colors: Record<string, string>; fonts: Record<string, string> };
   /** Set when the draft edits a published pack. */
   voice?: string;
   fonts?: string[];
@@ -145,11 +252,18 @@ const ROLES = ["cover", "summary", "divider", "subsection", "content", "closing"
 const NONE = "none";
 const NEVER = "never";
 
-/** Role per slide from the draft manifest (the first role wins; archetypes stay as drafted). */
+/** Role per slide from the draft manifest (the first role wins). */
 function rolesOf(d: Draft): Record<number, string> {
   const out: Record<number, string> = {};
   for (const s of d.slides) out[s.number] = d.manifest.never_clone.includes(s.number) ? NEVER : NONE;
   for (const r of ROLES) for (const n of d.manifest.roles[r] ?? []) if (out[n] === NONE) out[n] = r;
+  return out;
+}
+
+/** Archetype per slide from the draft manifest (the first archetype wins). */
+function archetypesOf(d: Draft): Record<number, string> {
+  const out: Record<number, string> = {};
+  for (const [a, ns] of Object.entries(d.manifest.roles.archetypes ?? {})) for (const n of ns) out[n] ??= a;
   return out;
 }
 
@@ -158,13 +272,18 @@ function Import({ me, editing, onDone }: { me: Me; editing?: Draft | null; onDon
   const [id, setId] = useState("");
   const [name, setName] = useState(editing ? String(editing.manifest.name ?? "") : "");
   const [template, setTemplate] = useState<File | null>(null);
+  const [tokens, setTokens] = useState<File | null>(null);
   const [draft, setDraft] = useState<Draft | null>(editing ?? null);
   const [roles, setRoles] = useState<Record<number, string>>(editing ? rolesOf(editing) : {});
+  const [archetypes, setArchetypes] = useState<Record<number, string>>(editing ? archetypesOf(editing) : {});
+  const [families, setFamilies] = useState<string[]>(editing?.manifest.lint.extra_fonts ?? []);
   const [language, setLanguage] = useState(editing ? (editing.manifest.default_language ?? "") : "en");
   const [placeholders, setPlaceholders] = useState((editing?.manifest.lint.placeholders ?? []).join("\n"));
   const [voice, setVoice] = useState(editing?.voice ?? "");
   const [fonts, setFonts] = useState<string[]>(editing?.fonts ?? []);
   const [visibility, setVisibility] = useState<"team" | "workspace">("team");
+  const [note, setNote] = useState("");
+  const [newTokens, setNewTokens] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [problems, setProblems] = useState<string[]>([]);
 
@@ -188,9 +307,12 @@ function Import({ me, editing, onDone }: { me: Me; editing?: Draft | null; onDon
       form.set("id", id);
       form.set("name", name || id);
       form.set("template", template);
+      if (tokens) form.set("tokens", tokens);
       const d = await upload<Draft>("/api/packs/drafts", form);
       setDraft(d);
       setRoles(rolesOf(d));
+      setArchetypes(archetypesOf(d));
+      setFamilies(d.manifest.lint.extra_fonts ?? []);
       setLanguage(d.manifest.default_language ?? "en");
       setPlaceholders((d.manifest.lint.placeholders ?? []).join("\n"));
     });
@@ -200,6 +322,8 @@ function Import({ me, editing, onDone }: { me: Me; editing?: Draft | null; onDon
     if (!draft) return;
     await step("Validating: template lint and a test deck", async () => {
       const assigned = Object.entries(roles);
+      const declared: Record<string, number[]> = {};
+      for (const [n, a] of Object.entries(archetypes)) if (a !== NONE) (declared[a] ??= []).push(Number(n));
       const manifest = {
         ...draft.manifest,
         ...(editing ? { name: name || draft.manifest.name } : {}),
@@ -208,21 +332,44 @@ function Import({ me, editing, onDone }: { me: Me; editing?: Draft | null; onDon
           ...Object.fromEntries(
             ROLES.map((r) => [r, assigned.filter(([, v]) => v === r).map(([n]) => Number(n))]).filter(([, ns]) => (ns as number[]).length),
           ),
-          ...(draft.manifest.roles.archetypes ? { archetypes: draft.manifest.roles.archetypes } : {}),
+          ...(Object.keys(declared).length ? { archetypes: declared } : {}),
         },
         never_clone: assigned.filter(([, v]) => v === NEVER).map(([n]) => Number(n)),
-        lint: { ...draft.manifest.lint, placeholders: placeholders.split("\n").map((l) => l.trim()).filter(Boolean) },
+        lint: { ...draft.manifest.lint, extra_fonts: families.map((f) => f.trim()).filter(Boolean), placeholders: placeholders.split("\n").map((l) => l.trim()).filter(Boolean) },
       };
       const r = await api<{ status: string; problems?: string[] }>(`/api/packs/drafts/${draft.draft_id}/publish`, {
         manifest,
         visibility,
         teams: me.teams,
         ...(voice.trim() || editing ? { voice } : {}),
+        ...(note.trim() ? { note: note.trim() } : {}),
       });
       if (r.status === "published") await onDone();
       else setProblems(r.problems ?? ["the pack did not validate"]);
     });
   }
+
+  /** A new template.pptx: the extractor re-drafts the slides and their roles, to review again. */
+  const swapTemplate = (file: File, d: Draft) =>
+    step("Reading the new template", async () => {
+      const form = new FormData();
+      form.set("template", file);
+      const next = await upload<Draft>(`/api/packs/drafts/${d.draft_id}/template`, form);
+      const t = Date.now(); // same image URLs, new pictures
+      const fresh = { ...next, slides: next.slides.map((s) => ({ ...s, image_url: `${s.image_url}?t=${t}` })) };
+      setDraft(fresh);
+      setRoles(rolesOf(fresh));
+      setPlaceholders((fresh.manifest.lint.placeholders ?? []).join("\n"));
+      setFamilies(fresh.manifest.lint.extra_fonts ?? []);
+    });
+  const swapTokens = (file: File, d: Draft) =>
+    step("Uploading tokens.json", async () => {
+      const form = new FormData();
+      form.set("tokens", file);
+      const r = await upload<{ review: NonNullable<Draft["review"]> }>(`/api/packs/drafts/${d.draft_id}/tokens`, form);
+      setDraft({ ...d, review: r.review });
+      setNewTokens(file.name);
+    });
 
   const stage = !draft ? 0 : 1;
   return (
@@ -231,7 +378,7 @@ function Import({ me, editing, onDone }: { me: Me; editing?: Draft | null; onDon
         title={editing ? `Edit ${String(editing.manifest.name ?? editing.manifest.id)}` : "Import a template"}
         description={
           editing
-            ? "Change the slide roles, language, placeholders, voice or fonts. The pack must still lint clean and build a clean test deck before it replaces the current one."
+            ? "Change the template, tokens, slide roles, language, placeholders, voice or fonts. The pack must still lint clean and build a clean test deck before it becomes the next release; the current one is kept for rollback."
             : draft ? "Check the role of each slide, then validate: the template must lint clean and a test deck must build clean." : "The company's official template.pptx."
         }
       >
@@ -274,10 +421,17 @@ function Import({ me, editing, onDone }: { me: Me; editing?: Draft | null; onDon
           </Field>
           <FileDrop
             label="Template file"
-            accept=".pptx"
-            title={template ? template.name : "Drop the template.pptx here"}
+            accept=".pptx,.potx"
+            title={template ? template.name : "Drop the template (.pptx or .potx) here"}
             hint="or click to choose it"
             onFiles={(f) => setTemplate(f[0] ?? null)}
+          />
+          <FileDrop
+            label="Tokens file"
+            accept=".json"
+            title={tokens ? tokens.name : "Optional: the company's tokens.json"}
+            hint="Design tokens (DTCG). Without it, colours and fonts are drafted from the template."
+            onFiles={(f) => setTokens(f[0] ?? null)}
           />
           <Button type="submit" disabled={!template || !id || !!busy}>
             <FileUp /> Read the template
@@ -302,9 +456,50 @@ function Import({ me, editing, onDone }: { me: Me; editing?: Draft | null; onDon
                   ))}
                   <option value={NEVER}>Never clone</option>
                 </select>
+                <select
+                  className="cq-select"
+                  aria-label={`Archetype of slide ${s.number}`}
+                  value={archetypes[s.number] ?? NONE}
+                  onChange={(e) => setArchetypes({ ...archetypes, [s.number]: e.target.value })}
+                >
+                  <option value={NONE}>No archetype</option>
+                  {draft.archetypes.map((a) => (
+                    <option key={a} value={a}>
+                      {a.replace(/_/g, " ")}
+                    </option>
+                  ))}
+                </select>
               </li>
             ))}
           </ul>
+          {draft.review && (
+            <div className="cq-card cq-form">
+              <FieldSet>
+                <FieldLegend variant="label">Colours</FieldLegend>
+                <ul className="cq-swatches">
+                  {Object.entries(draft.review.colors).map(([path, hex]) => (
+                    <li key={path} title={path}>
+                      <svg className="cq-swatch" viewBox="0 0 1 1" aria-hidden>
+                        <rect width="1" height="1" fill={`#${hex}`} />
+                      </svg>
+                      <span className="cq-mono">{path.replace(/^(theme|role\.color)\./, "")}</span>
+                      <span className="cq-mono cq-muted">#{hex}</span>
+                    </li>
+                  ))}
+                </ul>
+              </FieldSet>
+              <FieldSet>
+                <FieldLegend variant="label">Fonts</FieldLegend>
+                <ul className="cq-swatches">
+                  {Object.entries(draft.review.fonts).map(([path, family]) => (
+                    <li key={path}>
+                      <span className="cq-mono">{path.replace(/^(theme|role)\.font\./, "")}</span> {family}
+                    </li>
+                  ))}
+                </ul>
+              </FieldSet>
+            </div>
+          )}
           <div className="cq-columns">
             <div className="cq-card cq-form">
               {editing && (
@@ -312,6 +507,9 @@ function Import({ me, editing, onDone }: { me: Me; editing?: Draft | null; onDon
                   <Input id="p-edit-name" value={name} onChange={(e) => setName(e.target.value)} />
                 </Field>
               )}
+              <Field label="What changed" htmlFor="p-note" hint="One line for the pack's history.">
+                <Input id="p-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder={editing ? "New logo on the cover" : "First release"} />
+              </Field>
               <Field label="Default language" htmlFor="p-lang" hint="Empty: ask for the language of every deck.">
                 <Input id="p-lang" value={language} onChange={(e) => setLanguage(e.target.value)} placeholder="en" />
               </Field>
@@ -347,11 +545,34 @@ function Import({ me, editing, onDone }: { me: Me; editing?: Draft | null; onDon
                     for (const f of files) {
                       const form = new FormData();
                       form.set("font", f);
-                      setFonts((await upload<{ fonts: string[] }>(`/api/packs/drafts/${draft.draft_id}/fonts`, form)).fonts);
+                      const r = await upload<{ fonts: string[]; family: string }>(`/api/packs/drafts/${draft.draft_id}/fonts`, form);
+                      setFonts(r.fonts);
+                      setFamilies((fs) => (fs.includes(r.family) ? fs : [...fs, r.family]));
                     }
                   })
                 }
               />
+              <Field label="Allowed fonts" htmlFor="p-fonts" hint="Faces used on the template's slides and in the uploaded font files, besides the theme's. Lint flags any other.">
+                <Textarea id="p-fonts" rows={3} value={families.join("\n")} onChange={(e) => setFamilies(e.target.value.split("\n"))} />
+              </Field>
+              {editing && (
+                <FileDrop
+                  label="Template"
+                  accept=".pptx,.potx"
+                  title="Replace the template (.pptx or .potx)"
+                  hint="Slides and roles are read again from it; review them before saving."
+                  onFiles={(f) => f[0] && void swapTemplate(f[0], draft)}
+                />
+              )}
+              {editing && (
+                <FileDrop
+                  label="Design tokens"
+                  accept=".json"
+                  title={newTokens ?? "Replace the tokens.json"}
+                  hint="DTCG colours and fonts, the pack's source of truth. The template must lint clean against them."
+                  onFiles={(f) => f[0] && void swapTokens(f[0], draft)}
+                />
+              )}
             </div>
           </div>
           <div>
