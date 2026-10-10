@@ -110,6 +110,28 @@ more than their role answers 403. The caller's role is the best of the ones belo
 Every grant, revocation, general access change, link reset and transfer is logged in `deck_audit`
 (deck, actor, action, detail).
 
+### Review
+
+- **Comment threads**: `add_comment {parent_id, text}` replies in a thread (one level, on the
+  first comment's slide and shape). `list_comments {status: open | resolved | all}` and `open_deck`
+  (`open_comments`, `resolved_comments`) return threads with their `replies`. `resolve_comments
+  {comment_ids, status}` resolves or reopens threads one by one without editing the deck: an editor
+  any thread, a signed-in commenter only their own. `patch_deck {resolves}` still resolves what it
+  applied. The slide UI applies the selected threads or all of them
+  (`POST /api/agent/apply-comments {deck_id, comment_ids?}` in the web app).
+- **Authors**: versions and comments keep the author's id (`author`, the token's `sub`) and store
+  their display name (`author_name`, the `name` claim of the session or bearer token); the UIs show
+  the name. Comments through an anonymous link stay `guest`.
+- **Approval** (opt-in, M9): only on packs whose `pack.yaml` sets `approval: true` (default off, so
+  consultants are never blocked). A deck is `draft`, `in_review` or `approved` (`set_approval`,
+  status and allowed moves in `open_deck`'s `approval`). An editor requests the review and may
+  withdraw it; the approver is the pack's owner or an admin, with at least view access to the deck
+  (share it with them), who approves or sends it back to draft. A new version of an approved deck
+  is a draft again. Approval never gates an export. Each move is logged in `deck_audit`.
+- **Export gate** (soft, M18): `export_pptx` always exports. When the version has lint ERRORs it
+  answers `lint_errors` (and a `warning` without `reason`) and logs `export_with_errors` (version,
+  error count, `reason` or null) in `deck_audit`. The web app asks for the reason before exporting.
+
 ### Files in
 
 A template or deck is too big for a tool argument in base64 (a corporate template is ~14 MB).

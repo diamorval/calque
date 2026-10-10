@@ -10,6 +10,7 @@ import { getFile, MAX_UPLOAD, uploadTicket } from "./files.ts";
 import type { Models } from "./models.ts";
 import { importPack, listPacks, type User } from "./packs.ts";
 import { userToken } from "./preview.ts";
+import { approvalOf, recordExport, setApproval } from "./review.ts";
 import { resetLink, setGeneralAccess, share, shares, transfer, unshare } from "./shares.ts";
 
 export interface App {
@@ -91,7 +92,7 @@ async function openDeck(app: App, user: User, id: string, v?: number, render = t
         shapes,
       }))
     : undefined;
-  const open = await app.decks.comments(user, id, "open");
+  const threads = await app.decks.comments(user, id);
   return {
     deck_id: id,
     title: deck.title,
@@ -102,7 +103,9 @@ async function openDeck(app: App, user: User, id: string, v?: number, render = t
     versions: await app.decks.versions(id),
     spec,
     slides,
-    open_comments: open,
+    open_comments: threads.filter((c) => c.status === "open"),
+    resolved_comments: threads.filter((c) => c.status === "resolved"),
+    approval: await approvalOf(app.decks, user, id),
     ...links(app, user, id),
   };
 }
@@ -158,7 +161,8 @@ export const TOOLS = {
 
   open_deck: tool({
     title: "Open deck",
-    description: "A deck's DeckSpec, version history, rendered slides (PNG URL + shape map with shape_id and bbox) and open comments.",
+    description:
+      "A deck's DeckSpec, version history, rendered slides (PNG URL + shape map with shape_id and bbox), comment threads (open and resolved, with replies) and approval status.",
     input: z.object({ deck_id: deckId, version, render: z.boolean().default(true) }),
     ui: true,
     readOnly: true,
@@ -191,8 +195,8 @@ export const TOOLS = {
     role: "editor",
     run: async (app, user, a) => {
       const r = await app.decks.patch(user, a.deck_id, a.ops, a.note ?? "patch");
-      await app.decks.resolve(user, a.deck_id, a.resolves ?? []);
-      return { ...r, resolved: a.resolves ?? [], ...links(app, user, a.deck_id) };
+      const resolved = await app.decks.resolve(user, a.deck_id, a.resolves ?? []);
+      return { ...r, resolved, ...links(app, user, a.deck_id) };
     },
   }),
 
@@ -207,8 +211,14 @@ export const TOOLS = {
 
   add_comment: tool({
     title: "Comment",
-    description: "Comment on a slide, or on one shape of it (shape_id from the shape map).",
-    input: z.object({ deck_id: deckId, slide_id: z.string(), shape_id: z.number().int().optional(), text: z.string().min(1) }),
+    description: "Comment on a slide, or on one shape of it (shape_id from the shape map); with parent_id, reply in that comment's thread.",
+    input: z.object({
+      deck_id: deckId,
+      slide_id: z.string().optional(),
+      shape_id: z.number().int().optional(),
+      parent_id: z.number().int().optional().describe("The comment this replies to (a reply sits on its slide and shape)."),
+      text: z.string().min(1),
+    }),
     appOnly: true,
     role: "commenter",
     run: async (app, user, a) => ({ comment: await app.decks.addComment(user, a.deck_id, a) }),
@@ -216,11 +226,28 @@ export const TOOLS = {
 
   list_comments: tool({
     title: "List comments",
-    description: "Comments left on the deck (in the preview or the in-chat UI), each anchored on a slide id and shape_id. Apply them with patch_deck and pass their ids in `resolves`.",
-    input: z.object({ deck_id: deckId, status: z.enum(["open", "resolved"]).optional().default("open") }),
+    description:
+      "Comment threads left on the deck (in the preview or the in-chat UI), each anchored on a slide id and shape_id, with its status (open or resolved), author (id and author_name) and replies (read them: they refine the request). Apply them with patch_deck and pass their ids in `resolves`.",
+    input: z.object({ deck_id: deckId, status: z.enum(["open", "resolved", "all"]).optional().default("open") }),
     readOnly: true,
     role: "viewer",
-    run: async (app, user, a) => ({ comments: await app.decks.comments(user, a.deck_id, a.status), ...links(app, user, a.deck_id) }),
+    run: async (app, user, a) => ({
+      comments: await app.decks.comments(user, a.deck_id, a.status === "all" ? undefined : a.status),
+      ...links(app, user, a.deck_id),
+    }),
+  }),
+
+  resolve_comments: tool({
+    title: "Resolve comments",
+    description:
+      "Resolve comment threads by id without editing the deck (a remark answered or dismissed), or reopen them with status 'open'. An editor resolves any thread, a commenter only their own. Applied comments are resolved by patch_deck's `resolves`.",
+    input: z.object({
+      deck_id: deckId,
+      comment_ids: z.array(z.number().int()).min(1),
+      status: z.enum(["resolved", "open"]).default("resolved"),
+    }),
+    role: "commenter",
+    run: async (app, user, a) => ({ status: a.status, comment_ids: await app.decks.resolve(user, a.deck_id, a.comment_ids, a.status) }),
   }),
 
   lint_deck: tool({
@@ -275,18 +302,41 @@ export const TOOLS = {
 
   export_pptx: tool({
     title: "Export PPTX",
-    description: "Download link for the deck's PPTX (and its local path on a stdio server).",
-    input: z.object({ deck_id: deckId, version }),
-    readOnly: true,
+    description:
+      "Download link for the deck's PPTX (and its local path on a stdio server). It always exports; when the version has lint ERRORs, ask the user why it goes out anyway and pass it as `reason`: the export is recorded with it.",
+    input: z.object({
+      deck_id: deckId,
+      version,
+      reason: z.string().optional().describe("Why a version with lint ERRORs is exported anyway (recorded)."),
+    }),
+    readOnly: true, // the deck does not change; an off-charter export is only logged
     role: "viewer",
     run: async (app, user, a) => {
       const r = await app.decks.exportPath(user, a.deck_id, a.version);
+      // the soft gate (review.ts): never a block, a record when the export is off-charter
+      const errors = (await app.decks.lint(user, a.deck_id, r.version)).findings.filter((f) => f.severity === "ERROR").length;
+      await recordExport(app.decks, user, a.deck_id, r.version, errors, a.reason);
       return {
         version: r.version,
+        lint_errors: errors,
+        ...(errors && !a.reason?.trim() ? { warning: `v${r.version} has ${errors} lint ERROR(s): pass \`reason\` to record why it goes out anyway` } : {}),
         download_url: `${app.publicUrl}/decks/${a.deck_id}/deck.pptx?v=${r.version}&${token(app, user, a.deck_id)}`,
         ...(user.local ? { path: r.path } : {}),
       };
     },
+  }),
+
+  set_approval: tool({
+    title: "Set approval status",
+    description:
+      "Only on packs with approval on (open_deck's `approval.enabled`). Move the deck to in_review (an editor requests a review of a draft), approved (the pack owner or an admin, on a deck in review) or back to draft (the approver sends it back, or an editor withdraws it). Never needed to export.",
+    input: z.object({
+      deck_id: deckId,
+      status: z.enum(["draft", "in_review", "approved"]),
+      note: z.string().optional().describe("Why: recorded with the change."),
+    }),
+    role: "viewer",
+    run: (app, user, a) => setApproval(app.decks, user, a.deck_id, a.status, a.note),
   }),
 
   list_decks: tool({

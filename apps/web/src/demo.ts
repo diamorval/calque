@@ -194,19 +194,35 @@ export async function startDemo() {
       /^POST \/api\/tools\/add_comment$/,
       (_, b) => {
         const deck = opened(b.deck_id);
+        const parent = b.parent_id !== undefined ? deck.open_comments.find((c: Json) => c.id === b.parent_id) : undefined;
         const comment = {
           id: Date.now(),
           deck_id: b.deck_id,
           version: deck.head,
-          slide_id: b.slide_id,
-          shape_id: b.shape_id ?? null,
+          slide_id: parent?.slide_id ?? b.slide_id,
+          shape_id: parent ? parent.shape_id : (b.shape_id ?? null),
           text: b.text,
-          author: "Demo",
+          author: "demo",
+          author_name: "Demo",
           status: "open",
+          parent_id: parent?.id ?? null,
+          replies: [],
           created_at: new Date().toISOString(),
         };
-        deck.open_comments.push(comment);
+        if (parent) parent.replies = [...(parent.replies ?? []), comment];
+        else deck.open_comments.push(comment);
         return { comment };
+      },
+    ],
+    [
+      /^POST \/api\/tools\/resolve_comments$/,
+      (_, b) => {
+        const deck = opened(b.deck_id);
+        const all: Json[] = [...deck.open_comments, ...(deck.resolved_comments ?? [])];
+        for (const c of all) if (b.comment_ids.includes(c.id)) c.status = b.status ?? "resolved";
+        deck.open_comments = all.filter((c) => c.status === "open");
+        deck.resolved_comments = all.filter((c) => c.status === "resolved");
+        return { status: b.status ?? "resolved", comment_ids: b.comment_ids };
       },
     ],
     // sharing, in memory: people, general access and the share link of each deck

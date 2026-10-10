@@ -35,6 +35,8 @@ export function verifier(cfg: AuthConfig, metadata: () => Promise<OAuthMetadata>
           expiresAt: payload.exp ?? 0, // no exp: the SDK refuses the token
           extra: {
             sub: payload.sub,
+            // shown as the author of versions and comments (S18); the sub stays the id
+            ...(typeof payload.name === "string" ? { name: payload.name } : {}),
             // Keycloak group paths look like "/team-a"
             teams: Array.isArray(teams) ? teams.map((t) => String(t).replace(/^\//, "")) : [],
           },
@@ -48,7 +50,8 @@ export function verifier(cfg: AuthConfig, metadata: () => Promise<OAuthMetadata>
 
 export function userOf(auth: AuthInfo | undefined): User {
   if (!auth) return { id: "local", teams: [], local: true };
-  return { id: String(auth.extra?.sub ?? auth.clientId), teams: (auth.extra?.teams as string[]) ?? [] };
+  const name = auth.extra?.name;
+  return { id: String(auth.extra?.sub ?? auth.clientId), ...(typeof name === "string" ? { name } : {}), teams: (auth.extra?.teams as string[]) ?? [] };
 }
 
 /** The authorization server's metadata (OIDC discovery), fetched once. */

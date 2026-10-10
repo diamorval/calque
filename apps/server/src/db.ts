@@ -48,6 +48,11 @@ create table if not exists comments (
   status text not null default 'open' check (status in ('open', 'resolved')),
   created_at timestamptz not null default now()
 );
+-- review (review.ts): comment threads, authors' display names, opt-in approval status
+alter table comments add column if not exists parent_id int references comments(id);
+alter table comments add column if not exists author_name text;
+alter table deck_versions add column if not exists author_name text;
+alter table decks add column if not exists approval text not null default 'draft' check (approval in ('draft', 'in_review', 'approved'));
 create table if not exists models (
   id text primary key,
   provider text not null,

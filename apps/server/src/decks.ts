@@ -53,9 +53,17 @@ export interface Comment {
   shape_id: number | null;
   text: string;
   author: string;
+  /** The author's display name (the token's `name` claim), null for a guest or a nameless user. */
+  author_name: string | null;
   status: "open" | "resolved";
+  /** A reply's thread: the comment it answers (replies have no status of their own). */
+  parent_id: number | null;
   created_at: string;
 }
+export type Thread = Comment & { replies: Comment[] };
+
+/** The name versions and comments show for `user`: their display name, never for a guest. */
+const nameOf = (user: User) => (user.anonymous ? null : (user.name ?? null));
 
 interface DeckRow {
   id: string;
@@ -66,6 +74,7 @@ interface DeckRow {
   general_access: GeneralAccess;
   general_role: "viewer" | "commenter";
   link_key: string;
+  approval: "draft" | "in_review" | "approved";
 }
 
 export class Conflict extends Error {}
@@ -215,8 +224,8 @@ export class Decks {
   }
 
   async versions(id: string) {
-    const { rows } = await this.db.query<{ version: number; note: string; author: string; created_at: string }>(
-      "select version, note, author, created_at from deck_versions where deck_id = $1 order by version",
+    const { rows } = await this.db.query<{ version: number; note: string; author: string; author_name: string | null; created_at: string }>(
+      "select version, note, author, author_name, created_at from deck_versions where deck_id = $1 order by version",
       [id],
     );
     return rows;
@@ -235,8 +244,8 @@ export class Decks {
       spec.title,
     ]);
     await this.db.query(
-      "insert into deck_versions (deck_id, version, spec, note, author) values ($1, 1, $2, $3, $4)",
-      [id, JSON.stringify(spec), note, user.id],
+      "insert into deck_versions (deck_id, version, spec, note, author, author_name) values ($1, 1, $2, $3, $4, $5)",
+      [id, JSON.stringify(spec), note, user.id, nameOf(user)],
     );
     return { deck_id: id, version: 1, ...summary(report) };
   }
@@ -256,14 +265,15 @@ export class Decks {
     await this.ownFiles(user, spec);
     const next = from + 1;
     const report = await this.build(deck.packDir, id, spec, next);
+    // an approval is for the version approved: a change sends the deck back to draft (review.ts)
     const { rows } = await this.db.query(
-      "update decks set head = $3, title = $4 where id = $1 and head = $2 returning head",
+      "update decks set head = $3, title = $4, approval = case when approval = 'approved' then 'draft' else approval end where id = $1 and head = $2 returning head",
       [id, from, next, spec.title],
     );
     if (!rows.length) throw new Conflict(`deck ${id} changed since version ${from}: reopen it and retry`);
     await this.db.query(
-      "insert into deck_versions (deck_id, version, spec, note, author, undo_to) values ($1, $2, $3, $4, $5, $6)",
-      [id, next, JSON.stringify(spec), note, user.id, undoTo],
+      "insert into deck_versions (deck_id, version, spec, note, author, author_name, undo_to) values ($1, $2, $3, $4, $5, $6, $7)",
+      [id, next, JSON.stringify(spec), note, user.id, nameOf(user), undoTo],
     );
     return { deck_id: id, version: next, ...summary(report) };
   }
@@ -422,28 +432,51 @@ export class Decks {
     return { version: v, path: report.path };
   }
 
-  async addComment(user: User, id: string, c: { slide_id: string; shape_id?: number | null | undefined; text: string }) {
+  /** A comment on a slide (or one shape), or with `parent_id` a reply in that comment's thread. */
+  async addComment(user: User, id: string, c: { slide_id?: string | undefined; shape_id?: number | null | undefined; text: string; parent_id?: number | undefined }) {
     const deck = await this.deck(user, id, "commenter");
+    let anchor = { slide_id: c.slide_id, shape_id: c.shape_id ?? null };
+    if (c.parent_id !== undefined) {
+      const { rows } = await this.db.query<Comment>("select * from comments where deck_id = $1 and id = $2", [id, c.parent_id]);
+      const parent = rows[0];
+      if (!parent) throw new NotFound(`deck ${id} has no comment ${c.parent_id}`);
+      if (parent.parent_id !== null) throw new Error("reply to the thread's first comment: threads are one level deep");
+      anchor = { slide_id: parent.slide_id, shape_id: parent.shape_id };
+    }
+    if (!anchor.slide_id) throw new Error("a comment needs a slide_id (or a parent_id to reply)");
     const { rows } = await this.db.query<Comment>(
-      `insert into comments (deck_id, version, slide_id, shape_id, text, author) values ($1, $2, $3, $4, $5, $6)
+      `insert into comments (deck_id, version, slide_id, shape_id, text, author, author_name, parent_id) values ($1, $2, $3, $4, $5, $6, $7, $8)
        returning *`,
-      [id, deck.head, c.slide_id, c.shape_id ?? null, c.text, user.anonymous ? "guest" : user.id],
+      [id, deck.head, anchor.slide_id, anchor.shape_id, c.text, user.anonymous ? "guest" : user.id, nameOf(user), c.parent_id ?? null],
     );
     return rows[0] as Comment;
   }
 
-  async comments(user: User, id: string, status?: "open" | "resolved") {
+  /** The deck's comment threads (first comment + its replies), by the first comment's status. */
+  async comments(user: User, id: string, status?: "open" | "resolved"): Promise<Thread[]> {
     await this.deck(user, id, "viewer");
-    const { rows } = await this.db.query<Comment>(
-      `select * from comments where deck_id = $1 and ($2::text is null or status = $2) order by id`,
-      [id, status ?? null],
-    );
-    return rows;
+    const { rows } = await this.db.query<Comment>("select * from comments where deck_id = $1 order by id", [id]);
+    const threads = rows.filter((c) => c.parent_id === null && (!status || c.status === status)).map((c) => ({ ...c, replies: [] as Comment[] }));
+    const byId = new Map(threads.map((t) => [t.id, t]));
+    for (const r of rows) if (r.parent_id !== null) byId.get(r.parent_id)?.replies.push(r);
+    return threads;
   }
 
-  async resolve(user: User, id: string, ids: number[]) {
-    await this.deck(user, id, "editor");
-    if (ids.length) await this.db.query("update comments set status = 'resolved' where deck_id = $1 and id = any($2)", [id, ids]);
+  /** Resolve (or reopen) comment threads `ids`; returns the ids changed (unknown ids are skipped).
+  An editor may close any thread, a signed-in commenter only the ones they started. */
+  async resolve(user: User, id: string, ids: number[], status: "open" | "resolved" = "resolved") {
+    const deck = await this.deck(user, id, "commenter");
+    if (!ids.length) return [];
+    const { rows } = await this.db.query<{ id: number; author: string }>(
+      "select id, author from comments where deck_id = $1 and id = any($2) and parent_id is null",
+      [id, ids],
+    );
+    const others = rows.filter((c) => user.anonymous || c.author !== user.id).map((c) => c.id);
+    if (rank(deck.role) < rank("editor") && others.length)
+      throw new Forbidden(`editor access needed to ${status === "open" ? "reopen" : "resolve"} others' comments: ${others.join(", ")}`);
+    const found = rows.map((c) => c.id);
+    if (found.length) await this.db.query("update comments set status = $3 where deck_id = $1 and id = any($2)", [id, found, status]);
+    return found;
   }
 }
 

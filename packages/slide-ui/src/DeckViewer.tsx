@@ -1,10 +1,11 @@
-import { ChevronLeft, ChevronRight, MessageSquare, MessageSquarePlus, Sparkles, SquareDashed, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, MessageSquare, MessageSquarePlus, Reply, RotateCcw, Sparkles, SquareDashed, X } from "lucide-react";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { shapeLabel, SlideCanvas } from "./SlideCanvas.tsx";
 import { Thumbnails } from "./Thumbnails.tsx";
-import type { DeckView, NewComment } from "./types.ts";
+import type { Comment, DeckView, NewComment, NewReply } from "./types.ts";
 
 const plural = (n: number, word: string) => `${n} ${word}${n > 1 ? "s" : ""}`;
+const APPROVAL = { draft: "Draft", in_review: "In review", approved: "Approved" } as const;
 const typing = (t: EventTarget | null) => t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
 
 /** The deck workspace: top bar, slide rail, stage (preview + inspector + comment box) and a side panel
@@ -14,8 +15,13 @@ export function DeckViewer(props: {
   deck: DeckView;
   /** Post a comment; without it (a viewer) there is no comment box. */
   onComment?: (c: NewComment) => Promise<void>;
-  /** Hand the open comments to the agent (MCP Apps: a message to the model). */
-  onApply?: () => Promise<void>;
+  /** Hand the open comments to the agent (MCP Apps: a message to the model): the ids picked, or
+  every open comment (no ids). */
+  onApply?: (ids?: number[]) => Promise<void>;
+  /** Reply in a comment's thread; without it there is no Reply button. */
+  onReply?: (r: NewReply) => Promise<void>;
+  /** Resolve or reopen comment threads one by one, without the agent. */
+  onResolve?: (ids: number[], status: "open" | "resolved") => Promise<void>;
   /** The host's own actions, right of the title (web: lint, history, present, export). */
   actions?: ReactNode;
   /** The host's agent chat, shown in a tab next to Comments (web app only). */
@@ -29,7 +35,8 @@ export function DeckViewer(props: {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [outline, setOutline] = useState(false);
-  const [tab, setTab] = useState<"agent" | "comments">(props.agent ? "agent" : "comments");
+  // open comments win the first look: after a reload, Apply and the threads are where they were
+  const [tab, setTab] = useState<"agent" | "comments">(props.agent && !deck.open_comments.length ? "agent" : "comments");
   const last = deck.slides.length - 1;
   const index = Math.min(current, last);
   const slide = deck.slides[index];
@@ -80,6 +87,8 @@ export function DeckViewer(props: {
         setShape(shapeId);
       }}
       {...(props.onApply ? { onApply: props.onApply } : {})}
+      {...(props.onReply ? { onReply: props.onReply } : {})}
+      {...(props.onResolve ? { onResolve: props.onResolve } : {})}
     />
   );
 
@@ -90,6 +99,14 @@ export function DeckViewer(props: {
           <h1>{deck.title}</h1>
           <span>
             {deck.pack_id} · v{deck.version}
+            {deck.approval?.enabled && (
+              <>
+                {" · "}
+                <span className="cq-approval" data-status={deck.approval.status}>
+                  {APPROVAL[deck.approval.status]}
+                </span>
+              </>
+            )}
           </span>
         </div>
         <div className="cq-bar-actions">{props.actions}</div>
@@ -204,17 +221,57 @@ export function DeckViewer(props: {
   );
 }
 
-/** Every open comment, grouped by slide, and the button that hands them to the agent. */
+const who = (c: Comment) => c.author_name || c.author;
+
+/** Every open comment thread, grouped by slide, with its replies; each one can be replied to,
+resolved, or picked for the agent. The foot button hands the picked threads (else all) to the agent.
+Resolved threads stay one click away, to reopen. */
 function Comments(props: {
   deck: DeckView;
   current: string;
   selected: number | null;
   onPick: (slideId: string, shapeId: number | null) => void;
-  onApply?: () => Promise<void>;
+  onApply?: (ids?: number[]) => Promise<void>;
+  onReply?: (r: NewReply) => Promise<void>;
+  onResolve?: (ids: number[], status: "open" | "resolved") => Promise<void>;
 }) {
   const { deck } = props;
+  const [picked, setPicked] = useState<Set<number>>(new Set());
+  const [replying, setReplying] = useState<number | null>(null);
+  const [reply, setReply] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [showResolved, setShowResolved] = useState(false);
   const open = deck.open_comments.length;
+  const resolved = deck.resolved_comments ?? [];
+  // only threads still open count: one resolved meanwhile drops out of the selection
+  const chosen = deck.open_comments.filter((c) => picked.has(c.id)).map((c) => c.id);
   const groups = deck.slides.map((s) => ({ slide: s, items: deck.open_comments.filter((c) => c.slide_id === s.id) })).filter((g) => g.items.length);
+
+  const toggle = (id: number) =>
+    setPicked((p) => {
+      const n = new Set(p);
+      if (!n.delete(id)) n.add(id);
+      return n;
+    });
+  async function act(fn: () => Promise<void>) {
+    setBusy(true);
+    try {
+      await fn();
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function send(e: FormEvent, parent_id: number) {
+    e.preventDefault();
+    if (!reply.trim() || !props.onReply) return;
+    const onReply = props.onReply;
+    await act(async () => {
+      await onReply({ parent_id, text: reply.trim() });
+      setReply("");
+      setReplying(null);
+    });
+  }
+
   return (
     <div className="cq-comments">
       <div className="cq-comments-list">
@@ -235,7 +292,7 @@ function Comments(props: {
                   <li key={c.id}>
                     <button type="button" aria-current={slide.id === props.current && c.shape_id === props.selected && c.shape_id !== null} onClick={() => props.onPick(slide.id, c.shape_id)}>
                       <span className="cq-comment-meta">
-                        <b>{c.author}</b>
+                        <b>{who(c)}</b>
                         <span>·</span>
                         {s ? (
                           <span>
@@ -247,19 +304,100 @@ function Comments(props: {
                       </span>
                       <span>{c.text}</span>
                     </button>
+                    {!!c.replies?.length && (
+                      <ol className="cq-replies" aria-label={`Replies to comment ${c.id}`}>
+                        {c.replies.map((r) => (
+                          <li key={r.id}>
+                            <b>{who(r)}</b> {r.text}
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                    {(props.onApply || props.onReply || props.onResolve) && (
+                      <div className="cq-comment-actions">
+                        {props.onApply && (
+                          <label>
+                            <input type="checkbox" checked={picked.has(c.id)} onChange={() => toggle(c.id)} aria-label={`Select comment ${c.id}`} /> Select
+                          </label>
+                        )}
+                        <span className="cq-spacer" />
+                        {props.onReply && (
+                          <button type="button" className="cq-btn" data-variant="ghost" data-size="sm" aria-label={`Reply to comment ${c.id}`} onClick={() => setReplying(replying === c.id ? null : c.id)}>
+                            <Reply /> Reply
+                          </button>
+                        )}
+                        {props.onResolve && (
+                          <button
+                            type="button"
+                            className="cq-btn"
+                            data-variant="ghost"
+                            data-size="sm"
+                            aria-label={`Resolve comment ${c.id}`}
+                            disabled={busy}
+                            onClick={() => void act(() => props.onResolve?.([c.id], "resolved") ?? Promise.resolve())}
+                          >
+                            <Check /> Resolve
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    {replying === c.id && (
+                      <form className="cq-reply" onSubmit={(e) => void send(e, c.id)}>
+                        <textarea aria-label={`Reply to comment ${c.id}`} rows={2} value={reply} placeholder="Reply…" onChange={(e) => setReply(e.target.value)} />
+                        <button type="submit" className="cq-btn" data-variant="primary" data-size="sm" disabled={busy || !reply.trim()}>
+                          Send
+                        </button>
+                      </form>
+                    )}
                   </li>
                 );
               })}
             </ul>
           </section>
         ))}
+        {resolved.length > 0 && (
+          <section className="cq-resolved">
+            <button type="button" className="cq-btn" data-variant="ghost" data-size="sm" aria-expanded={showResolved} onClick={() => setShowResolved((v) => !v)}>
+              {plural(resolved.length, "resolved comment")}
+            </button>
+            {showResolved && (
+              <ul>
+                {resolved.map((c) => (
+                  <li key={c.id}>
+                    <span className="cq-comment-meta">
+                      <b>{who(c)}</b>
+                      <span>·</span>
+                      <span>Slide {deck.slides.find((s) => s.id === c.slide_id)?.number ?? "?"}</span>
+                    </span>
+                    <span>{c.text}</span>
+                    {props.onResolve && (
+                      <button
+                        type="button"
+                        className="cq-btn"
+                        data-variant="ghost"
+                        data-size="sm"
+                        aria-label={`Reopen comment ${c.id}`}
+                        disabled={busy}
+                        onClick={() => void act(() => props.onResolve?.([c.id], "open") ?? Promise.resolve())}
+                      >
+                        <RotateCcw /> Reopen
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        )}
       </div>
       {props.onApply && open > 0 && (
         <div className="cq-comments-foot">
-          <button type="button" className="cq-btn" data-variant="accent" onClick={() => void props.onApply?.()}>
-            <Sparkles /> Apply {plural(open, "comment")}
+          <button type="button" className="cq-btn" data-variant="accent" onClick={() => void props.onApply?.(chosen.length ? chosen : undefined)}>
+            <Sparkles /> {chosen.length ? `Apply ${chosen.length} selected` : `Apply ${plural(open, "comment")}`}
           </button>
-          <span className="cq-hint">The agent edits the deck, then resolves each comment.</span>
+          <span className="cq-hint">
+            {chosen.length ? "The agent edits the deck for the selected comments only." : "The agent edits the deck, then resolves each comment."}
+          </span>
         </div>
       )}
     </div>
