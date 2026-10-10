@@ -8,6 +8,7 @@ import { Textarea } from "diametral-ds/textarea";
 import { Sparkles, Wand } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { tool } from "../api.ts";
+import { t, tn } from "../i18n.ts";
 import { Dialog, Field, Spinner } from "../ui.tsx";
 import type { Ask } from "./Chat.tsx";
 
@@ -17,23 +18,23 @@ export function AddSlides({ onClose, onAsk }: { onClose: () => void; onAsk: (a: 
   function submit(e: FormEvent) {
     e.preventDefault();
     if (!brief.trim()) return;
-    onAsk({ text: `Add slides to this deck: ${brief.trim()}`, workflow: "draft-slides" });
+    onAsk({ text: t("Add slides to this deck: {brief}", { brief: brief.trim() }), workflow: "draft-slides" });
     onClose();
   }
   return (
-    <Dialog title="Add slides" onClose={onClose}>
+    <Dialog title={t("Add slides")} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="cq-dialog-body">
-          <Field label="What should the new slides say?" htmlFor="a-brief" hint="One message per slide, the figures you have. The agent inserts them before the closing slide.">
-            <Textarea id="a-brief" rows={5} required value={brief} onChange={(e) => setBrief(e.target.value)} placeholder="A key-figures slide: 3 sites, 120 people, 12% growth…" />
+          <Field label={t("What should the new slides say?")} htmlFor="a-brief" hint={t("One message per slide, the figures you have. The agent inserts them before the closing slide.")}>
+            <Textarea id="a-brief" rows={5} required value={brief} onChange={(e) => setBrief(e.target.value)} placeholder={t("A key-figures slide: 3 sites, 120 people, 12% growth…")} />
           </Field>
         </div>
         <DialogFooter>
           <Button variant="outline" type="button" onClick={onClose}>
-            Cancel
+            {t("Cancel")}
           </Button>
           <Button type="submit" disabled={!brief.trim()}>
-            <Sparkles /> Ask the agent
+            <Sparkles /> {t("Ask the agent")}
           </Button>
         </DialogFooter>
       </form>
@@ -63,7 +64,7 @@ function Findings({ title, items }: { title: string; items: Finding[] }) {
         {items.map((f, i) => (
           <li key={i}>
             <Tag tone={TONE[f.severity]}>{f.severity}</Tag>
-            <span className="cq-mono cq-muted">{f.slide ? `Slide ${f.slide}` : "Deck"}</span>
+            <span className="cq-mono cq-muted">{f.slide ? t("Slide {n}", { n: f.slide }) : t("Deck")}</span>
             <span>{f.message}</span>
           </li>
         ))}
@@ -82,9 +83,9 @@ export function ReviewDeck(props: { deck_id: string; onClose: () => void; onAppl
   const r = review?.report;
   const notes = r?.NOTE ?? [];
   return (
-    <Dialog title="Review" wide onClose={props.onClose}>
+    <Dialog title={t("Review")} wide onClose={props.onClose}>
       <div className="cq-dialog-body cq-review">
-        {!r && !error && <Spinner label="Reviewing: lint and render" />}
+        {!r && !error && <Spinner label={t("Reviewing: lint and render")} />}
         {error && (
           <Alert variant="destructive">
             <AlertDescription>{error}</AlertDescription>
@@ -93,32 +94,32 @@ export function ReviewDeck(props: { deck_id: string; onClose: () => void; onAppl
         {r && (
           <>
             <p className="cq-hint">
-              v{r.version}: {r.ERROR.length} error{r.ERROR.length === 1 ? "" : "s"}, {r.WARN.length} warning{r.WARN.length === 1 ? "" : "s"},{" "}
-              {notes.length} note{notes.length === 1 ? "" : "s"}. The agent also proofreads and checks the renders slide by slide.
+              v{r.version}: {tn(r.ERROR.length, "{n} error", "{n} errors")}, {tn(r.WARN.length, "{n} warning", "{n} warnings")}, {tn(notes.length, "{n} note", "{n} notes")}.{" "}
+              {t("The agent also proofreads and checks the renders slide by slide.")}
             </p>
-            <Findings title="Safe fixes" items={r.safe_fixes} />
-            <Findings title="Judgment calls" items={r.judgment_calls} />
-            <Findings title="Notes" items={notes} />
+            <Findings title={t("Safe fixes")} items={r.safe_fixes} />
+            <Findings title={t("Judgment calls")} items={r.judgment_calls} />
+            <Findings title={t("Notes")} items={notes} />
           </>
         )}
       </div>
       <DialogFooter>
         <Button variant="outline" onClick={props.onClose}>
-          Close
+          {t("Close")}
         </Button>
         {!!r?.safe_fixes.length && (
           <Button variant="outline" onClick={props.onApplySafe}>
-            <Wand /> Apply {r.safe_fixes.length} safe fix{r.safe_fixes.length > 1 ? "es" : ""}
+            <Wand /> {tn(r.safe_fixes.length, "Apply {n} safe fix", "Apply {n} safe fixes")}
           </Button>
         )}
         <Button
           disabled={!r}
           onClick={() => {
-            props.onAsk({ text: "Review this deck: report the fixes by severity, then apply the ones I approve.", workflow: "review-deck" });
+            props.onAsk({ text: t("Review this deck: report the fixes by severity, then apply the ones I approve."), workflow: "review-deck" });
             props.onClose();
           }}
         >
-          <Sparkles /> Review with the agent
+          <Sparkles /> {t("Review with the agent")}
         </Button>
       </DialogFooter>
     </Dialog>

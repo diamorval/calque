@@ -13,6 +13,15 @@ test("without a session the app and its API refuse access; SSO signs in", async 
   await expect(page.getByRole("heading", { name: "Brand packs" })).toBeVisible();
   expect((await page.request.get("/api/decks")).status()).toBe(200);
 
+  // the UI in French, picked in the sidebar and kept across reloads (the run itself is in English)
+  await page.getByRole("button", { name: "Language: English" }).click();
+  await expect(page.getByRole("heading", { name: "Packs de marque" })).toBeVisible();
+  await expect(page.locator("html")).toHaveAttribute("lang", "fr");
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Packs de marque" })).toBeVisible();
+  await page.getByRole("button", { name: /^Langue/ }).click();
+  await expect(page.getByRole("heading", { name: "Brand packs" })).toBeVisible();
+
   await page.getByRole("button", { name: "Sign out" }).click();
   await expect(page.getByText("Sign in to Calque")).toBeVisible();
   expect((await page.request.get("/api/decks")).status()).toBe(401);

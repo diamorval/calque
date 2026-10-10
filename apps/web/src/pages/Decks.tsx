@@ -7,6 +7,7 @@ import { Cloud, Copy, FileUp, LayoutGrid, Pencil, Plus, Search, Trash2 } from "l
 import { useEffect, useState, type FormEvent } from "react";
 import { api, fileArg, tool, type Pack } from "../api.ts";
 import { M365Picker, useM365 } from "../components/M365.tsx";
+import { t } from "../i18n.ts";
 import { go, navigate } from "../nav.ts";
 import { ago, Dialog, Field, FileDrop, PageHead, Spinner } from "../ui.tsx";
 
@@ -20,7 +21,7 @@ interface DeckRow {
   role: "owner" | "editor" | "commenter" | "viewer";
 }
 
-const ROLE = { owner: "Owner", editor: "Editor", commenter: "Commenter", viewer: "Viewer" };
+const ROLE = { owner: "Owner", editor: "Editor", commenter: "Commenter", viewer: "Viewer" } as const;
 
 interface CardActions {
   onRename?: (() => void) | undefined;
@@ -42,22 +43,22 @@ function DeckCard({ d, onRename, onDuplicate, onDelete }: { d: DeckRow } & CardA
           </span>
           {d.role !== "owner" && (
             <span>
-              {ROLE[d.role]} · from {d.owner}
+              {t(ROLE[d.role])} · {t("from {owner}", { owner: d.owner })}
             </span>
           )}
         </span>
       </a>
       <span className="cq-deck-actions">
         {onRename && (
-          <Button size="icon" variant="outline" aria-label={`Rename ${d.title}`} title="Rename" onClick={onRename}>
+          <Button size="icon" variant="outline" aria-label={t("Rename {title}", { title: d.title })} title={t("Rename")} onClick={onRename}>
             <Pencil />
           </Button>
         )}
-        <Button size="icon" variant="outline" aria-label={`Duplicate ${d.title}`} title="Duplicate" onClick={onDuplicate}>
+        <Button size="icon" variant="outline" aria-label={t("Duplicate {title}", { title: d.title })} title={t("Duplicate")} onClick={onDuplicate}>
           <Copy />
         </Button>
         {onDelete && (
-          <Button size="icon" variant="outline" aria-label={`Delete ${d.title}`} title="Delete" onClick={onDelete}>
+          <Button size="icon" variant="outline" aria-label={t("Delete {title}", { title: d.title })} title={t("Delete")} onClick={onDelete}>
             <Trash2 />
           </Button>
         )}
@@ -105,21 +106,21 @@ export function Decks() {
   }
   const remove = (d: DeckRow) => {
     setDeleting(null);
-    return run(`Deleting ${d.title}`, async () => {
+    return run(t("Deleting {title}", { title: d.title }), async () => {
       await api(`/api/decks/${encodeURIComponent(d.id)}`, undefined, "DELETE");
       await load();
     });
   };
   const rename = (d: DeckRow, title: string) => {
     setRenaming(null);
-    return run(`Renaming ${d.title}`, async () => {
+    return run(t("Renaming {title}", { title: d.title }), async () => {
       await tool("rename_deck", { deck_id: d.id, title });
       await load();
     });
   };
   // the copy opens in the editor, as a new deck of the caller's
   const duplicate = (d: DeckRow) =>
-    run(`Duplicating ${d.title}`, async () => navigate(`/d/${(await tool<{ deck_id: string }>("duplicate_deck", { deck_id: d.id })).deck_id}`));
+    run(t("Duplicating {title}", { title: d.title }), async () => navigate(`/d/${(await tool<{ deck_id: string }>("duplicate_deck", { deck_id: d.id })).deck_id}`));
   const actions = (d: DeckRow): CardActions => ({
     onRename: d.role === "owner" || d.role === "editor" ? () => setRenaming(d) : undefined,
     onDuplicate: () => void duplicate(d),
@@ -130,22 +131,22 @@ export function Decks() {
 
   return (
     <div className="cq-page">
-      <PageHead title="Decks" description="Every deck you co-edit with the agent, newest first.">
+      <PageHead title={t("Decks")} description={t("Every deck you co-edit with the agent, newest first.")}>
         <Button variant="outline" onClick={() => setImporting(true)}>
-          <FileUp /> Import PPTX
+          <FileUp /> {t("Import PPTX")}
         </Button>
         <Button onClick={() => navigate("/new")}>
-          <Plus /> New deck
+          <Plus /> {t("New deck")}
         </Button>
       </PageHead>
       {(filtered || !!all?.length) && (
         <div className="cq-deck-filters" role="search">
           <span className="cq-deck-search">
             <Search aria-hidden />
-            <Input type="search" aria-label="Search decks" placeholder="Search by title, client or slide text" value={query} onChange={(e) => setQuery(e.target.value)} />
+            <Input type="search" aria-label={t("Search decks")} placeholder={t("Search by title, client or slide text")} value={query} onChange={(e) => setQuery(e.target.value)} />
           </span>
-          <select className="cq-select" aria-label="Brand pack filter" value={packId} onChange={(e) => setPackId(e.target.value)}>
-            <option value="">All brand packs</option>
+          <select className="cq-select" aria-label={t("Brand pack filter")} value={packId} onChange={(e) => setPackId(e.target.value)}>
+            <option value="">{t("All brand packs")}</option>
             {packs.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
@@ -160,15 +161,15 @@ export function Decks() {
         </Alert>
       )}
       {busy && <Spinner label={busy} />}
-      {!decks && <Spinner label="Loading decks" />}
+      {!decks && <Spinner label={t("Loading decks")} />}
       {filtered && all?.length === 0 && (
         <Empty className="border">
           <EmptyHeader>
             <EmptyMedia variant="icon">
               <Search />
             </EmptyMedia>
-            <EmptyTitle>No deck matches</EmptyTitle>
-            <EmptyDescription>Try other words, or another brand pack.</EmptyDescription>
+            <EmptyTitle>{t("No deck matches")}</EmptyTitle>
+            <EmptyDescription>{t("Try other words, or another brand pack.")}</EmptyDescription>
           </EmptyHeader>
         </Empty>
       )}
@@ -178,15 +179,15 @@ export function Decks() {
             <EmptyMedia variant="icon">
               <LayoutGrid />
             </EmptyMedia>
-            <EmptyTitle>No deck yet</EmptyTitle>
-            <EmptyDescription>Describe the deck you need; the agent builds it on your company's brand pack.</EmptyDescription>
+            <EmptyTitle>{t("No deck yet")}</EmptyTitle>
+            <EmptyDescription>{t("Describe the deck you need; the agent builds it on your company's brand pack.")}</EmptyDescription>
           </EmptyHeader>
           <EmptyContent>
             <Button variant="outline" onClick={() => setImporting(true)}>
-              <FileUp /> Import PPTX
+              <FileUp /> {t("Import PPTX")}
             </Button>
             <Button onClick={() => navigate("/new")}>
-              <Plus /> New deck
+              <Plus /> {t("New deck")}
             </Button>
           </EmptyContent>
         </Empty>
@@ -197,7 +198,7 @@ export function Decks() {
             <li>
               <a className="cq-deck-card cq-deck-new" href="/new" onClick={(e) => go(e, "/new")}>
                 <Plus />
-                <span>Start from a brief</span>
+                <span>{t("Start from a brief")}</span>
               </a>
             </li>
           )}
@@ -207,8 +208,8 @@ export function Decks() {
         </ul>
       )}
       {shared.length > 0 && (
-        <section className="cq-shared" aria-label="Shared with me">
-          <h2>Shared with me</h2>
+        <section className="cq-shared" aria-label={t("Shared with me")}>
+          <h2>{t("Shared with me")}</h2>
           <ul className="cq-deck-grid">
             {shared.map((d) => (
               <DeckCard key={d.id} d={d} {...actions(d)} />
@@ -219,16 +220,16 @@ export function Decks() {
       {importing && <ImportPptx onClose={() => setImporting(false)} />}
       {renaming && <RenameDeck deck={renaming} onClose={() => setRenaming(null)} onRename={(title) => void rename(renaming, title)} />}
       {deleting && (
-        <Dialog title={`Delete ${deleting.title}?`} onClose={() => setDeleting(null)}>
+        <Dialog title={t("Delete {title}?", { title: deleting.title })} onClose={() => setDeleting(null)}>
           <div className="cq-dialog-body">
-            <p>Every version, comment and share goes with it, for everyone it is shared with. This cannot be undone.</p>
+            <p>{t("Every version, comment and share goes with it, for everyone it is shared with. This cannot be undone.")}</p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleting(null)}>
-              Cancel
+              {t("Cancel")}
             </Button>
             <Button variant="destructive" onClick={() => void remove(deleting)}>
-              <Trash2 /> Delete
+              <Trash2 /> {t("Delete")}
             </Button>
           </DialogFooter>
         </Dialog>
@@ -245,19 +246,19 @@ function RenameDeck({ deck, onClose, onRename }: { deck: DeckRow; onClose: () =>
     onRename(title);
   };
   return (
-    <Dialog title="Rename deck" onClose={onClose}>
+    <Dialog title={t("Rename deck")} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="cq-dialog-body">
-          <Field label="Name" htmlFor="r-title" hint="Shown in the deck lists; the slides do not change. Leave it empty to use the deck's own title.">
+          <Field label={t("Name")} htmlFor="r-title" hint={t("Shown in the deck lists; the slides do not change. Leave it empty to use the deck's own title.")}>
             <Input id="r-title" autoFocus maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} />
           </Field>
         </div>
         <DialogFooter>
           <Button variant="outline" type="button" onClick={onClose}>
-            Cancel
+            {t("Cancel")}
           </Button>
           <Button type="submit">
-            <Pencil /> Rename
+            <Pencil /> {t("Rename")}
           </Button>
         </DialogFooter>
       </form>
@@ -304,14 +305,14 @@ function ImportPptx({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Dialog title="Import a PPTX" onClose={onClose}>
+    <Dialog title={t("Import a PPTX")} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="cq-dialog-body">
           <FileDrop
-            label="PPTX file"
+            label={t("PPTX file")}
             accept=".pptx"
-            title={cloud ? cloud.name : file ? file.name : "Drop the .pptx here"}
-            hint="Calque edits its own copy: your file is never overwritten."
+            title={cloud ? cloud.name : file ? file.name : t("Drop the .pptx here")}
+            hint={t("Calque edits its own copy: your file is never overwritten.")}
             onFiles={(f) => {
               setFile(f[0] ?? null);
               setCloud(null);
@@ -319,13 +320,13 @@ function ImportPptx({ onClose }: { onClose: () => void }) {
           />
           {m365 && (
             <Button type="button" variant="outline" onClick={() => setPicking(true)}>
-              <Cloud /> From Microsoft 365
+              <Cloud /> {t("From Microsoft 365")}
             </Button>
           )}
-          <Field label="Brand pack" htmlFor="i-pack" hint="Lint and the agent check the deck against this pack.">
+          <Field label={t("Brand pack")} htmlFor="i-pack" hint={t("Lint and the agent check the deck against this pack.")}>
             <select id="i-pack" className="cq-select" required value={pack} onChange={(e) => pick(packs.find((p) => p.id === e.target.value))}>
               <option value="" disabled>
-                Choose a brand pack
+                {t("Choose a brand pack")}
               </option>
               {packs.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -334,10 +335,10 @@ function ImportPptx({ onClose }: { onClose: () => void }) {
               ))}
             </select>
           </Field>
-          <Field label="Language" htmlFor="i-lang" hint="The deck's language, for spelling and lint.">
+          <Field label={t("Language")} htmlFor="i-lang" hint={t("The deck's language, for spelling and lint.")}>
             <Input id="i-lang" required minLength={2} value={language} placeholder="en" onChange={(e) => setLanguage(e.target.value)} />
           </Field>
-          {busy && <Spinner label="Importing: rendering every slide" />}
+          {busy && <Spinner label={t("Importing: rendering every slide")} />}
           {error && (
             <Alert variant="destructive">
               <AlertDescription>{error}</AlertDescription>
@@ -346,14 +347,14 @@ function ImportPptx({ onClose }: { onClose: () => void }) {
         </div>
         <DialogFooter>
           <Button variant="outline" type="button" onClick={onClose}>
-            Cancel
+            {t("Cancel")}
           </Button>
           <Button type="submit" disabled={!(file || cloud) || !pack || busy}>
-            <FileUp /> Import
+            <FileUp /> {t("Import")}
           </Button>
         </DialogFooter>
       </form>
-      {picking && m365 && <M365Picker status={m365} accept={/\.pptx$/i} title="Import from Microsoft 365" onPick={setCloud} onClose={() => setPicking(false)} />}
+      {picking && m365 && <M365Picker status={m365} accept={/\.pptx$/i} title={t("Import from Microsoft 365")} onPick={setCloud} onClose={() => setPicking(false)} />}
     </Dialog>
   );
 }

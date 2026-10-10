@@ -9,7 +9,8 @@ export default defineConfig({
   workers: 1,
   timeout: 120_000,
   expect: { timeout: 30_000 },
-  use: { baseURL: `http://localhost:${PORT}`, trace: "retain-on-failure" },
+  // English whatever the machine's language: the UI follows the browser's until the user picks one
+  use: { baseURL: `http://localhost:${PORT}`, trace: "retain-on-failure", locale: "en-US" },
   webServer: {
     command: `node e2e/serve.ts ${PORT}`,
     url: `http://localhost:${PORT}/api/tools`,

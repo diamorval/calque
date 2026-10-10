@@ -13,6 +13,7 @@ import { Textarea } from "diametral-ds/textarea";
 import { KeyRound, Pencil, Server, Star, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { api, type Me } from "../api.ts";
+import { t } from "../i18n.ts";
 import { Dialog, Field, PageHead } from "../ui.tsx";
 
 interface Provider {
@@ -66,10 +67,10 @@ export function Models({ me }: { me: Me }) {
 
   return (
     <div className="cq-page">
-      <PageHead title="AI models" description="The models the web app's agent runs on. Keys are tested when saved and never shown again." />
+      <PageHead title={t("AI models")} description={t("The models the web app's agent runs on. Keys are tested when saved and never shown again.")} />
       {!me.admin && (
         <Alert tone="info">
-          <AlertDescription>Only workspace admins change the models.</AlertDescription>
+          <AlertDescription>{t("Only workspace admins change the models.")}</AlertDescription>
         </Alert>
       )}
       {error && (
@@ -79,8 +80,8 @@ export function Models({ me }: { me: Me }) {
       )}
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
         <TabsList variant="line">
-          <TabsTrigger value="configured">Configured</TabsTrigger>
-          <TabsTrigger value="providers">Providers</TabsTrigger>
+          <TabsTrigger value="configured">{t("Configured")}</TabsTrigger>
+          <TabsTrigger value="providers">{t("Providers")}</TabsTrigger>
         </TabsList>
       </Tabs>
       {tab === "configured" &&
@@ -90,8 +91,8 @@ export function Models({ me }: { me: Me }) {
               <EmptyMedia variant="icon">
                 <Server />
               </EmptyMedia>
-              <EmptyTitle>No model yet</EmptyTitle>
-              <EmptyDescription>Configure one from the Providers tab.</EmptyDescription>
+              <EmptyTitle>{t("No model yet")}</EmptyTitle>
+              <EmptyDescription>{t("Configure one from the Providers tab.")}</EmptyDescription>
             </EmptyHeader>
           </Empty>
         ) : (
@@ -99,10 +100,10 @@ export function Models({ me }: { me: Me }) {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Provider</TableHead>
-                  <TableHead>Model</TableHead>
-                  <TableHead>Endpoint</TableHead>
-                  <TableHead>Default</TableHead>
+                  <TableHead>{t("Provider")}</TableHead>
+                  <TableHead>{t("Model")}</TableHead>
+                  <TableHead>{t("Endpoint")}</TableHead>
+                  <TableHead>{t("Default")}</TableHead>
                   <TableHead />
                 </TableRow>
               </TableHeader>
@@ -116,24 +117,24 @@ export function Models({ me }: { me: Me }) {
                     <TableCell className="cq-muted">{m.base_url ?? m.resource ?? "—"}</TableCell>
                     <TableCell>
                       {m.is_default ? (
-                        <Tag>Default</Tag>
+                        <Tag>{t("Default")}</Tag>
                       ) : (
                         me.admin && (
                           <Button size="sm" variant="outline" onClick={() => act(() => api(`/api/models/${encodeURIComponent(m.id)}/default`, {}))}>
-                            <Star /> Set as default
+                            <Star /> {t("Set as default")}
                           </Button>
                         )
                       )}
                     </TableCell>
                     <TableCell>
                       {me.admin && provider(m.provider) && (
-                        <Button size="sm" variant="ghost" aria-label={`Edit ${m.id}`} onClick={() => setEditing({ provider: provider(m.provider) as Provider, model: m })}>
-                          <Pencil /> Edit
+                        <Button size="sm" variant="ghost" aria-label={t("Edit {name}", { name: m.id })} onClick={() => setEditing({ provider: provider(m.provider) as Provider, model: m })}>
+                          <Pencil /> {t("Edit")}
                         </Button>
                       )}
                       {me.admin && (
                         <Button size="sm" variant="ghost" onClick={() => setRemoving(m)}>
-                          <Trash2 /> Remove
+                          <Trash2 /> {t("Remove")}
                         </Button>
                       )}
                     </TableCell>
@@ -154,12 +155,12 @@ export function Models({ me }: { me: Me }) {
                 <div>
                   <strong>{p.label}</strong>
                   <span className="cq-hint">
-                    {p.key ? "API key" : "No key needed"}
-                    {p.baseURL ? " · your endpoint" : ""}
+                    {p.key ? t("API key") : t("No key needed")}
+                    {p.baseURL ? ` · ${t("your endpoint")}` : ""}
                   </span>
                 </div>
-                <Button size="sm" variant="outline" disabled={!me.admin} aria-label={`Configure ${p.label}`} onClick={() => setEditing({ provider: p })}>
-                  Configure
+                <Button size="sm" variant="outline" disabled={!me.admin} aria-label={t("Configure {name}", { name: p.label })} onClick={() => setEditing({ provider: p })}>
+                  {t("Configure")}
                 </Button>
               </Card>
             </li>
@@ -167,16 +168,16 @@ export function Models({ me }: { me: Me }) {
         </ul>
       )}
       {removing && (
-        <Dialog title={`Remove ${label(removing.provider)} ${removing.model}?`} onClose={() => setRemoving(null)}>
+        <Dialog title={t("Remove {name}?", { name: `${label(removing.provider)} ${removing.model}` })} onClose={() => setRemoving(null)}>
           <div className="cq-dialog-body">
             <p>
-              The agent stops running on it, and its key is deleted.
-              {removing.is_default && " It is the default: the most recently configured model takes over."}
+              {t("The agent stops running on it, and its key is deleted.")}
+              {removing.is_default && ` ${t("It is the default: the most recently configured model takes over.")}`}
             </p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setRemoving(null)}>
-              Cancel
+              {t("Cancel")}
             </Button>
             <Button
               variant="destructive"
@@ -186,7 +187,7 @@ export function Models({ me }: { me: Me }) {
                 void act(() => api(`/api/models/${encodeURIComponent(id)}`, undefined, "DELETE"));
               }}
             >
-              <Trash2 /> Remove
+              <Trash2 /> {t("Remove")}
             </Button>
           </DialogFooter>
         </Dialog>
@@ -213,7 +214,7 @@ function parseHeaders(text: string): Record<string, string> {
   for (const line of text.split("\n")) {
     if (!line.trim()) continue;
     const i = line.indexOf(":");
-    if (i < 1) throw new Error(`custom header "${line.trim()}": write Name: value`);
+    if (i < 1) throw new Error(t("Custom header \"{line}\": write Name: value", { line: line.trim() }));
     out[line.slice(0, i).trim()] = line.slice(i + 1).trim();
   }
   return out;
@@ -264,52 +265,52 @@ function Configure(props: { provider: Provider; initial?: Model | undefined; onC
   }
 
   return (
-    <Dialog title={m ? `Edit ${m.id}` : `Configure ${p.label}`} onClose={props.onClose}>
+    <Dialog title={m ? t("Edit {name}", { name: m.id }) : t("Configure {name}", { name: p.label })} onClose={props.onClose}>
       <form onSubmit={save}>
         <div className="cq-dialog-body">
-          <Field label={p.modelLabel ?? "Model"} htmlFor="m-model">
+          <Field label={p.modelLabel ?? t("Model")} htmlFor="m-model">
             <Input id="m-model" required value={model} placeholder={p.example} onChange={(e) => setModel(e.target.value)} />
           </Field>
-          <Field label="Label (optional)" htmlFor="m-label" hint="Tells two configurations of one model apart: a region, a subsidiary.">
+          <Field label={t("Label (optional)")} htmlFor="m-label" hint={t("Tells two configurations of one model apart: a region, a subsidiary.")}>
             <Input id="m-label" maxLength={40} value={label} placeholder="EU" onChange={(e) => setLabel(e.target.value)} />
           </Field>
           {has("managedIdentity") && (
             <Label className="cq-check">
               <Checkbox checked={identity} onCheckedChange={setIdentity} />
-              Sign in with the server's managed identity (Entra ID), no key
+              {t("Sign in with the server's managed identity (Entra ID), no key")}
             </Label>
           )}
           {!identity && (
-            <Field label={`API key${p.key && !m?.has_key ? "" : " (optional)"}`} htmlFor="m-key" hint={m?.has_key ? "Leave empty to keep the stored key." : undefined}>
+            <Field label={p.key && !m?.has_key ? t("API key") : t("API key (optional)")} htmlFor="m-key" hint={m?.has_key ? t("Leave empty to keep the stored key.") : undefined}>
               <Input id="m-key" type="password" autoComplete="off" required={p.key && !m?.has_key} value={key} onChange={(e) => setKey(e.target.value)} />
             </Field>
           )}
           {has("resource") && (
-            <Field label="Resource name" htmlFor="m-resource" hint="Or a base URL: an APIM gateway, a private endpoint.">
+            <Field label={t("Resource name")} htmlFor="m-resource" hint={t("Or a base URL: an APIM gateway, a private endpoint.")}>
               <Input id="m-resource" value={resource} placeholder="my-openai-eu" onChange={(e) => setResource(e.target.value)} />
             </Field>
           )}
-          <Field label={`Base URL${p.baseURL ? "" : " (optional)"}`} htmlFor="m-base">
+          <Field label={p.baseURL ? t("Base URL") : t("Base URL (optional)")} htmlFor="m-base">
             <Input id="m-base" type="url" required={p.baseURL} value={base} placeholder={p.defaultBaseURL ?? "https://…/v1"} onChange={(e) => setBase(e.target.value)} />
           </Field>
           {has("apiVersion") && (
-            <Field label="API version (optional)" htmlFor="m-version" hint="Empty: the v1 API. A dated version (2024-10-21) calls the deployment URL.">
+            <Field label={t("API version (optional)")} htmlFor="m-version" hint={t("Empty: the v1 API. A dated version (2024-10-21) calls the deployment URL.")}>
               <Input id="m-version" value={apiVersion} placeholder="v1" onChange={(e) => setApiVersion(e.target.value)} />
             </Field>
           )}
           <Field
-            label="Custom headers (optional)"
+            label={t("Custom headers (optional)")}
             htmlFor="m-headers"
-            hint={m?.headers?.length ? `Leave empty to keep the stored ones (${m.headers.join(", ")}).` : "One per line, e.g. Ocp-Apim-Subscription-Key: …, stored encrypted."}
+            hint={m?.headers?.length ? t("Leave empty to keep the stored ones ({names}).", { names: m.headers.join(", ") }) : t("One per line, e.g. Ocp-Apim-Subscription-Key: …, stored encrypted.")}
           >
-            <Textarea id="m-headers" rows={2} value={headers} placeholder="Name: value" onChange={(e) => setHeaders(e.target.value)} />
+            <Textarea id="m-headers" rows={2} value={headers} placeholder={t("Name: value")} onChange={(e) => setHeaders(e.target.value)} />
           </Field>
           <Label className="cq-check">
             <Checkbox checked={isDefault} onCheckedChange={setDefault} />
-            Use as the default model
+            {t("Use as the default model")}
           </Label>
           <span className="cq-hint">
-            <KeyRound size={13} /> Saving sends a one-token request to check the key and the model.
+            <KeyRound size={13} /> {t("Saving sends a one-token request to check the key and the model.")}
           </span>
           {error && (
             <Alert variant="destructive">
@@ -319,10 +320,10 @@ function Configure(props: { provider: Provider; initial?: Model | undefined; onC
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={props.onClose}>
-            Cancel
+            {t("Cancel")}
           </Button>
           <Button type="submit" disabled={saving}>
-            {saving ? "Testing…" : "Test and save"}
+            {saving ? t("Testing…") : t("Test and save")}
           </Button>
         </DialogFooter>
       </form>

@@ -12,6 +12,7 @@ import { ExportWithErrors } from "../components/ExportGate.tsx";
 import { AddToLibrary, LibraryPanel } from "../components/Library.tsx";
 import { SaveToM365, useM365 } from "../components/M365.tsx";
 import { ShareDeck } from "../components/Share.tsx";
+import { slideUiStrings, t } from "../i18n.ts";
 import { bySeverity, type Finding, lintSummary } from "../lint.ts";
 import { navigate } from "../nav.ts";
 import { ago, Dialog, Spinner } from "../ui.tsx";
@@ -19,7 +20,7 @@ import { ago, Dialog, Spinner } from "../ui.tsx";
 type Deck = DeckView & { versions: { version: number; note: string; author: string; author_name: string | null; created_at: string }[] };
 const APPROVAL = { draft: "Draft", in_review: "In review", approved: "Approved" } as const;
 
-const EDITS = ["Tighten every title to one line", "Add an agenda slide after the cover", "Review the deck against the brand pack"];
+const EDITS = ["Tighten every title to one line", "Add an agenda slide after the cover", "Review the deck against the brand pack"] as const;
 
 /** The editor: the deck workspace (slide-ui) with the agent chat in its side panel. */
 export function Editor({ id }: { id: string }) {
@@ -76,7 +77,7 @@ export function Editor({ id }: { id: string }) {
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         ) : (
-          <Spinner label="Loading deck" />
+          <Spinner label={t("Loading deck")} />
         )}
       </div>
     );
@@ -95,12 +96,13 @@ export function Editor({ id }: { id: string }) {
     <>
       <DeckViewer
         deck={deck}
+        strings={slideUiStrings()}
         working={busy}
         actions={
           <>
             {summary &&
               (findings?.length ? (
-                <Button variant="ghost" aria-label={`Lint: ${summary.label}`} onClick={() => setReport(true)}>
+                <Button variant="ghost" aria-label={t("Lint: {summary}", { summary: summary.label })} onClick={() => setReport(true)}>
                   <Tag tone={summary.tone}>
                     <TriangleAlert /> {summary.label}
                   </Tag>
@@ -113,42 +115,42 @@ export function Editor({ id }: { id: string }) {
             {edits ? (
               <>
                 <Button variant="ghost" onClick={() => setDialog("add")}>
-                  <ListPlus /> Add slides
+                  <ListPlus /> {t("Add slides")}
                 </Button>
                 <Button variant="ghost" onClick={() => setDialog("review")}>
-                  <ListChecks /> Review
+                  <ListChecks /> {t("Review")}
                 </Button>
               </>
             ) : (
-              <Tag>{role === "viewer" ? "Viewer" : "Commenter"}</Tag>
+              <Tag>{role === "viewer" ? t("Viewer") : t("Commenter")}</Tag>
             )}
             <Button variant="ghost" onClick={() => setHistory(true)}>
-              <History /> History
+              <History /> {t("History")}
             </Button>
             <Button variant="outline" onClick={() => navigate(`/present/${id}`)}>
-              <Play /> Present
+              <Play /> {t("Present")}
             </Button>
             {approval && (
               <>
-                <Tag tone={approval.status === "approved" ? "success" : approval.status === "in_review" ? "warning" : "neutral"}>{APPROVAL[approval.status]}</Tag>
+                <Tag tone={approval.status === "approved" ? "success" : approval.status === "in_review" ? "warning" : "neutral"}>{t(APPROVAL[approval.status])}</Tag>
                 {approval.can_request && (
-                  <Button variant="ghost" onClick={() => setApproval("in_review", "Requesting review")}>
-                    <Send /> Request review
+                  <Button variant="ghost" onClick={() => setApproval("in_review", t("Requesting review"))}>
+                    <Send /> {t("Request review")}
                   </Button>
                 )}
                 {approval.can_approve && (
                   <>
-                    <Button variant="ghost" onClick={() => setApproval("approved", "Approving")}>
-                      <BadgeCheck /> Approve
+                    <Button variant="ghost" onClick={() => setApproval("approved", t("Approving"))}>
+                      <BadgeCheck /> {t("Approve")}
                     </Button>
-                    <Button variant="ghost" onClick={() => setApproval("draft", "Requesting changes")}>
-                      <Undo2 /> Request changes
+                    <Button variant="ghost" onClick={() => setApproval("draft", t("Requesting changes"))}>
+                      <Undo2 /> {t("Request changes")}
                     </Button>
                   </>
                 )}
                 {approval.can_withdraw && !approval.can_approve && (
-                  <Button variant="ghost" onClick={() => setApproval("draft", "Back to draft")}>
-                    <Undo2 /> Back to draft
+                  <Button variant="ghost" onClick={() => setApproval("draft", t("Back to draft"))}>
+                    <Undo2 /> {t("Back to draft")}
                   </Button>
                 )}
               </>
@@ -157,7 +159,7 @@ export function Editor({ id }: { id: string }) {
               variant="outline"
               disabled={busy !== null}
               onClick={async () => {
-                setBusy("Exporting PDF");
+                setBusy(t("Exporting PDF"));
                 setError(null);
                 try {
                   location.assign((await tool<{ download_url: string }>("export_pdf", { deck_id: id })).download_url);
@@ -168,20 +170,20 @@ export function Editor({ id }: { id: string }) {
                 }
               }}
             >
-              <FileText /> Export PDF
+              <FileText /> {t("Export PDF")}
             </Button>
             {/* the soft gate: lint ERRORs ask for a reason, recorded with the export, never a block */}
             <Button onClick={() => (errors.length ? setDialog("export") : void exportPptx().catch((e: Error) => setError(e.message)))}>
-              <Download /> Export PPTX
+              <Download /> {t("Export PPTX")}
             </Button>
             {m365 && (
               <Button variant="outline" onClick={() => setDialog("m365")}>
-                <Cloud /> Save to SharePoint
+                <Cloud /> {t("Save to SharePoint")}
               </Button>
             )}
             {role === "owner" && (
               <Button variant="outline" onClick={() => setDialog("share")}>
-                <Share2 /> Share
+                <Share2 /> {t("Share")}
               </Button>
             )}
           </>
@@ -192,14 +194,14 @@ export function Editor({ id }: { id: string }) {
               storageKey={`chat:${id}`}
               deck_id={id}
               pack_id={deck.pack_id}
-              placeholder="Ask for a change: reword, add a slide, review…"
-              suggestions={EDITS}
+              placeholder={t("Ask for a change: reword, add a slide, review…")}
+              suggestions={EDITS.map((e) => t(e))}
               ask={ask}
               empty={
                 <div className="cq-empty">
                   <Sparkles />
-                  <strong>Edit with the agent</strong>
-                  <span>Ask for a change in your words. Comments on the slides go through the agent too.</span>
+                  <strong>{t("Edit with the agent")}</strong>
+                  <span>{t("Ask for a change in your words. Comments on the slides go through the agent too.")}</span>
                 </div>
               }
               onDone={() => void reload()}
@@ -209,7 +211,7 @@ export function Editor({ id }: { id: string }) {
         tabs={[
           {
             id: "library",
-            label: "Library",
+            label: t("Library"),
             icon: <BookMarked />,
             content: <LibraryPanel key={library} pack_id={deck.pack_id} deck_id={id} canEdit={edits} manages={manages} me={me?.id ?? null} onInserted={() => void reload()} />,
           },
@@ -218,7 +220,7 @@ export function Editor({ id }: { id: string }) {
           ? {
               slideActions: (s: { id: string; number: number }) => (
                 <Button variant="ghost" size="sm" onClick={() => setAdding({ id: s.id, number: s.number })}>
-                  <BookMarked /> Add to library
+                  <BookMarked /> {t("Add to library")}
                 </Button>
               ),
             }
@@ -238,7 +240,7 @@ export function Editor({ id }: { id: string }) {
         {...(edits
           ? {
               onApply: (ids?: number[]) =>
-                run("Applying comments", () => agent("/api/agent/apply-comments", { deck_id: id, ...(ids ? { comment_ids: ids } : {}) }, () => {})),
+                run(t("Applying comments"), () => agent("/api/agent/apply-comments", { deck_id: id, ...(ids ? { comment_ids: ids } : {}) }, () => {})),
               onResolve: (ids: number[], status: "open" | "resolved") => run("", () => tool("resolve_comments", { deck_id: id, comment_ids: ids, status })),
             }
           : {})}
@@ -246,7 +248,7 @@ export function Editor({ id }: { id: string }) {
       {error && (
         <div className="cq-toast" role="alert">
           <TriangleAlert /> <span>{error}</span>
-          <Button variant="ghost" size="icon-sm" aria-label="Dismiss" onClick={() => setError(null)}>
+          <Button variant="ghost" size="icon-sm" aria-label={t("Dismiss")} onClick={() => setError(null)}>
             <X />
           </Button>
         </div>
@@ -265,19 +267,19 @@ export function Editor({ id }: { id: string }) {
           onAsk={setAsk}
           onApplySafe={() => {
             setDialog(null);
-            void run("Applying safe fixes", () => tool("review_deck", { deck_id: id, apply_safe_fixes: true }));
+            void run(t("Applying safe fixes"), () => tool("review_deck", { deck_id: id, apply_safe_fixes: true }));
           }}
         />
       )}
       {history && (
-        <Dialog title="Version history" wide onClose={() => setHistory(false)}>
+        <Dialog title={t("Version history")} wide onClose={() => setHistory(false)}>
           <div className="cq-dialog-body">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Version</TableHead>
-                  <TableHead>Change</TableHead>
-                  <TableHead>By</TableHead>
+                  <TableHead>{t("Version")}</TableHead>
+                  <TableHead>{t("Change")}</TableHead>
+                  <TableHead>{t("By")}</TableHead>
                   <TableHead />
                 </TableRow>
               </TableHeader>
@@ -294,19 +296,19 @@ export function Editor({ id }: { id: string }) {
                     <TableCell>{v.author_name || v.author}</TableCell>
                     <TableCell>
                       {v.version === deck.head ? (
-                        <Tag>Current</Tag>
+                        <Tag>{t("Current")}</Tag>
                       ) : (
                         edits && (
                           <Button
                             size="sm"
                             variant="outline"
-                            aria-label={`Restore v${v.version}`}
+                            aria-label={t("Restore v{version}", { version: v.version })}
                             onClick={() => {
                               setHistory(false);
-                              void run("Restoring", () => tool("restore_version", { deck_id: id, version: v.version }));
+                              void run(t("Restoring"), () => tool("restore_version", { deck_id: id, version: v.version }));
                             }}
                           >
-                            Restore
+                            {t("Restore")}
                           </Button>
                         )
                       )}
@@ -319,14 +321,14 @@ export function Editor({ id }: { id: string }) {
         </Dialog>
       )}
       {report && findings && (
-        <Dialog title={`Lint: ${summary?.label}`} wide onClose={() => setReport(false)}>
+        <Dialog title={t("Lint: {summary}", { summary: summary?.label ?? "" })} wide onClose={() => setReport(false)}>
           <div className="cq-dialog-body">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Severity</TableHead>
-                  <TableHead>Slide</TableHead>
-                  <TableHead>Finding</TableHead>
+                  <TableHead>{t("Severity")}</TableHead>
+                  <TableHead>{t("Slide")}</TableHead>
+                  <TableHead>{t("Finding")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -335,12 +337,12 @@ export function Editor({ id }: { id: string }) {
                     <TableCell>
                       <Tag tone={f.severity === "ERROR" ? "danger" : f.severity === "WARN" ? "warning" : "neutral"}>{f.severity}</Tag>
                     </TableCell>
-                    <TableCell>{f.slide ? `Slide ${f.slide}` : "Deck"}</TableCell>
+                    <TableCell>{f.slide ? t("Slide {n}", { n: f.slide }) : t("Deck")}</TableCell>
                     <TableCell>
                       {f.message}
                       <div className="cq-hint">
                         <span className="cq-mono">{f.check}</span>
-                        {f.shape_id !== null && ` · shape ${f.shape_id}`}
+                        {f.shape_id !== null && ` · ${t("shape {id}", { id: f.shape_id })}`}
                       </div>
                     </TableCell>
                   </TableRow>

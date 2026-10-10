@@ -78,15 +78,5 @@ export function Logo({ brand, size = 28 }: { brand: { logo: string | null }; siz
   return brand.logo ? <img className="cq-logo-img" data-size={size} src={brand.logo} alt="" /> : <Mark size={size} />;
 }
 
-const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
-/** "3 minutes ago", "yesterday"… */
-export function ago(iso: string): string {
-  const s = (new Date(iso).getTime() - Date.now()) / 1000;
-  const steps: [Intl.RelativeTimeFormatUnit, number][] = [["second", 60], ["minute", 60], ["hour", 24], ["day", 7], ["week", 4.35], ["month", 12], ["year", Infinity]];
-  let v = s;
-  for (const [unit, size] of steps) {
-    if (Math.abs(v) < size) return rtf.format(Math.round(v), unit);
-    v /= size;
-  }
-  return iso;
-}
+/** "3 minutes ago", "yesterday"…, in the UI language. */
+export { ago } from "./i18n.ts";

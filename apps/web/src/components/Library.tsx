@@ -9,6 +9,7 @@ import { Tag } from "diametral-ds/tag";
 import { BookMarked, Check, Plus, Search, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { tool } from "../api.ts";
+import { t } from "../i18n.ts";
 import { Dialog, Field, Spinner } from "../ui.tsx";
 
 export interface LibraryEntry {
@@ -77,17 +78,17 @@ export function LibraryPanel(props: { pack_id: string; deck_id: string; canEdit:
         )}
         <span className="cq-lib-actions">
           {e.status === "approved" && props.canEdit && (
-            <Button size="sm" variant="outline" disabled={!!busy} aria-label={`Insert ${e.title}`} onClick={() => void act("Inserting", () => tool("library_insert", { entry_id: e.entry_id, deck_id: props.deck_id }), props.onInserted)}>
-              <Plus /> Insert
+            <Button size="sm" variant="outline" disabled={!!busy} aria-label={t("Insert {title}", { title: e.title })} onClick={() => void act(t("Inserting"), () => tool("library_insert", { entry_id: e.entry_id, deck_id: props.deck_id }), props.onInserted)}>
+              <Plus /> {t("Insert")}
             </Button>
           )}
           {e.status === "pending" && props.manages && (
-            <Button size="sm" variant="outline" disabled={!!busy} aria-label={`Approve ${e.title}`} onClick={() => void act("Approving", () => tool("library_review", { entry_id: e.entry_id, action: "approve" }))}>
-              <Check /> Approve
+            <Button size="sm" variant="outline" disabled={!!busy} aria-label={t("Approve {title}", { title: e.title })} onClick={() => void act(t("Approving"), () => tool("library_review", { entry_id: e.entry_id, action: "approve" }))}>
+              <Check /> {t("Approve")}
             </Button>
           )}
           {(props.manages || (e.status === "pending" && e.added_by === props.me)) && (
-            <Button size="icon-sm" variant="ghost" disabled={!!busy} aria-label={`Remove ${e.title}`} onClick={() => void act("Removing", () => tool("library_review", { entry_id: e.entry_id, action: "remove" }))}>
+            <Button size="icon-sm" variant="ghost" disabled={!!busy} aria-label={t("Remove {title}", { title: e.title })} onClick={() => void act(t("Removing"), () => tool("library_review", { entry_id: e.entry_id, action: "remove" }))}>
               <Trash2 />
             </Button>
           )}
@@ -97,10 +98,10 @@ export function LibraryPanel(props: { pack_id: string; deck_id: string; canEdit:
   );
 
   return (
-    <section className="cq-lib" aria-label="Slide library">
+    <section className="cq-lib" aria-label={t("Slide library")}>
       <form className="cq-m365-search" onSubmit={search}>
-        <Input aria-label="Search the library" value={query} placeholder="Case study, sector, team…" onChange={(e) => setQuery(e.target.value)} />
-        <Button type="submit" size="icon" variant="outline" aria-label="Search the library">
+        <Input aria-label={t("Search the library")} value={query} placeholder={t("Case study, sector, team…")} onChange={(e) => setQuery(e.target.value)} />
+        <Button type="submit" size="icon" variant="outline" aria-label={t("Search the library")}>
           <Search />
         </Button>
       </form>
@@ -110,18 +111,18 @@ export function LibraryPanel(props: { pack_id: string; deck_id: string; canEdit:
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
-      {!entries && !error && <Spinner label="Loading the library" />}
+      {!entries && !error && <Spinner label={t("Loading the library")} />}
       {entries && approved.length === 0 && (
         <div className="cq-empty">
           <BookMarked />
-          <strong>{query ? "No approved slide matches" : "No approved slide yet"}</strong>
-          <span>Add a slide that proves a point (a case study, a reference, a team bio) with “Add to library” above the slide.</span>
+          <strong>{query ? t("No approved slide matches") : t("No approved slide yet")}</strong>
+          <span>{t("Add a slide that proves a point (a case study, a reference, a team bio) with “Add to library” above the slide.")}</span>
         </div>
       )}
       {approved.length > 0 && <ul className="cq-lib-list">{approved.map(card)}</ul>}
       {pending.length > 0 && (
         <>
-          <h3 className="cq-lib-head">{props.manages ? "To approve" : "Waiting for approval"}</h3>
+          <h3 className="cq-lib-head">{props.manages ? t("To approve") : t("Waiting for approval")}</h3>
           <ul className="cq-lib-list">{pending.map(card)}</ul>
         </>
       )}
@@ -152,28 +153,28 @@ export function AddToLibrary(props: { deck_id: string; slide_id: string; number:
     }
   }
   return (
-    <Dialog title={`Add slide ${props.number} to the library`} onClose={props.onClose}>
+    <Dialog title={t("Add slide {n} to the library", { n: props.number })} onClose={props.onClose}>
       {done ? (
         <>
           <div className="cq-dialog-body">
-            <p>{done.status === "approved" ? "Added: everyone on this brand pack can now insert it." : "Sent for approval: the brand pack's owner or an admin reviews it."}</p>
+            <p>{done.status === "approved" ? t("Added: everyone on this brand pack can now insert it.") : t("Sent for approval: the brand pack's owner or an admin reviews it.")}</p>
           </div>
           <DialogFooter>
-            <Button onClick={props.onClose}>Close</Button>
+            <Button onClick={props.onClose}>{t("Close")}</Button>
           </DialogFooter>
         </>
       ) : (
         <form onSubmit={submit}>
           <div className="cq-dialog-body">
             <p className="cq-hint">
-              {props.manages ? "You manage this brand pack: the slide is approved at once." : "The brand pack's owner or an admin approves it before others can use it."} The library keeps a copy: later edits to
-              this deck do not change it.
+              {props.manages ? t("You manage this brand pack: the slide is approved at once.") : t("The brand pack's owner or an admin approves it before others can use it.")}{" "}
+              {t("The library keeps a copy: later edits to this deck do not change it.")}
             </p>
-            <Field label="Title" htmlFor="l-title">
-              <Input id="l-title" required maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Retail case study: stock-outs down 30%" />
+            <Field label={t("Title")} htmlFor="l-title">
+              <Input id="l-title" required maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t("Retail case study: stock-outs down 30%")} />
             </Field>
-            <Field label="Tags" htmlFor="l-tags" hint="Comma-separated: what it is, the sector, the offer.">
-              <Input id="l-tags" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="case-study, retail, supply chain" />
+            <Field label={t("Tags")} htmlFor="l-tags" hint={t("Comma-separated: what it is, the sector, the offer.")}>
+              <Input id="l-tags" value={tags} onChange={(e) => setTags(e.target.value)} placeholder={t("case-study, retail, supply chain")} />
             </Field>
             {error && (
               <Alert variant="destructive">
@@ -183,10 +184,10 @@ export function AddToLibrary(props: { deck_id: string; slide_id: string; number:
           </div>
           <DialogFooter>
             <Button variant="outline" type="button" onClick={props.onClose}>
-              Cancel
+              {t("Cancel")}
             </Button>
             <Button type="submit" disabled={busy || !title.trim()}>
-              <BookMarked /> Add to library
+              <BookMarked /> {t("Add to library")}
             </Button>
           </DialogFooter>
         </form>
