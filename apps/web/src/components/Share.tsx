@@ -1,6 +1,6 @@
 // The editor's Share dialog (deck owner only), artifact style: the people and teams with access
 // (share_deck / unshare_deck), and the deck's one share link with its general access, who else it
-// opens for (set_general_access), copied as is or reset (reset_link). People and the workspace
+// opens for (set_general_access) and until when, copied as is or reset (reset_link). People and the workspace
 // see a shared deck only if they see its brand pack.
 import { Alert, AlertDescription } from "diametral-ds/alert";
 import { Button } from "diametral-ds/button";
@@ -25,7 +25,7 @@ interface Person {
 interface Sharing {
   owner: string;
   people: Person[];
-  general: { access: Access; role: GeneralRole };
+  general: { access: Access; role: GeneralRole; expires_at: string | null };
   url: string;
 }
 
@@ -35,6 +35,21 @@ const ROLES = [
   ["editor", "Editor"],
 ] as const;
 const ACCESS = { private: [Lock, "Private"], workspace: [Building2, "Workspace"], anyone: [Globe, "Anyone with the link"] } as const;
+const EXPIRY = [
+  [0, "Never expires"],
+  [1, "Expires in 1 day"],
+  [7, "Expires in 7 days"],
+  [30, "Expires in 30 days"],
+  [90, "Expires in 90 days"],
+] as const;
+
+/** When the link stops opening for general access, in one line. */
+function expiry(at: string | null): string {
+  if (!at) return "The link does not expire.";
+  const d = new Date(at);
+  const when = d.toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" });
+  return d.getTime() <= Date.now() ? `The link expired on ${when}: only people with access can open it.` : `The link expires on ${when}.`;
+}
 
 /** Who the link opens for, in one line. */
 function hint({ access, role }: Sharing["general"]): string {
@@ -71,7 +86,8 @@ export function ShareDeck({ deck_id, onClose }: { deck_id: string; onClose: () =
     }
   };
   const target = (p: Person) => ({ deck_id, principal_type: p.principal_type, principal: p.principal });
-  const general = (g: Partial<Sharing["general"]>) => data && act(() => tool("set_general_access", { deck_id, ...data.general, ...g }));
+  const general = (g: Partial<Pick<Sharing["general"], "access" | "role">> & { expires_in_days?: number }) =>
+    data && act(() => tool("set_general_access", { deck_id, access: data.general.access, role: data.general.role, ...g }));
 
   function add(e: FormEvent) {
     e.preventDefault();
@@ -192,10 +208,28 @@ export function ShareDeck({ deck_id, onClose }: { deck_id: string; onClose: () =
                     <option value="commenter">{t("Can comment")}</option>
                   </select>
                 )}
+                {data.general.access !== "private" && (
+                  <select
+                    className="cq-select"
+                    aria-label="Link expiry"
+                    value=""
+                    onChange={(e) => void general({ expires_in_days: Number(e.target.value) })}
+                  >
+                    <option value="" disabled>
+                      Change expiry…
+                    </option>
+                    {EXPIRY.map(([d, l]) => (
+                      <option key={d} value={d}>
+                        {l}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
               <p className="cq-hint">
                 <AccessIcon size={14} /> {hint(data.general)}
               </p>
+              {data.general.access !== "private" && <p className="cq-hint">{expiry(data.general.expires_at)}</p>}
               <div className="cq-row-actions">
                 <Button
                   variant="outline"

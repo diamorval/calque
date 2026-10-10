@@ -17,6 +17,7 @@ import { discovery, gate, identityOf, userOf, type AuthConfig } from "./auth.ts"
 import { Conflict } from "./decks.ts";
 import { EngineError, REPO } from "./engine.ts";
 import { attachment, MAX_UPLOAD, saveFile, ticketUser, TooLarge } from "./files.ts";
+import { imageFile } from "./images.ts";
 import { librarySlide } from "./library.ts";
 import { buildServer, UI_HTML } from "./mcp.ts";
 import { InvalidModel, isAdmin } from "./models.ts";
@@ -571,6 +572,21 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
     try {
       const png = await librarySlide(app, user, param(c, "id"));
       return new Response(Readable.toWeb(createReadStream(png)) as ReadableStream, { headers: { "content-type": "image/png", "cache-control": "no-cache" } });
+    } catch (e) {
+      return fail(c, e);
+    }
+  });
+
+  // An image library image (image_library_list's image_url), for whoever may see it. Sandboxed:
+  // an SVG opened on its own runs no script.
+  http.get("/api/library/images/:id", async (c) => {
+    const user = await who(c);
+    if (user instanceof Response) return user;
+    try {
+      const f = await imageFile(app, user, param(c, "id"));
+      return new Response(Readable.toWeb(createReadStream(f.path)) as ReadableStream, {
+        headers: { "content-type": f.type, "cache-control": "no-cache", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox", "x-content-type-options": "nosniff" },
+      });
     } catch (e) {
       return fail(c, e);
     }

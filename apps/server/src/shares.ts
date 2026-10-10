@@ -8,8 +8,9 @@ import { Forbidden, NotFound, type User } from "./packs.ts";
 /** Deck sharing, artifact style: people and teams with a role (deck_shares), and one share link
 per deck (`/decks/:id?k=<link_key>`) whose general access says who else it opens for: nobody
 (private), anyone signed in who sees the deck's pack (workspace), or anybody (anyone), with the
-general role (viewer or commenter). Resetting the link rotates its key: every copy of the old one
-stops working. The owner manages all of it; an admin (CALQUE_ADMIN_TEAM) may only see who has
+general role (viewer or commenter), until an optional expiry (CALQUE_LINK_DAYS sets the default when
+a deck stops being private): past it the link opens for people with access only. Resetting the link
+rotates its key: every copy of the old one stops working. The owner manages all of it; an admin (CALQUE_ADMIN_TEAM) may only see who has
 access, transfer the deck, set it Private and reset its link, never read it. Every change is logged
 in the audit log (audit.ts). */
 
@@ -29,10 +30,13 @@ interface SharingRow {
   general_access: GeneralAccess;
   general_role: GeneralRole;
   link_key: string;
+  link_expires_at: Date | string | null;
 }
 
 export const audit = (db: Db, deckId: string, actor: User, action: string, detail: Record<string, unknown>) =>
   log(db, actor, action, "deck", deckId, detail);
+
+const iso = (d: Date | string | null) => (d ? new Date(d).toISOString() : null);
 
 function principalOf(type: PrincipalType, principal: string): string {
   const p = principal.trim();
@@ -43,7 +47,7 @@ function principalOf(type: PrincipalType, principal: string): string {
 /** Deck `id` for its owner, or for a signed-in admin; the caller's way in. */
 async function ownerOrAdmin(decks: Decks, user: User, id: string): Promise<SharingRow & { owns: boolean }> {
   const { rows } = await decks.db
-    .query<SharingRow>("select id, owner, pack_id, general_access, general_role, link_key from decks where id = $1", [id])
+    .query<SharingRow>("select id, owner, pack_id, general_access, general_role, link_key, link_expires_at from decks where id = $1", [id])
     .catch(() => ({ rows: [] as SharingRow[] }));
   const row = rows[0];
   const role = row ? await access(decks.db, user, row) : null;
@@ -90,20 +94,29 @@ export async function shares(decks: Decks, user: User, id: string) {
   return {
     owner: deck.owner,
     people: await people(decks.db, id),
-    general: { access: deck.general_access, role: deck.general_role },
+    general: { access: deck.general_access, role: deck.general_role, expires_at: iso(deck.link_expires_at) },
     ...(deck.owns ? { link_key: deck.link_key } : {}),
   };
 }
 
-/** Who the share link opens for besides people with access, and with which role. The owner; an
-admin may only make the deck private. */
-export async function setGeneralAccess(decks: Decks, user: User, id: string, general: GeneralAccess, role: GeneralRole) {
+/** Days a share link opens for general access by default (CALQUE_LINK_DAYS); undefined: no expiry. */
+export function linkDays(env = process.env): number | undefined {
+  const d = Number(env.CALQUE_LINK_DAYS);
+  return d > 0 ? d : undefined;
+}
+
+/** Who the share link opens for besides people with access, with which role, and until when:
+`expiresInDays` days from now (0: never); unset, the expiry stays, except that a private deck opened
+up gets the default (linkDays). The owner; an admin may only make the deck private. */
+export async function setGeneralAccess(decks: Decks, user: User, id: string, general: GeneralAccess, role: GeneralRole, expiresInDays?: number) {
   const deck = await ownerOrAdmin(decks, user, id);
   if (!deck.owns && general !== "private") throw new Forbidden(`owner access needed on deck ${id}: an admin may only make it private`);
   const r = general === "private" ? deck.general_role : role;
-  await decks.db.query("update decks set general_access = $2, general_role = $3 where id = $1", [id, general, r]);
-  await audit(decks.db, id, user, "access", { from: deck.general_access, access: general, role: r });
-  return { access: general, role: r };
+  const days = expiresInDays ?? (general !== "private" && deck.general_access === "private" ? (linkDays() ?? 0) : undefined);
+  const until = days === undefined ? iso(deck.link_expires_at) : days > 0 ? new Date(Date.now() + days * 86_400_000).toISOString() : null;
+  await decks.db.query("update decks set general_access = $2, general_role = $3, link_expires_at = $4 where id = $1", [id, general, r, until]);
+  await audit(decks.db, id, user, "access", { from: deck.general_access, access: general, role: r, expires_at: until });
+  return { access: general, role: r, expires_at: until };
 }
 
 /** A new share link key: every copy of the old link stops working. The owner or an admin. */

@@ -5,7 +5,7 @@ import type { User } from "./packs.ts";
 the content itself (no DeckSpec, prompt or key): ids, titles, versions and notes. Rows outlive what
 they name, so a deleted deck's history stays. Admins read it (GET /api/admin/audit). */
 
-export type Target = "deck" | "pack" | "model" | "user" | "library";
+export type Target = "deck" | "pack" | "model" | "user" | "library" | "library_image";
 
 export interface AuditRow {
   id: number;

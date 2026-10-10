@@ -28,6 +28,7 @@ test("alice shares a deck: bob as viewer, anyone with the link may comment, then
   await expect(general).toContainText("Only you and the people with access can open the link.");
   await general.getByRole("combobox", { name: "General access" }).selectOption({ label: "Anyone with the link" });
   await general.getByRole("combobox", { name: "Link role" }).selectOption({ label: "Can comment" });
+  await expect(general.getByText("The link does not expire.")).toBeVisible();
   await expect(general).toContainText("Anyone who has the link can comment, no sign-in needed.");
   await general.getByRole("button", { name: "Copy link" }).click();
   await expect(dialog.getByRole("status")).toHaveText("Link copied.");

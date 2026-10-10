@@ -51,7 +51,7 @@ export async function copyFile(db: Db, data: string, user: User, id: string): Pr
 
 export class TooLarge extends Error {}
 
-const isImage = (f: StoredFile) => f.type.startsWith("image/") || /\.(png|jpe?g|gif|bmp|tiff?|webp|svg)$/i.test(f.name);
+export const isImage = (f: Pick<StoredFile, "name" | "type">) => f.type.startsWith("image/") || /\.(png|jpe?g|gif|bmp|tiff?|webp|svg)$/i.test(f.name);
 
 /** An attached file as the model sees it: an image to place by reference, or a document's text. */
 export async function attachment(db: Db, data: string, user: User, id: string) {

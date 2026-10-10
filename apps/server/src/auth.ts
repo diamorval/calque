@@ -10,7 +10,7 @@ import {
 } from "@modelcontextprotocol/server";
 import type { Identity } from "./access.ts";
 import type { User } from "./packs.ts";
-import { teamsOf, type TeamsConfig } from "./teams.ts";
+import { resolveTeams, type TeamsConfig } from "./teams.ts";
 
 /** OAuth resource server: tokens come from an external authorization server (Keycloak, Entra ID). */
 export interface AuthConfig {
@@ -40,7 +40,8 @@ export function verifier(cfg: AuthConfig, metadata: () => Promise<OAuthMetadata>
             names: namesOf(payload),
             // shown as the author of versions and comments (S18); the sub stays the id
             ...(typeof payload.name === "string" ? { name: payload.name } : {}),
-            teams: teamsOf(payload, { ...cfg.teams, claim: cfg.teamsClaim }),
+            // over the Entra group overage, read from Graph (app-only: this token is for Calque)
+            teams: await resolveTeams(payload, { ...cfg.teams, claim: cfg.teamsClaim }),
           },
         };
       } catch (e) {

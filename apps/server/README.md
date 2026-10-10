@@ -27,16 +27,20 @@ node apps/server/src/stdio.ts          # stdio, for a local MCP client (bridge t
 | `CALQUE_TEAMS_MAP_ONLY` | unset | `1`: drop the groups the map does not name |
 | `CALQUE_OIDC_CLIENT_ID` | the audience | the web app's OIDC client (authorization code + PKCE) |
 | `CALQUE_OIDC_CLIENT_SECRET` | unset: public client | its secret, for a confidential client |
+| `CALQUE_OIDC_SCOPE` | `openid profile email` | scopes the web sign-in asks for; with Entra, add `GroupMember.Read.All` to read the groups over the overage with the sign-in's own token |
+| `CALQUE_ENTRA_TENANT` / `_CLIENT_ID` / `_CLIENT_SECRET` | unset | an Entra app (application permission `GroupMember.Read.All`, admin consent) that reads a user's groups from Graph when the token leaves them out (group overage), on both doors (see [Microsoft Entra ID](#microsoft-entra-id)) |
+| `CALQUE_ENTRA_AUTHORITY` / `_GRAPH` | `https://login.microsoftonline.com` / `https://graph.microsoft.com/v1.0` | sign-in and Graph endpoints for those lookups (national clouds, tests) |
 | `CALQUE_SECRET` | random, in `$CALQUE_DATA/secret` | seals model API keys and Microsoft 365 refresh tokens at rest (AES-256-GCM) and sessions: required when `CALQUE_OIDC_ISSUER` is set (the server refuses to start without it) |
 | `CALQUE_ADMIN_TEAM` | `calque-admins` | team allowed to configure AI models, to manage every brand pack (seeded ones included) and, on any deck, see who has access, make it private, reset its link and transfer it (never to read it) |
 | `CALQUE_LLM_MODEL` | unset | preconfigured gateway, saved as model `env`, default unless another is set |
 | `CALQUE_LLM_PROVIDER` / `_BASE_URL` / `_API_KEY` | `openai-compatible` / – / – | the gateway's provider, endpoint and key |
 | `CALQUE_LLM_HEADERS` | unset | JSON object of extra request headers (e.g. `{"Ocp-Apim-Subscription-Key": "…"}`), sealed at rest |
 | `CALQUE_LLM_AZURE_RESOURCE` / `_API_VERSION` / `_MANAGED_IDENTITY` | – / `v1` / – | Azure OpenAI (`CALQUE_LLM_PROVIDER=azure`, the model is the deployment): resource name, `api-version`, `1` to sign in with the managed identity |
-| `CALQUE_M365_CLIENT_ID` | unset: no Microsoft 365 | the Entra app registration that lets users connect OneDrive and SharePoint (see [Microsoft 365](#microsoft-365-onedrive-and-sharepoint)) |
+| `CALQUE_M365_CLIENT_ID` | unset: no Microsoft 365 | the Entra app registration that lets users connect OneDrive and SharePoint (see [Microsoft 365](#microsoft-365-onedrive-sharepoint-and-teams)) |
 | `CALQUE_M365_CLIENT_SECRET` | unset: public client | its secret, for a confidential (Web) client |
 | `CALQUE_M365_TENANT` | `organizations` | tenant id or domain to sign in against (`organizations`: any work account) |
 | `CALQUE_M365_AUTHORITY` / `_GRAPH` | `https://login.microsoftonline.com` / `https://graph.microsoft.com/v1.0` | sign-in and Graph endpoints (national clouds, tests) |
+| `CALQUE_LINK_DAYS` | unset: no expiry | days a deck's share link keeps opening for general access when a private deck is opened up (`set_general_access`); the owner may change it per deck |
 | `CALQUE_RETENTION_DAYS` | unset: keep everything | delete decks untouched for that many days and uploads older than that, at start and daily (the audit log is kept) |
 | `CALQUE_RATE_LIMIT` | on | `off` lifts the per-minute limits on `/auth/*` (30 per address), agent runs (30 per user) and model tests (10 per user) |
 | `CALQUE_TRUST_PROXY` | unset | `1`: rate-limit by the first `X-Forwarded-For` hop (behind your reverse proxy) instead of the socket address |
@@ -135,6 +139,19 @@ and imported slide copied with it), so editing or deleting the source deck leave
 `CALQUE_RETENTION_DAYS` keeps it. `GET /api/library/:id/slide.png` is its thumbnail. The workflows
 (core/workflows) look there for proof points before naming a gap.
 
+### Image library
+
+Next to it, each pack has a library of approved images (photography, client logos, product
+shots). `image_library_add` takes an image the caller uploaded (`file_id`: `upload_url`,
+`POST /api/files`, `m365_import`) with a title and tags, copied into the library (a file owned by
+`library:<pack id>`, kept by `CALQUE_RETENTION_DAYS`); the pack's owner or an admin approves it
+(`image_library_review`), their own additions approved at once. Everyone who sees the pack searches
+the approved images (`image_library_list`: words of the title or tags, `tags`) and places one in a
+picture slot as its `ref` (`"image": "file:<file_id>"`). On save the deck gets its own copy, so a
+pending image is never placed and removing an image (`image_library_review` `remove`, which deletes
+its file) never breaks a deck. `GET /api/library/images/:id` serves the image (sandboxed). In the
+web app: the *Images* section of the editor's Library tab.
+
 ### Sharing
 
 Artifact style: people with access, and one share link per deck. Roles, each including the ones
@@ -151,10 +168,14 @@ more than their role answers 403. The caller's role is the best of the ones belo
   the deck. Its **general access** (`set_general_access {access, role}`) says who else it opens for:
   `private` (default: only the owner and people with access, signed in), `workspace` (anyone signed
   in who sees the deck's pack gets the general role) or `anyone` (no sign-in, no pack gate), with the
-  general role `viewer` or `commenter`, never editor. No expiry: `reset_link` rotates the key, and
+  general role `viewer` or `commenter`, never editor. **Expiry**: `set_general_access
+  {expires_in_days}` (0: none) makes the link stop opening for general access after that many days
+  (people with access still open it; a holder of the expired link gets 403 "share link expired");
+  when a private deck opens up without it, `CALQUE_LINK_DAYS` sets the default (unset: no expiry).
+  The Share dialog shows the date and changes it. `reset_link` rotates the key, and
   every copy of the old link stops working at once. Comments through an anonymous link are signed
-  `guest`. `list_shares` returns the owner, the people, the general access and, for the owner, the
-  link `url`.
+  `guest`. `list_shares` returns the owner, the people, the general access (with `expires_at`) and, for the
+  owner, the link `url`.
 - **URL tokens** (internal): the URLs in tool results (`preview_url`, `image_url`, `download_url`)
   and the MCP App's PNGs must work with no browser session, so they carry `?t=`, a per-user token
   (HMAC with `CALQUE_SECRET`, 24 h, bound to the user and the deck). It is no grant: every request
@@ -238,10 +259,10 @@ Files are capped at 50 MB, stored under `$CALQUE_DATA/uploads/<file_id>`, and us
 uploader. `{base64}` (and `{path}` on a stdio server) still work.
 
 Outputs: `export_pptx` (`/decks/:id/deck.pptx`) and `export_pdf` (`/decks/:id/deck.pdf`, rendered by
-LibreOffice with the pack's fonts, like the previews; one file per version), and `m365_save` to
-OneDrive or SharePoint (below).
+LibreOffice with the pack's fonts, like the previews; one file per version), `m365_save` to
+OneDrive or SharePoint and `m365_share_teams` to a Teams channel or chat (below).
 
-### Microsoft 365: OneDrive and SharePoint
+### Microsoft 365: OneDrive, SharePoint and Teams
 
 With `CALQUE_M365_CLIENT_ID` set, each user connects their own Microsoft 365 account once, then:
 
@@ -253,14 +274,24 @@ With `CALQUE_M365_CLIENT_ID` set, each user connects their own Microsoft 365 acc
 - `m365_save` saves a deck as PPTX or PDF into a folder (default: their OneDrive root) through an
   upload session, never overwriting (a taken name gets a new one), and returns its `web_url`. A
   PPTX with lint ERRORs takes a `reason`, recorded like `export_pptx`.
+- `m365_teams` lists the user's joined teams, a team's channels (`team_id`) or their recent chats
+  (`chats: true`); `m365_share_teams` posts, as the user, a message with the deck's link in a
+  channel (`team_id`, `channel_id`) or a chat (`chat_id`), with their `message` and the saved file's
+  `web_url` (`file_url`) if given. The link is the share link when the caller owns the deck and its
+  general access is open (not expired); otherwise the app's page of the deck (`/d/:id`), which opens
+  for the people with access only, and the result says so. Logged as `share_teams`.
 
 In the web app: *From Microsoft 365* in the Import PPTX dialog and next to the chat's attach button,
-and *Save to SharePoint* next to Export.
+*Save to SharePoint* and *Share to Teams* next to Export (and *Share to Teams* after a save, with
+the saved file's link).
 
 **Connecting.** This is separate from sign-in (which may use another issuer, and keeps no token):
 OAuth authorization code + PKCE against Entra, scopes `offline_access User.Read
-Files.ReadWrite.All Sites.Read.All` (delegated, no admin consent needed; `Files.ReadWrite.All`
-because saving into a SharePoint library is a write outside the user's OneDrive). The web app links
+Files.ReadWrite.All Sites.Read.All Team.ReadBasic.All Channel.ReadBasic.All ChannelMessage.Send
+Chat.ReadBasic ChatMessage.Send` (delegated, no admin consent needed; `Files.ReadWrite.All`
+because saving into a SharePoint library is a write outside the user's OneDrive). A user connected
+before the Teams scopes were added is asked to connect again (the refresh is refused for the new
+scopes). The web app links
 to `/auth/m365/connect?return=<path>`; an MCP client gets that URL in the tool's error, for the
 user to open in a browser (signed in to Calque first, through `/auth/login`: a bearer link could
 bind a Microsoft account to the wrong Calque user). The callback,
@@ -271,7 +302,8 @@ revoked or expired grant deletes the stored token and asks to connect again.
 
 **App registration.** In Entra, *App registrations > New registration*: redirect URI (Web)
 `<public url>/auth/m365/callback`; *API permissions* > Microsoft Graph > Delegated: `User.Read`,
-`Files.ReadWrite.All`, `Sites.Read.All`, `offline_access`; a client secret for
+`Files.ReadWrite.All`, `Sites.Read.All`, `Team.ReadBasic.All`, `Channel.ReadBasic.All`,
+`ChannelMessage.Send`, `Chat.ReadBasic`, `ChatMessage.Send`, `offline_access`; a client secret for
 `CALQUE_M365_CLIENT_SECRET`. It may be the sign-in registration with this redirect URI added.
 
 | Route | |
@@ -303,8 +335,20 @@ Entra ID works as the issuer for both doors, next to Keycloak:
    secret for `CALQUE_OIDC_CLIENT_SECRET`. *Expose an API* with a scope (e.g. `access_as_user`), and
    set `"accessTokenAcceptedVersion": 2` in the manifest so access tokens carry the v2 issuer.
 2. **Groups claim.** *Token configuration > Add groups claim*, and prefer *Groups assigned to the
-   application*: past 200 groups Entra leaves `groups` out of the token (the overage claim). Calque
-   makes no Graph call: it logs a warning naming the user, who then has no teams.
+   application*: past 200 groups Entra leaves `groups` out of the token (the overage claim,
+   `_claim_names.groups` or `hasgroups`). Calque then reads the user's groups (transitive, nested
+   groups included) from Microsoft Graph, kept 10 minutes per user:
+   - **app-only** (both doors; the MCP door's bearer token is for Calque, not Graph): set
+     `CALQUE_ENTRA_TENANT`, `CALQUE_ENTRA_CLIENT_ID`, `CALQUE_ENTRA_CLIENT_SECRET` for an app
+     registration (it may be this one) with the Graph *application* permission
+     `GroupMember.Read.All`, admin-consented; Calque calls
+     `/users/{oid}/transitiveMemberOf/microsoft.graph.group` with a client-credentials token;
+   - **delegated** (web sign-in only): add `GroupMember.Read.All` to `CALQUE_OIDC_SCOPE`
+     (`openid profile email GroupMember.Read.All`, admin consent): the sign-in's access token is
+     then a Graph token, and Calque calls `/me/transitiveMemberOf/microsoft.graph.group` with it.
+
+   With neither, or when Graph fails, Calque logs a warning naming the user, who then has no teams
+   (they still sign in).
 3. **Environment.**
 
    ```bash
@@ -320,8 +364,19 @@ Entra ID works as the issuer for both doors, next to Keycloak:
    Entra sends group object ids (GUIDs): `CALQUE_TEAMS_MAP` names them, so pack visibility reads
    `sales` rather than `3f2a…`.
 
-Limits: Entra has no dynamic client registration, so an MCP client that relies on it cannot sign in
-on its own (pre-register a client for it, or broker Entra through Keycloak). To cut a removed user's
+4. **Claude's MCP connector.** Claude (claude.ai, Desktop, Cowork) registers itself as an OAuth
+   client through dynamic client registration (DCR) unless it is given one. Entra has no DCR, so a
+   custom connector pointing at `<public url>/mcp` cannot sign in on its own. Workaround: a
+   pre-registered client. Simplest is this same app registration: under *Authentication*, add
+   Claude's OAuth callback `https://claude.ai/api/mcp/auth_callback` as a Web redirect URI, and
+   create a client secret for Claude. In Claude, *Settings > Connectors > Add custom connector*:
+   URL `<public url>/mcp` and, under *Advanced settings*, its **OAuth Client ID** (the application
+   id) and **OAuth Client Secret**. The connector then asks Entra for this API's scope, and its
+   access tokens carry the audience Calque checks (`CALQUE_OIDC_AUDIENCE`). Another MCP client
+   without DCR takes the same pre-registered client (see its documentation for where to enter it).
+   Alternatively, broker Entra through Keycloak, which supports DCR.
+
+Limits: to cut a removed user's
 access before their 8-hour cookie expires, provision the enterprise application over SCIM to
 `<public url>/scim/v2` with `CALQUE_SCIM_TOKEN` as the secret token, and map `userName` to the
 `preferred_username` (UPN) the tokens carry.
@@ -333,6 +388,7 @@ access before their 8-hour cookie expires, provision the enterprise application 
 | `GET /api/branding` | `{name, logo}` for the web chrome (`CALQUE_APP_NAME`, `CALQUE_APP_LOGO`), no sign-in needed |
 | `POST /api/files` | multipart `file` (50 MB max, else 413) → `{file_id, name, size, type}`, owned by the caller; `?ticket=` from `upload_url` instead of credentials |
 | `GET /api/library/:id/slide.png` | a slide library entry's image, for whoever may see the entry |
+| `GET /api/library/images/:id` | an image library image, for whoever may see it (sandboxed CSP) |
 | `POST /api/packs/drafts` | multipart `template` (.pptx or .potx), `id`, `name`, optional `tokens` (tokens.json): extracted draft (manifest with guessed roles and the fonts/colours the slides use, resolved colours and fonts to review, archetype names, one PNG per template slide) |
 | `POST /api/packs/drafts/:id/fonts` | multipart `font` (.ttf, .otf): its family is allowed by lint (`lint.extra_fonts`) on publish |
 | `POST /api/packs/drafts/:id/template` | multipart `template`: a new template.pptx; the map and template-bound manifest fields are re-extracted |

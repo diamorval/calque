@@ -31,7 +31,9 @@ do not fill it: signatures are cloned for identity, content slides are derived f
    reference, a client logo, a team bio, standard boilerplate), search the pack's approved slides
    with `library_list` (words of the audience's sector, function or offer; then tags). A match is
    placed with `library_insert` after `create_deck` and adapted with `patch_deck`; only when
-   nothing fits does the beat become a named gap.
+   nothing fits does the beat become a named gap. Likewise a picture slot takes an approved image
+   from the pack's image library (`image_library_list`, then its `ref` as `"image"`) before you
+   ask the user for a photo.
 2. **See what good looks like.** Read the exemplar: the moves (title length, eyebrow, where a
    number may be huge, imagery density), never the copy.
 3. **Deck type and narrative.** Name the type (pitch, proposal, debrief, internal, plenary…), the

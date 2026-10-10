@@ -1,12 +1,13 @@
 // Microsoft 365 in and out: pick a OneDrive or SharePoint file into Calque (m365_import, a file_id
-// like an upload), save a deck to a OneDrive or SharePoint folder (m365_save). Each user connects
-// their own account once; the server keeps the connection.
+// like an upload), save a deck to a OneDrive or SharePoint folder (m365_save), post its link in a
+// Teams channel or chat (m365_teams, m365_share_teams). Each user connects their own account once;
+// the server keeps the connection.
 import { Alert, AlertDescription } from "diametral-ds/alert";
 import { Button, buttonVariants } from "diametral-ds/button";
 import { DialogFooter } from "diametral-ds/dialog";
 import { Input } from "diametral-ds/input";
 import { Textarea } from "diametral-ds/textarea";
-import { ChevronRight, Cloud, ExternalLink, File as FileIcon, Folder, Globe, HardDrive, Search } from "lucide-react";
+import { ChevronRight, Cloud, ExternalLink, File as FileIcon, Folder, Globe, HardDrive, MessageSquareShare, Search } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { api, tool } from "../api.ts";
 import { t, tn } from "../i18n.ts";
@@ -205,7 +206,7 @@ export function M365Picker(props: { status: M365Status; accept: RegExp; title?: 
 }
 
 /** Save the deck as PPTX or PDF into a OneDrive or SharePoint folder; lint ERRORs ask why, as Export does. */
-export function SaveToM365(props: { status: M365Status; deck_id: string; errors: number; onClose: () => void }) {
+export function SaveToM365(props: { status: M365Status; deck_id: string; errors: number; onClose: () => void; onShareTeams?: (file_url: string) => void }) {
   const [place, setPlace] = useState<Place>(ONEDRIVE);
   const [format, setFormat] = useState<"pptx" | "pdf">("pptx");
   const [reason, setReason] = useState("");
@@ -257,6 +258,11 @@ export function SaveToM365(props: { status: M365Status; deck_id: string; errors:
             <Button variant="outline" onClick={props.onClose}>
               {t("Close")}
             </Button>
+            {saved.web_url && props.onShareTeams && (
+              <Button variant="outline" onClick={() => props.onShareTeams?.(saved.web_url as string)}>
+                <MessageSquareShare /> Share to Teams
+              </Button>
+            )}
             {saved.web_url && (
               <a className={buttonVariants()} href={saved.web_url} target="_blank" rel="noreferrer">
                 <ExternalLink /> {t("Open")}
@@ -296,6 +302,148 @@ export function SaveToM365(props: { status: M365Status; deck_id: string; errors:
             </Button>
             <Button type="submit" disabled={busy || !folder || (gate && !reason.trim())}>
               <Cloud /> {t("Save here")}
+            </Button>
+          </DialogFooter>
+        </form>
+      )}
+    </Dialog>
+  );
+}
+
+type Option = { id: string; name: string };
+
+/** Post the deck's link (and the saved file's, `file_url`) in a Teams channel or chat, as the user. */
+export function ShareToTeams(props: { status: M365Status; deck_id: string; file_url?: string | undefined; onClose: () => void }) {
+  const [kind, setKind] = useState<"channel" | "chat">("channel");
+  const [teams, setTeams] = useState<Option[] | null>(null);
+  const [team, setTeam] = useState("");
+  const [channels, setChannels] = useState<Option[] | null>(null);
+  const [channel, setChannel] = useState("");
+  const [chats, setChats] = useState<Option[] | null>(null);
+  const [chat, setChat] = useState("");
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [posted, setPosted] = useState<{ web_url: string | null; note?: string } | null>(null);
+  const fail = (e: Error) => setError(e.message);
+
+  useEffect(() => {
+    if (!props.status.connected) return;
+    if (kind === "channel" && !teams)
+      tool<{ teams: { team_id: string; name: string }[] }>("m365_teams").then((r) => setTeams(r.teams.map((t) => ({ id: t.team_id, name: t.name }))), fail);
+    if (kind === "chat" && !chats)
+      tool<{ chats: { chat_id: string; name: string }[] }>("m365_teams", { chats: true }).then((r) => setChats(r.chats.map((c) => ({ id: c.chat_id, name: c.name }))), fail);
+  }, [kind, props.status.connected]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    setChannels(null);
+    setChannel("");
+    if (team)
+      tool<{ channels: { channel_id: string; name: string }[] }>("m365_teams", { team_id: team }).then((r) => setChannels(r.channels.map((c) => ({ id: c.channel_id, name: c.name }))), fail);
+  }, [team]);
+
+  const ready = kind === "chat" ? !!chat : !!team && !!channel;
+  async function post(e: FormEvent) {
+    e.preventDefault();
+    if (!ready) return;
+    setBusy(true);
+    setError(null);
+    try {
+      setPosted(
+        await tool<{ web_url: string | null; note?: string }>("m365_share_teams", {
+          deck_id: props.deck_id,
+          ...(kind === "chat" ? { chat_id: chat } : { team_id: team, channel_id: channel }),
+          ...(message.trim() ? { message: message.trim() } : {}),
+          ...(props.file_url ? { file_url: props.file_url } : {}),
+        }),
+      );
+    } catch (err) {
+      fail(err as Error);
+    } finally {
+      setBusy(false);
+    }
+  }
+  const pick = (id: string, label: string, options: Option[] | null, value: string, set: (v: string) => void) => (
+    <Field label={label} htmlFor={id}>
+      {options ? (
+        <select id={id} className="cq-select" value={value} onChange={(e) => set(e.target.value)}>
+          <option value="" disabled>
+            {options.length ? "Choose…" : "None found"}
+          </option>
+          {options.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.name}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <Spinner label="Loading" />
+      )}
+    </Field>
+  );
+
+  if (!props.status.connected)
+    return (
+      <Dialog title="Share to Teams" onClose={props.onClose}>
+        <div className="cq-dialog-body">
+          <Connect />
+        </div>
+      </Dialog>
+    );
+  return (
+    <Dialog title="Share to Teams" onClose={props.onClose}>
+      {posted ? (
+        <>
+          <div className="cq-dialog-body">
+            <p>Posted.</p>
+            {posted.note && <p className="cq-hint">Only the people with access to the deck can open its link: share it with them first.</p>}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={props.onClose}>
+              Close
+            </Button>
+            {posted.web_url && (
+              <a className={buttonVariants()} href={posted.web_url} target="_blank" rel="noreferrer">
+                <ExternalLink /> Open in Teams
+              </a>
+            )}
+          </DialogFooter>
+        </>
+      ) : (
+        <form onSubmit={post}>
+          <div className="cq-dialog-body">
+            <div className="cq-m365-places">
+              <Button type="button" size="sm" variant={kind === "channel" ? "default" : "outline"} onClick={() => setKind("channel")}>
+                Channel
+              </Button>
+              <Button type="button" size="sm" variant={kind === "chat" ? "default" : "outline"} onClick={() => setKind("chat")}>
+                Chat
+              </Button>
+            </div>
+            {kind === "channel" ? (
+              <>
+                {pick("t-team", "Team", teams, team, setTeam)}
+                {team && pick("t-channel", "Channel", channels, channel, setChannel)}
+              </>
+            ) : (
+              pick("t-chat", "Chat", chats, chat, setChat)
+            )}
+            <Field label="Message" htmlFor="t-message">
+              <Textarea id="t-message" rows={3} maxLength={4000} value={message} placeholder="Here is the deck for Thursday's review." onChange={(e) => setMessage(e.target.value)} />
+            </Field>
+            <p className="cq-hint">The message carries the deck's link{props.file_url ? " and the saved file's" : ""}, posted as you.</p>
+            {busy && <Spinner label="Posting" />}
+            {error && (
+              <Alert variant="destructive">
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" type="button" onClick={props.onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={busy || !ready}>
+              <MessageSquareShare /> Post
             </Button>
           </DialogFooter>
         </form>

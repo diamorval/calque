@@ -127,6 +127,38 @@ describe("Microsoft 365: OneDrive and SharePoint in and out", { timeout: ENGINE_
     expect(rows.map((x) => x.detail.format)).toEqual(["pptx", "pptx", "pdf"]);
   });
 
+  it("lists teams, channels and chats, and posts the deck's link in a channel or a chat", async () => {
+    expect((await run(app, "m365_teams")).teams).toEqual([{ team_id: "team-sales", name: "Sales", description: "The sales team" }]);
+    expect((await run(app, "m365_teams", { team_id: "team-sales" })).channels.map((c: Json) => c.name)).toEqual(["General", "Deals"]);
+    expect((await run(app, "m365_teams", { chats: true })).chats).toEqual([{ chat_id: "19:chat-bob@unq.gbl.spaces", name: "Alice Martin, Bob Durand", type: "oneOnOne" }]);
+
+    const deck = (await run(app, "create_deck", { deck: acmeDeck() })).deck_id;
+    // a private deck: the app's page, which opens for the people with access only
+    const r = await run(app, "m365_share_teams", { deck_id: deck, team_id: "team-sales", channel_id: "19:deals@thread.tacv2", message: "Board deck <draft> for review" });
+    expect(r).toMatchObject({ message_id: expect.stringMatching(/^msg-/), web_url: expect.stringMatching(/^https:\/\/teams\.test\//), url: `http://calque.test/d/${deck}` });
+    expect(r.note).toMatch(/people with access/);
+    const posted = graph.messages.at(-1);
+    expect(posted?.to).toBe("/teams/team-sales/channels/19:deals@thread.tacv2/messages");
+    expect(posted?.body.contentType).toBe("html");
+    expect(posted?.body.content).toContain("Board deck &#60;draft&#62; for review");
+    expect(posted?.body.content).toContain(`<a href="http://calque.test/d/${deck}">${acmeDeck().title}</a>`);
+
+    // general access open: the share link, and the saved file's link
+    const link = (await run(app, "set_general_access", { deck_id: deck, access: "workspace" })) && (await run(app, "list_shares", { deck_id: deck })).url;
+    const saved = await run(app, "m365_save", { deck_id: deck, drive_id: "sales-docs" });
+    const c = await run(app, "m365_share_teams", { deck_id: deck, chat_id: "19:chat-bob@unq.gbl.spaces", file_url: saved.web_url });
+    expect(c.url).toBe(link);
+    expect(c).not.toHaveProperty("note");
+    expect(graph.messages.at(-1)?.to).toBe("/chats/19:chat-bob@unq.gbl.spaces/messages");
+    expect(graph.messages.at(-1)?.body.content).toContain(`File: <a href="${saved.web_url}">${saved.name}</a>`);
+
+    await expect(run(app, "m365_share_teams", { deck_id: deck, team_id: "team-sales" })).rejects.toThrow(/post where/);
+    await expect(run(app, "m365_share_teams", { deck_id: deck, team_id: "team-sales", channel_id: "nope" })).rejects.toThrow(/Channel not found/);
+    expect(() => toolNamed("m365_share_teams")?.input.parse({ deck_id: deck, chat_id: "x", file_url: "javascript:alert(1)" })).toThrow();
+    const { rows } = await app.db.query<Json>("select detail from audit where action = 'share_teams' and target_id = $1", [deck]);
+    expect(rows.map((x) => x.detail.link)).toEqual(["app", "share_link"]);
+  });
+
   it("refreshes the access token from the stored refresh token, and asks to reconnect once it is revoked", async () => {
     const fresh = new M365(app.db, app.secret, app.publicUrl, cfg); // a restart: no access token cached
     app.m365 = fresh;
