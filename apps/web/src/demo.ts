@@ -60,6 +60,20 @@ export async function startDemo() {
       },
     ];
 
+  const shares = new Map<string, Json>();
+  const link = (id: string) =>
+    `${location.origin}${BASE}/decks/${id}?k=${Math.random().toString(36).slice(2)}`;
+  const sharing = (id: string): Json => {
+    if (!shares.has(id))
+      shares.set(id, {
+        owner: "local",
+        people: [],
+        general: { access: "private", role: "viewer" },
+        url: link(id),
+      });
+    return shares.get(id) as Json;
+  };
+
   // method + path pattern -> answer; the request body is parsed JSON, or the FormData of an upload
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const routes: [RegExp, (m: string[], b: any) => unknown][] = [
@@ -193,6 +207,40 @@ export async function startDemo() {
         };
         deck.open_comments.push(comment);
         return { comment };
+      },
+    ],
+    // sharing, in memory: people, general access and the share link of each deck
+    [/^POST \/api\/tools\/list_shares$/, (_, b) => sharing(b.deck_id)],
+    [
+      /^POST \/api\/tools\/share_deck$/,
+      (_, b) => {
+        const s = sharing(b.deck_id);
+        s.people = s.people.filter((p: Json) => p.principal !== b.principal);
+        s.people.push({ principal_type: b.principal_type, principal: b.principal, role: b.role });
+        return { principal_type: b.principal_type, principal: b.principal, role: b.role };
+      },
+    ],
+    [
+      /^POST \/api\/tools\/unshare_deck$/,
+      (_, b) => {
+        const s = sharing(b.deck_id);
+        s.people = s.people.filter((p: Json) => p.principal !== b.principal);
+        return { principal_type: b.principal_type, principal: b.principal };
+      },
+    ],
+    [
+      /^POST \/api\/tools\/set_general_access$/,
+      (_, b) => {
+        sharing(b.deck_id).general = { access: b.access, role: b.role ?? "viewer" };
+        return sharing(b.deck_id).general;
+      },
+    ],
+    [
+      /^POST \/api\/tools\/reset_link$/,
+      (_, b) => {
+        const s = sharing(b.deck_id);
+        s.url = link(b.deck_id);
+        return { deck_id: b.deck_id, url: s.url };
       },
     ],
     // an imported file opens a deck the engine built earlier on that pack

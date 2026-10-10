@@ -17,9 +17,9 @@ import { attachment, MAX_UPLOAD, saveFile, ticketUser, TooLarge } from "./files.
 import { buildServer, UI_HTML } from "./mcp.ts";
 import { InvalidModel, isAdmin } from "./models.ts";
 import { addFont, draftDir, draftPack, editPack, Forbidden, NotFound, publishDraft, setVisibility, type User } from "./packs.ts";
-import { previewGuest } from "./preview.ts";
+import { tokenUser } from "./preview.ts";
 import type { Sessions } from "./session.ts";
-import { adminLinks, live, revokeLink, transfer } from "./shares.ts";
+import { resetLink, setGeneralAccess, shares, transfer } from "./shares.ts";
 import { TOOLS, toolNamed, type App } from "./tools.ts";
 
 const LOCAL: User = { id: "local", name: "Local", teams: [], local: true };
@@ -80,14 +80,17 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
     return a instanceof Response ? a : userOf(a);
   }
 
-  /** A preview route's caller: a guest through the deck's signed link (`?t=`), else `who`, who must own the deck.
-  Without auth (local only) the link is not checked. */
+  /** A preview route's caller: the user a per-user URL token (`?t=`) was minted for; else, with the
+  deck's share link key (`?k=`), the signed-in caller or an anonymous one presenting it; else `who`.
+  Their access to the deck is checked as usual. Without auth (local only) neither is checked. */
   async function viewer(c: Context): Promise<User | Response> {
+    if (!check) return who(c);
     const t = c.req.query("t");
-    if (!t || !check) return who(c);
-    const guest = previewGuest(app.secret, t, param(c, "id"));
-    if (guest?.guest && (await live(app.db, guest.guest.link, param(c, "id")))) return guest;
-    return c.json({ error: "Unauthorized", message: "preview link expired, revoked or invalid" }, 401);
+    if (t) return tokenUser(app.secret, t, param(c, "id")) ?? c.json({ error: "Unauthorized", message: "preview link expired or invalid" }, 401);
+    const k = c.req.query("k");
+    if (!k) return who(c);
+    const user = await who(c);
+    return user instanceof Response ? { id: "guest", teams: [], anonymous: true, key: k } : { ...user, key: k };
   }
 
   const mcp = createMcpHandler(({ authInfo }) => buildServer(app, userOf(authInfo)));
@@ -172,14 +175,28 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
 
   http.get("/api/decks", route(async (_, user) => ({ decks: await app.decks.list(user) })));
 
-  // Admins (CALQUE_ADMIN_TEAM): a deck's links (no URL) and its owner, never its content.
+  // Admins (CALQUE_ADMIN_TEAM): who has access to a deck (never its link nor its content), make it
+  // private, reset its link, transfer it.
   const admin = (fn: (c: Context, user: User) => Promise<unknown>) =>
     route(async (c, user) => {
-      if (user.guest || !isAdmin(user)) throw new Forbidden("admins only");
+      if (!isAdmin(user)) throw new Forbidden("admins only");
       return fn(c, user);
     });
-  http.get("/api/admin/decks/:id/links", admin(async (c, user) => ({ links: await adminLinks(app.decks, user, param(c, "id")) })));
-  http.post("/api/admin/decks/:id/links/:link/revoke", admin((c, user) => revokeLink(app.decks, user, param(c, "id"), param(c, "link"))));
+  http.get(
+    "/api/admin/decks/:id/access",
+    admin(async (c, user) => {
+      const { owner, people, general } = await shares(app.decks, user, param(c, "id")); // never the link, even to an owner
+      return { owner, people, general };
+    }),
+  );
+  http.post("/api/admin/decks/:id/private", admin((c, user) => setGeneralAccess(app.decks, user, param(c, "id"), "private", "viewer")));
+  http.post(
+    "/api/admin/decks/:id/reset-link",
+    admin(async (c, user) => {
+      await resetLink(app.decks, user, param(c, "id"));
+      return { deck_id: param(c, "id"), reset: true };
+    }),
+  );
   http.post(
     "/api/admin/decks/:id/transfer",
     admin(async (c, user) => transfer(app.decks, user, param(c, "id"), z.object({ to: z.string().min(1) }).parse(await body(c)).to)),

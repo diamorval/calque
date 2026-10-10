@@ -1,15 +1,18 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import type { Db } from "./db.ts";
-import { access, type Decks, type Role } from "./decks.ts";
+import { access, type Decks, type GeneralAccess, type Role } from "./decks.ts";
 import { isAdmin } from "./models.ts";
 import { Forbidden, NotFound, type User } from "./packs.ts";
-import { PREVIEW_ROLE, PREVIEW_TTL_S, type Link } from "./preview.ts";
 
-/** Deck sharing: grants to a user, a team or the whole workspace (deck_shares), guest links
-(deck_links), ownership transfer. The owner manages them; an admin (CALQUE_ADMIN_TEAM) may only
-transfer a deck and revoke its links, never read it. Every change is logged in deck_audit. */
+/** Deck sharing, artifact style: people and teams with a role (deck_shares), and one share link
+per deck (`/decks/:id?k=<link_key>`) whose general access says who else it opens for: nobody
+(private), anyone signed in who sees the deck's pack (workspace), or anybody (anyone), with the
+general role (viewer or commenter). Resetting the link rotates its key: every copy of the old one
+stops working. The owner manages all of it; an admin (CALQUE_ADMIN_TEAM) may only see who has
+access, transfer the deck, set it Private and reset its link, never read it. Every change is logged
+in deck_audit. */
 
-export type PrincipalType = "user" | "team" | "workspace";
+export type PrincipalType = "user" | "team";
 export interface Share {
   principal_type: PrincipalType;
   principal: string;
@@ -17,33 +20,39 @@ export interface Share {
   granted_by: string;
   created_at: string;
 }
-
-const HOUR = 3600;
-const WORKSPACE = "*";
+export type GeneralRole = "viewer" | "commenter";
+interface SharingRow {
+  id: string;
+  owner: string;
+  pack_id: string;
+  general_access: GeneralAccess;
+  general_role: GeneralRole;
+  link_key: string;
+}
 
 async function audit(db: Db, deckId: string, actor: User, action: string, detail: Record<string, unknown>) {
   await db.query("insert into deck_audit (deck_id, actor, action, detail) values ($1, $2, $3, $4)", [deckId, actor.id, action, JSON.stringify(detail)]);
 }
 
-/** Who a grant names; the workspace has no name. */
-function principalOf(type: PrincipalType, principal: string | undefined): string {
-  if (type === "workspace") return WORKSPACE;
-  const p = principal?.trim();
+function principalOf(type: PrincipalType, principal: string): string {
+  const p = principal.trim();
   if (!p) throw new Error(`a ${type} share needs the ${type}'s id`);
   return p;
 }
 
-/** Deck `id` for its owner, or for an admin who is not a guest; the caller's way in. */
-async function ownerOrAdmin(decks: Decks, user: User, id: string) {
-  const { rows } = await decks.db.query<{ id: string; owner: string; pack_id: string }>("select id, owner, pack_id from decks where id = $1", [id]).catch(() => ({ rows: [] }));
+/** Deck `id` for its owner, or for a signed-in admin; the caller's way in. */
+async function ownerOrAdmin(decks: Decks, user: User, id: string): Promise<SharingRow & { owns: boolean }> {
+  const { rows } = await decks.db
+    .query<SharingRow>("select id, owner, pack_id, general_access, general_role, link_key from decks where id = $1", [id])
+    .catch(() => ({ rows: [] as SharingRow[] }));
   const row = rows[0];
   const role = row ? await access(decks.db, user, row) : null;
-  if (row && (role === "owner" || (!user.guest && isAdmin(user)))) return row;
+  if (row && (role === "owner" || (!user.anonymous && isAdmin(user)))) return { ...row, owns: role === "owner" };
   if (row && role) throw new Forbidden(`owner access needed on deck ${id}`);
   throw new NotFound(`no deck ${JSON.stringify(id)}`);
 }
 
-export async function share(decks: Decks, user: User, id: string, type: PrincipalType, principal: string | undefined, role: Role) {
+export async function share(decks: Decks, user: User, id: string, type: PrincipalType, principal: string, role: Role) {
   const deck = await decks.deck(user, id, "owner");
   const p = principalOf(type, principal);
   if (role === "owner") throw new Error("a deck has one owner: transfer it instead");
@@ -57,7 +66,7 @@ export async function share(decks: Decks, user: User, id: string, type: Principa
   return { principal_type: type, principal: p, role };
 }
 
-export async function unshare(decks: Decks, user: User, id: string, type: PrincipalType, principal: string | undefined) {
+export async function unshare(decks: Decks, user: User, id: string, type: PrincipalType, principal: string) {
   await decks.deck(user, id, "owner");
   const p = principalOf(type, principal);
   const { rows } = await decks.db.query("delete from deck_shares where deck_id = $1 and principal_type = $2 and principal = $3 returning role", [id, type, p]);
@@ -66,78 +75,44 @@ export async function unshare(decks: Decks, user: User, id: string, type: Princi
   return { principal_type: type, principal: p };
 }
 
-/** The deck's live links (not revoked, not expired), newest first. */
-export async function links(db: Db, id: string): Promise<Link[]> {
-  const { rows } = await db.query<Link>(
-    "select * from deck_links where deck_id = $1 and revoked_at is null and expires_at > now() order by created_at desc",
+async function people(db: Db, id: string): Promise<Share[]> {
+  const { rows } = await db.query<Share>(
+    "select principal_type, principal, role, granted_by, created_at from deck_shares where deck_id = $1 order by created_at",
     [id],
   );
   return rows;
 }
 
-/** Whether guest link `linkId` of deck `deckId` still opens it (stored, not revoked, not expired). */
-export async function live(db: Db, linkId: string, deckId: string): Promise<boolean> {
-  const { rows } = await db
-    .query("select 1 from deck_links where id = $1 and deck_id = $2 and revoked_at is null and expires_at > now()", [linkId, deckId])
-    .catch(() => ({ rows: [] })); // a malformed id
-  return rows.length > 0;
-}
-
-/** Grants and live links of a deck, owner only. */
+/** Who has access to deck `id`: its owner, the people and teams it is shared with, its general
+access. With its link key for the owner; without it for an admin. */
 export async function shares(decks: Decks, user: User, id: string) {
-  const deck = await decks.deck(user, id, "owner");
-  const { rows } = await decks.db.query<Share>(
-    "select principal_type, principal, role, granted_by, created_at from deck_shares where deck_id = $1 order by created_at",
-    [id],
-  );
-  return { owner: deck.owner, shares: rows, links: await links(decks.db, id) };
+  const deck = await ownerOrAdmin(decks, user, id);
+  return {
+    owner: deck.owner,
+    people: await people(decks.db, id),
+    general: { access: deck.general_access, role: deck.general_role },
+    ...(deck.owns ? { link_key: deck.link_key } : {}),
+  };
 }
 
-/** A guest link on purpose: `role` viewer or commenter, for `days`. */
-export async function createLink(decks: Decks, user: User, id: string, role: "viewer" | "commenter", days: number, label?: string) {
-  await decks.deck(user, id, "owner");
-  const link = await insertLink(decks.db, user, id, role, new Date(Date.now() + days * 24 * HOUR * 1000), false, label);
-  await audit(decks.db, id, user, "link", { link: link.id, role, expires_at: link.expires_at });
-  return link;
+/** Who the share link opens for besides people with access, and with which role. The owner; an
+admin may only make the deck private. */
+export async function setGeneralAccess(decks: Decks, user: User, id: string, general: GeneralAccess, role: GeneralRole) {
+  const deck = await ownerOrAdmin(decks, user, id);
+  if (!deck.owns && general !== "private") throw new Forbidden(`owner access needed on deck ${id}: an admin may only make it private`);
+  const r = general === "private" ? deck.general_role : role;
+  await decks.db.query("update decks set general_access = $2, general_role = $3 where id = $1", [id, general, r]);
+  await audit(decks.db, id, user, "access", { from: deck.general_access, access: general, role: r });
+  return { access: general, role: r };
 }
 
-/** The link tool results carry for `user`: their live automatic link, reused while it has more than
-a day left (stable URLs), else a new one. */
-export async function previewLink(db: Db, user: User, id: string): Promise<Link> {
-  const { rows } = await db.query<Link>(
-    `select * from deck_links where deck_id = $1 and created_by = $2 and auto and teams = $3::jsonb and revoked_at is null
-     and expires_at > now() + interval '1 day' order by expires_at desc limit 1`,
-    [id, user.id, JSON.stringify(user.teams)],
-  );
-  if (rows[0]) return rows[0];
-  // expiry rounded up to the hour
-  const e = Math.ceil((Date.now() / 1000 + PREVIEW_TTL_S) / HOUR) * HOUR;
-  return insertLink(db, user, id, PREVIEW_ROLE, new Date(e * 1000), true);
-}
-
-async function insertLink(db: Db, user: User, id: string, role: Role, expires: Date, auto: boolean, label?: string): Promise<Link> {
-  const { rows } = await db.query<Link>(
-    `insert into deck_links (id, deck_id, role, label, created_by, teams, auto, expires_at) values ($1, $2, $3, $4, $5, $6, $7, $8) returning *`,
-    [randomUUID(), id, role, label?.trim() || `link from ${user.name ?? user.id}`, user.id, JSON.stringify(user.teams), auto, expires.toISOString()],
-  );
-  return rows[0] as Link;
-}
-
-/** Revoke a link: it opens nothing from now on. The owner or an admin. */
-export async function revokeLink(decks: Decks, user: User, id: string, linkId: string) {
-  await ownerOrAdmin(decks, user, id);
-  const { rows } = await decks.db
-    .query("update deck_links set revoked_at = now() where id = $1 and deck_id = $2 and revoked_at is null returning id", [linkId, id])
-    .catch(() => ({ rows: [] }));
-  if (!rows.length) throw new NotFound(`no live link ${JSON.stringify(linkId)} on deck ${id}`);
-  await audit(decks.db, id, user, "revoke_link", { link: linkId });
-  return { revoked: linkId };
-}
-
-/** What an admin may see of a deck's links: who minted them, their role and expiry, not the URL. */
-export async function adminLinks(decks: Decks, user: User, id: string) {
-  await ownerOrAdmin(decks, user, id);
-  return (await links(decks.db, id)).map(({ id: link, role, label, created_by, auto, expires_at, created_at }) => ({ id: link, role, label, created_by, auto, expires_at, created_at }));
+/** A new share link key: every copy of the old link stops working. The owner or an admin. */
+export async function resetLink(decks: Decks, user: User, id: string) {
+  const deck = await ownerOrAdmin(decks, user, id);
+  const key = randomBytes(24).toString("base64url");
+  await decks.db.query("update decks set link_key = $2 where id = $1", [id, key]);
+  await audit(decks.db, id, user, "reset_link", {});
+  return deck.owns ? { link_key: key } : {};
 }
 
 /** Give the deck to user `to`. The former owner keeps editor access through a share (the new owner

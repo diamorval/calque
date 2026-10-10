@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { parse, stringify } from "yaml";
 import { engine, REPO } from "./engine.ts";
 import type { Db } from "./db.ts";
-import type { Role } from "./decks.ts";
 
 /** Who is calling. `local`: stdio or auth disabled, sees every pack and may pass file paths. */
 export interface User {
@@ -13,9 +12,12 @@ export interface User {
   name?: string;
   teams: string[];
   local?: boolean;
-  /** Acting through a guest link (src/preview.ts): its deck, role, label, token and stored link id.
-  `id` and `teams` are then those of whoever minted the link. */
-  guest?: { deck: string; role: Role; label: string; token: string; link: string };
+  /** Not signed in: someone who opened a deck's "Anyone with the link" share link. */
+  anonymous?: boolean;
+  /** The deck share link key this request presented (`?k=`, src/shares.ts). */
+  key?: string;
+  /** The per-user URL token this request came with (`?t=`, src/preview.ts), passed on as is. */
+  token?: string;
 }
 
 export interface PackRow {

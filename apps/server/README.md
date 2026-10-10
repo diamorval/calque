@@ -22,7 +22,7 @@ node apps/server/src/stdio.ts          # stdio, for a local MCP client (bridge t
 | `CALQUE_OIDC_CLIENT_ID` | the audience | the web app's OIDC client (authorization code + PKCE) |
 | `CALQUE_OIDC_CLIENT_SECRET` | unset: public client | its secret, for a confidential client |
 | `CALQUE_SECRET` | random, in `$CALQUE_DATA/secret` | seals model API keys at rest (AES-256-GCM): set it in production |
-| `CALQUE_ADMIN_TEAM` | `calque-admins` | team allowed to configure AI models, transfer decks and revoke their guest links (never to read a deck) |
+| `CALQUE_ADMIN_TEAM` | `calque-admins` | team allowed to configure AI models and, on any deck, see who has access, make it private, reset its link and transfer it (never to read it) |
 | `CALQUE_LLM_MODEL` | unset | preconfigured gateway, saved as model `env`, default unless another is set |
 | `CALQUE_LLM_PROVIDER` / `_BASE_URL` / `_API_KEY` | `openai-compatible` / – / – | the gateway's provider, endpoint and key |
 
@@ -69,35 +69,46 @@ Put an HTTPS reverse proxy in front of `:8787` at `CALQUE_PUBLIC_URL`; the healt
 
 Hosts with MCP Apps show the deck UI (`ui://calque/deck.html`) on `create_deck`, `open_deck`,
 `import_pptx`, `patch_deck`, `add_slides`, `restore_version`. The others get `preview_url`
-(`/decks/:id?t=…`), the same UI over REST: comments posted there are read by `list_comments`.
+(`/decks/:id?t=…`, the caller's URL token, see below), the same UI over REST: comments posted there
+are read by `list_comments`.
 
 ### Sharing
 
-A deck belongs to its owner; to anyone it is not shared with it does not exist (404). Roles, each
-including the ones before it: **viewer** (open, lint, export, list comments, present), **commenter**
-(+ comment), **editor** (+ `patch_deck`, `add_slides`, `restore_version`, `review_deck`), **owner**
-(+ share, links, transfer). A tool needing more than the caller's role answers 403.
+Artifact style: people with access, and one share link per deck. Roles, each including the ones
+before it: **viewer** (open, lint, export, list comments, present), **commenter** (+ comment),
+**editor** (+ `patch_deck`, `add_slides`, `restore_version`, `review_deck`), **owner** (+ manage
+access, transfer). A deck the caller has no role on does not exist for them (404); a tool needing
+more than their role answers 403. The caller's role is the best of the ones below.
 
-- **Shares** (`deck_shares`): the owner gives a role to a user id, a team or the whole workspace
-  (`share_deck`, `unshare_deck`, `list_shares`). The best share wins, and a share counts only while
-  the user sees the deck's pack. `list_decks` (and `GET /api/decks`) returns the caller's decks and
-  the decks shared with them, each with `role` and `owner`.
-- **Guest links** (`deck_links`): `?t=` on preview, PNG and download URLs, a signed token (HMAC with
-  `CALQUE_SECRET`) naming a stored link: viewer or commenter on that one deck, until it expires or is
-  revoked, and never more than whoever minted it still has (pack visibility aside). Tool results
-  carry the caller's automatic preview link (commenter, 7 days, reused while it has a day left); the
-  owner mints others with `create_link` (viewer or commenter, 1 to 90 days) and revokes any of them
-  with `revoke_link`. Comments through a link are signed `guest (<label>)`. The owner's session or
-  bearer token works without a link. Without `CALQUE_OIDC_ISSUER` (local only) the token is not
+- **People with access** (`deck_shares`): the owner gives a user id or a team viewer, commenter or
+  editor (`share_deck`, `unshare_deck`). A grant counts only while the user sees the deck's pack.
+  `list_decks` (and `GET /api/decks`) returns the caller's decks and the decks shared with them,
+  each with `role` and `owner` ("Shared with me" in the web app).
+- **Share link**: each deck has exactly one, `/decks/:id?k=<link_key>`, a random secret stored on
+  the deck. Its **general access** (`set_general_access {access, role}`) says who else it opens for:
+  `private` (default: only the owner and people with access, signed in), `workspace` (anyone signed
+  in who sees the deck's pack gets the general role) or `anyone` (no sign-in, no pack gate), with the
+  general role `viewer` or `commenter`, never editor. No expiry: `reset_link` rotates the key, and
+  every copy of the old link stops working at once. Comments through an anonymous link are signed
+  `guest`. `list_shares` returns the owner, the people, the general access and, for the owner, the
+  link `url`.
+- **URL tokens** (internal): the URLs in tool results (`preview_url`, `image_url`, `download_url`)
+  and the MCP App's PNGs must work with no browser session, so they carry `?t=`, a per-user token
+  (HMAC with `CALQUE_SECRET`, 24 h, bound to the user and the deck). It is no grant: every request
+  re-checks that user's current access, so removing their access kills it, and it never gives more
+  than they have. A caller who came through the share link gets URLs with that link instead. Never
+  shown in the Share dialog. Without `CALQUE_OIDC_ISSUER` (local only) neither `?k=` nor `?t=` is
   checked.
 - **Transfer** (`transfer_deck`): the owner, or an admin, gives the deck to another user id; the
-  former owner keeps editor access through a share.
-- **Admins** (`CALQUE_ADMIN_TEAM`) have no access to deck content. They transfer decks and revoke
-  links: `revoke_link` / `transfer_deck`, or `GET /api/admin/decks/:id/links` (links without their
-  URL), `POST /api/admin/decks/:id/links/:link/revoke`, `POST /api/admin/decks/:id/transfer` `{to}`.
+  former owner keeps editor access through a grant.
+- **Admins** (`CALQUE_ADMIN_TEAM`) have no access to deck content. On any deck they see who has
+  access (never the link), set general access to private, reset the link and transfer it:
+  `list_shares`, `set_general_access {access: "private"}`, `reset_link`, `transfer_deck`, or
+  `GET /api/admin/decks/:id/access`, `POST /api/admin/decks/:id/private`,
+  `POST /api/admin/decks/:id/reset-link`, `POST /api/admin/decks/:id/transfer` `{to}`.
 
-Every share, unshare, link, revocation and transfer is logged in `deck_audit` (deck, actor, action,
-detail).
+Every grant, revocation, general access change, link reset and transfer is logged in `deck_audit`
+(deck, actor, action, detail).
 
 ### Files in
 

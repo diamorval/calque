@@ -23,6 +23,10 @@ create table if not exists decks (
   head int not null,
   created_at timestamptz not null default now()
 );
+-- sharing: one share link per deck (/decks/:id?k=<link_key>) and who it opens for (shares.ts)
+alter table decks add column if not exists general_access text not null default 'private' check (general_access in ('private', 'workspace', 'anyone'));
+alter table decks add column if not exists general_role text not null default 'viewer' check (general_role in ('viewer', 'commenter'));
+alter table decks add column if not exists link_key text not null default replace(gen_random_uuid()::text, '-', '');
 create table if not exists deck_versions (
   deck_id uuid not null references decks(id),
   version int not null,
@@ -64,24 +68,12 @@ create table if not exists files (
 );
 create table if not exists deck_shares (
   deck_id uuid not null references decks(id),
-  principal_type text not null check (principal_type in ('user', 'team', 'workspace')),
+  principal_type text not null check (principal_type in ('user', 'team')),
   principal text not null,
   role text not null check (role in ('viewer', 'commenter', 'editor')),
   granted_by text not null,
   created_at timestamptz not null default now(),
   primary key (deck_id, principal_type, principal)
-);
-create table if not exists deck_links (
-  id uuid primary key,
-  deck_id uuid not null references decks(id),
-  role text not null check (role in ('viewer', 'commenter')),
-  label text not null,
-  created_by text not null,
-  teams jsonb not null default '[]',
-  auto boolean not null default false,
-  expires_at timestamptz not null,
-  revoked_at timestamptz,
-  created_at timestamptz not null default now()
 );
 create table if not exists deck_audit (
   id serial primary key,
@@ -91,6 +83,9 @@ create table if not exists deck_audit (
   detail jsonb not null default '{}',
   created_at timestamptz not null default now()
 );
+-- replaced by the deck's share link and general access
+drop table if exists deck_links;
+delete from deck_shares where principal_type not in ('user', 'team');
 create unique index if not exists one_default_model on models (is_default) where is_default;`;
 
 /** Postgres when `url` is a postgres:// URL, else embedded PGlite (a data dir, or in memory). */

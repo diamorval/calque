@@ -18,9 +18,11 @@ const POLL_MS = 4000;
 
 function web(id: string): Backend {
   const base = `/decks/${id}`;
-  // the signed preview link (?t=) authorizes every request; image URLs in the data carry it already
-  const t = new URLSearchParams(location.search).get("t");
-  const q = t ? `?t=${encodeURIComponent(t)}` : "";
+  // the deck's share link (?k=) or a per-user token (?t=) authorizes every request, else the web
+  // session; image URLs in the data carry it already
+  const s = new URLSearchParams(location.search);
+  const [k, t] = [s.get("k"), s.get("t")];
+  const q = t ? `?t=${encodeURIComponent(t)}` : k ? `?k=${encodeURIComponent(k)}` : "";
   let version = 0;
   return {
     async load() {

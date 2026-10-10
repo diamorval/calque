@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
@@ -63,6 +63,9 @@ interface DeckRow {
   owner: string;
   title: string;
   head: number;
+  general_access: GeneralAccess;
+  general_role: "viewer" | "commenter";
+  link_key: string;
 }
 
 export class Conflict extends Error {}
@@ -89,14 +92,18 @@ export type Role = (typeof ROLES)[number];
 
 const rank = (r: Role) => ROLES.indexOf(r);
 
-/** The best role `user` holds on each of `ids` through a share: to them, to one of their teams, or
-to the workspace. */
+/** Who the deck's share link opens for, besides its owner and the people and teams it is shared
+with: nobody else, anyone signed in who sees its pack, or anyone at all. */
+export type GeneralAccess = "private" | "workspace" | "anyone";
+type Sharing = { id: string; owner: string; pack_id: string; general_access: GeneralAccess; general_role: "viewer" | "commenter"; link_key: string };
+
+/** The best role `user` holds on each of `ids` through a share: to them or to one of their teams. */
 export async function granted(db: Db, user: User, ids: string[]): Promise<Map<string, Role>> {
   const out = new Map<string, Role>();
-  if (!ids.length) return out;
+  if (!ids.length || user.anonymous) return out;
   const { rows } = await db.query<{ deck_id: string; role: Role }>(
-    `select deck_id, role from deck_shares where deck_id = any($1::uuid[]) and (principal_type = 'workspace'
-       or (principal_type = 'user' and principal = $2) or (principal_type = 'team' and principal = any($3::text[])))`,
+    `select deck_id, role from deck_shares where deck_id = any($1::uuid[])
+       and ((principal_type = 'user' and principal = $2) or (principal_type = 'team' and principal = any($3::text[])))`,
     [ids, user.id, user.teams],
   );
   for (const r of rows) {
@@ -106,29 +113,27 @@ export async function granted(db: Db, user: User, ids: string[]): Promise<Map<st
   return out;
 }
 
-/** The caller's role on a deck, null: none (the deck does not exist for them). The owner, else the
-best share, which counts only while the user sees the deck's pack. A guest link's holder has its
-link's role on that one deck while the link is stored and not revoked, never more than whoever
-minted it still has (pack visibility aside: that is what a link is for). The local user owns every
-deck. Admins get nothing here: they transfer decks and revoke links without reading them. */
-export async function access(db: Db, user: User, deck: { id: string; owner: string; pack_id: string }): Promise<Role | null> {
-  if (user.guest) {
-    if (user.guest.deck !== deck.id) return null;
-    const { rows } = await db
-      .query<{ role: Role }>("select role from deck_links where id = $1 and deck_id = $2 and revoked_at is null and expires_at > now()", [
-        user.guest.link,
-        deck.id,
-      ])
-      .catch(() => ({ rows: [] as { role: Role }[] })); // a malformed link id
-    const link = rows[0];
-    const minter = link ? await access(db, { id: user.id, teams: user.teams }, deck) : null;
-    if (!link || !minter) return null;
-    return ROLES[Math.min(rank(minter), rank(link.role), rank(user.guest.role))] ?? null;
-  }
+/** Whether `user` presented deck `deck`'s current share link key. */
+function presents(user: User, deck: Sharing): boolean {
+  const [got, want] = [Buffer.from(user.key ?? ""), Buffer.from(deck.link_key)];
+  return !!user.key && got.length === want.length && timingSafeEqual(got, want);
+}
+
+/** The caller's role on a deck, null: none (the deck does not exist for them). The best of: owner;
+a share to them or their team, while they see the deck's pack; the general role if they present
+the deck's share link key and its general access lets them in ("workspace": signed in and seeing
+the pack, "anyone": anybody). The local user owns every deck. Admins get nothing here: they manage
+a deck's access without reading it. */
+export async function access(db: Db, user: User, deck: Sharing): Promise<Role | null> {
+  const link = presents(user, deck);
+  if (user.anonymous) return link && deck.general_access === "anyone" ? deck.general_role : null;
   if (user.local || deck.owner === user.id) return "owner";
   const { rows } = await db.query<PackRow>("select * from packs where id = $1", [deck.pack_id]);
-  if (!rows[0] || !visible(rows[0], user)) return null;
-  return (await granted(db, user, [deck.id])).get(deck.id) ?? null;
+  const sees = !!rows[0] && visible(rows[0], user);
+  let best = (sees && (await granted(db, user, [deck.id])).get(deck.id)) || null;
+  if (link && (deck.general_access === "anyone" || (deck.general_access === "workspace" && sees)) && (!best || rank(deck.general_role) > rank(best)))
+    best = deck.general_role;
+  return best;
 }
 
 /** Deck versions, their built PPTX and renders. Every change is a new DeckSpec version. */
@@ -166,10 +171,11 @@ export class Decks {
     // a deck the caller has no access to does not exist for them
     if (!row || !role) throw new NotFound(`no deck ${JSON.stringify(id)}`);
     if (rank(role) < rank(need)) throw new Forbidden(`${need} access needed on deck ${id}`);
-    // a deck on a hidden pack is hidden too, except through a guest link
-    const pack = user.guest
-      ? ((await this.db.query<PackRow>("select * from packs where id = $1", [row.pack_id])).rows[0] as PackRow)
-      : await getPack(this.db, user, row.pack_id);
+    // a deck on a hidden pack is hidden too, except through an "Anyone with the link" link
+    const pack =
+      user.anonymous || (row.general_access === "anyone" && presents(user, row))
+        ? ((await this.db.query<PackRow>("select * from packs where id = $1", [row.pack_id])).rows[0] as PackRow)
+        : await getPack(this.db, user, row.pack_id);
     return { ...row, packDir: pack.dir, role };
   }
 
@@ -179,8 +185,8 @@ export class Decks {
     const { rows } = await this.db.query<DeckRow & { updated_at: string }>(
       `select d.*, v.created_at as updated_at from decks d
        join deck_versions v on v.deck_id = d.id and v.version = d.head
-       where d.owner = $1 or d.id in (select deck_id from deck_shares where principal_type = 'workspace'
-         or (principal_type = 'user' and principal = $1) or (principal_type = 'team' and principal = any($2::text[])))
+       where d.owner = $1 or d.id in (select deck_id from deck_shares
+         where (principal_type = 'user' and principal = $1) or (principal_type = 'team' and principal = any($2::text[])))
        order by v.created_at desc`,
       [user.id, user.teams],
     );
@@ -421,7 +427,7 @@ export class Decks {
     const { rows } = await this.db.query<Comment>(
       `insert into comments (deck_id, version, slide_id, shape_id, text, author) values ($1, $2, $3, $4, $5, $6)
        returning *`,
-      [id, deck.head, c.slide_id, c.shape_id ?? null, c.text, user.guest ? `guest (${user.guest.label})` : user.id],
+      [id, deck.head, c.slide_id, c.shape_id ?? null, c.text, user.anonymous ? "guest" : user.id],
     );
     return rows[0] as Comment;
   }
