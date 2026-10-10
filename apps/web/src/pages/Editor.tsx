@@ -1,12 +1,15 @@
-import { DeckViewer, type DeckView } from "@calque/slide-ui";
+import { DeckViewer, type DeckView, type NewComment } from "@calque/slide-ui";
 import { Alert, AlertDescription } from "diametral-ds/alert";
 import { Button } from "diametral-ds/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "diametral-ds/table";
 import { Tag } from "diametral-ds/tag";
-import { CircleCheck, Download, History, Play, Sparkles, TriangleAlert, X } from "lucide-react";
+import { CircleCheck, Download, History, ListChecks, ListPlus, Play, Share2, Sparkles, TriangleAlert, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { agent, tool } from "../api.ts";
-import { Chat } from "../components/Chat.tsx";
+import { Chat, type Ask } from "../components/Chat.tsx";
+import { AddSlides, ReviewDeck } from "../components/DeckActions.tsx";
+import { ShareDeck } from "../components/Share.tsx";
+import { bySeverity, type Finding, lintSummary } from "../lint.ts";
 import { navigate } from "../nav.ts";
 import { ago, Dialog, Spinner } from "../ui.tsx";
 
@@ -17,15 +20,19 @@ const EDITS = ["Tighten every title to one line", "Add an agenda slide after the
 /** The editor: the deck workspace (slide-ui) with the agent chat in its side panel. */
 export function Editor({ id }: { id: string }) {
   const [deck, setDeck] = useState<Deck | null>(null);
-  const [errors, setErrors] = useState<number | null>(null);
+  const [findings, setFindings] = useState<Finding[] | null>(null);
+  const [report, setReport] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [history, setHistory] = useState(false);
+  // toolbar actions that go through the agent chat, and their dialogs
+  const [ask, setAsk] = useState<Ask | null>(null);
+  const [dialog, setDialog] = useState<"add" | "review" | "share" | null>(null);
 
   const reload = useCallback(async () => {
     try {
       setDeck(await tool<Deck>("open_deck", { deck_id: id }));
-      setErrors((await tool<{ errors: number }>("lint_deck", { deck_id: id })).errors);
+      setFindings((await tool<{ findings: Finding[] }>("lint_deck", { deck_id: id })).findings);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -59,6 +66,10 @@ export function Editor({ id }: { id: string }) {
         )}
       </div>
     );
+  const summary = findings && lintSummary(findings);
+  // a deck shared with the user: viewers read, commenters also comment, editors change it
+  const role = deck.role ?? "owner";
+  const edits = role === "editor" || role === "owner";
   return (
     <>
       <DeckViewer
@@ -66,16 +77,30 @@ export function Editor({ id }: { id: string }) {
         working={busy}
         actions={
           <>
-            {errors !== null &&
-              (errors ? (
-                <Tag tone="danger">
-                  <TriangleAlert /> {errors} lint error{errors > 1 ? "s" : ""}
-                </Tag>
+            {summary &&
+              (findings?.length ? (
+                <Button variant="ghost" aria-label={`Lint: ${summary.label}`} onClick={() => setReport(true)}>
+                  <Tag tone={summary.tone}>
+                    <TriangleAlert /> {summary.label}
+                  </Tag>
+                </Button>
               ) : (
                 <Tag tone="success">
-                  <CircleCheck /> Lint clean
+                  <CircleCheck /> {summary.label}
                 </Tag>
               ))}
+            {edits ? (
+              <>
+                <Button variant="ghost" onClick={() => setDialog("add")}>
+                  <ListPlus /> Add slides
+                </Button>
+                <Button variant="ghost" onClick={() => setDialog("review")}>
+                  <ListChecks /> Review
+                </Button>
+              </>
+            ) : (
+              <Tag>{role === "viewer" ? "Viewer" : "Commenter"}</Tag>
+            )}
             <Button variant="ghost" onClick={() => setHistory(true)}>
               <History /> History
             </Button>
@@ -87,30 +112,42 @@ export function Editor({ id }: { id: string }) {
             >
               <Download /> Export PPTX
             </Button>
+            {role === "owner" && (
+              <Button variant="outline" onClick={() => setDialog("share")}>
+                <Share2 /> Share
+              </Button>
+            )}
           </>
         }
         agent={
-          <Chat
-            storageKey={`chat:${id}`}
-            deck_id={id}
-            pack_id={deck.pack_id}
-            placeholder="Ask for a change: reword, add a slide, review…"
-            suggestions={EDITS}
-            empty={
-              <div className="cq-empty">
-                <Sparkles />
-                <strong>Edit with the agent</strong>
-                <span>Ask for a change in your words. Comments on the slides go through the agent too.</span>
-              </div>
-            }
-            onDone={() => void reload()}
-          />
+          edits && (
+            <Chat
+              storageKey={`chat:${id}`}
+              deck_id={id}
+              pack_id={deck.pack_id}
+              placeholder="Ask for a change: reword, add a slide, review…"
+              suggestions={EDITS}
+              ask={ask}
+              empty={
+                <div className="cq-empty">
+                  <Sparkles />
+                  <strong>Edit with the agent</strong>
+                  <span>Ask for a change in your words. Comments on the slides go through the agent too.</span>
+                </div>
+              }
+              onDone={() => void reload()}
+            />
+          )
         }
-        onComment={async (c) => {
-          await tool("add_comment", { deck_id: id, ...c });
-          await reload();
-        }}
-        onApply={() => run("Applying comments", () => agent("/api/agent/apply-comments", { deck_id: id }, () => {}))}
+        {...(role !== "viewer"
+          ? {
+              onComment: async (c: NewComment) => {
+                await tool("add_comment", { deck_id: id, ...c });
+                await reload();
+              },
+            }
+          : {})}
+        {...(edits ? { onApply: () => run("Applying comments", () => agent("/api/agent/apply-comments", { deck_id: id }, () => {})) } : {})}
       />
       {error && (
         <div className="cq-toast" role="alert">
@@ -119,6 +156,19 @@ export function Editor({ id }: { id: string }) {
             <X />
           </Button>
         </div>
+      )}
+      {dialog === "share" && <ShareDeck deck_id={id} onClose={() => setDialog(null)} />}
+      {dialog === "add" && <AddSlides onClose={() => setDialog(null)} onAsk={setAsk} />}
+      {dialog === "review" && (
+        <ReviewDeck
+          deck_id={id}
+          onClose={() => setDialog(null)}
+          onAsk={setAsk}
+          onApplySafe={() => {
+            setDialog(null);
+            void run("Applying safe fixes", () => tool("review_deck", { deck_id: id, apply_safe_fixes: true }));
+          }}
+        />
       )}
       {history && (
         <Dialog title="Version history" wide onClose={() => setHistory(false)}>
@@ -147,18 +197,52 @@ export function Editor({ id }: { id: string }) {
                       {v.version === deck.head ? (
                         <Tag>Current</Tag>
                       ) : (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          aria-label={`Restore v${v.version}`}
-                          onClick={() => {
-                            setHistory(false);
-                            void run("Restoring", () => tool("restore_version", { deck_id: id, version: v.version }));
-                          }}
-                        >
-                          Restore
-                        </Button>
+                        edits && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            aria-label={`Restore v${v.version}`}
+                            onClick={() => {
+                              setHistory(false);
+                              void run("Restoring", () => tool("restore_version", { deck_id: id, version: v.version }));
+                            }}
+                          >
+                            Restore
+                          </Button>
+                        )
                       )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </Dialog>
+      )}
+      {report && findings && (
+        <Dialog title={`Lint: ${summary?.label}`} wide onClose={() => setReport(false)}>
+          <div className="cq-dialog-body">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Severity</TableHead>
+                  <TableHead>Slide</TableHead>
+                  <TableHead>Finding</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {bySeverity(findings).map((f, i) => (
+                  <TableRow key={i}>
+                    <TableCell>
+                      <Tag tone={f.severity === "ERROR" ? "danger" : f.severity === "WARN" ? "warning" : "neutral"}>{f.severity}</Tag>
+                    </TableCell>
+                    <TableCell>{f.slide ? `Slide ${f.slide}` : "Deck"}</TableCell>
+                    <TableCell>
+                      {f.message}
+                      <div className="cq-hint">
+                        <span className="cq-mono">{f.check}</span>
+                        {f.shape_id !== null && ` · shape ${f.shape_id}`}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}

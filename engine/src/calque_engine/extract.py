@@ -7,6 +7,9 @@ slide is duplicated and are unreliable. Reviewed keys in an existing map are pre
 from __future__ import annotations
 
 import re
+import shutil
+import tempfile
+import zipfile
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -28,6 +31,51 @@ THEME_SLOTS = (
     "folHlink",
 )
 REVIEWED_SLIDE_KEYS = ("description", "slots", "fit", "notes")
+PML = "application/vnd.openxmlformats-officedocument.presentationml"
+# generic words naming a summary or a closing slide, in the languages packs ship in
+SUMMARY = re.compile(
+    r"summary|agenda|(table of )?contents|outline|overview|sommaire|ordre du jour|plan", re.I
+)
+CLOSING = re.compile(r"\b(thanks?|thank you|merci|questions)\b", re.I)
+SECTION_NO = re.compile(r"0?\d|\d{2}")  # "01" on a divider
+
+
+def as_presentation(path: str | Path) -> bool:
+    """Rewrite a .potx (template content type) in place as a .pptx. True when it did."""
+    path = Path(path)
+    with zipfile.ZipFile(path) as z:
+        types = z.read("[Content_Types].xml").decode("utf-8")
+        if f"{PML}.template.main+xml" not in types:
+            return False
+        fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".pptx")
+        with open(fd, "wb") as f, zipfile.ZipFile(f, "w", zipfile.ZIP_DEFLATED) as out:
+            for item in z.infolist():
+                data = z.read(item.filename)
+                if item.filename == "[Content_Types].xml":
+                    data = types.replace(
+                        f"{PML}.template.main+xml", f"{PML}.presentation.main+xml"
+                    ).encode("utf-8")
+                out.writestr(item, data)
+    shutil.move(tmp, path)
+    return True
+
+
+def used_styles(template: str | Path) -> dict[str, list[str]]:
+    """Fonts and hex colours the template's slides set directly, most used first: a real
+    template often names its faces on each run, not in the theme."""
+    fonts: Counter[str] = Counter()
+    colors: Counter[str] = Counter()
+    for slide in Presentation(str(template)).slides:
+        for el in slide._element.iter():
+            face = el.get("typeface")
+            if face and not face.startswith("+"):
+                fonts[face] += 1
+            if el.tag == f"{{{NS['a']}}}srgbClr" and el.get("val"):
+                colors[el.get("val").upper()] += 1
+    return {
+        "fonts": [f for f, _ in fonts.most_common()],
+        "colors": [c for c, _ in colors.most_common()],
+    }
 
 
 def _in(v: int | Emu | None) -> float:
@@ -234,19 +282,66 @@ def draft_tokens(tmap: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _role_numbers(slides: list[dict[str, Any]]) -> dict[str, list[int]]:
-    """Guess roles from slide order and layout names; the reviewer corrects them."""
-    nums = [s["number"] for s in slides]
-    cover, closing = nums[0], nums[-1]
-    rest = [s for s in slides if s["number"] not in (cover, closing)]
-    divider = [s["number"] for s in rest if "section" in s["layout"].lower()]
-    content = [
+def _words(sh: dict[str, Any]) -> int:
+    return len(sh["text"].split())
+
+
+def _is_divider(s: dict[str, Any]) -> bool:
+    """A section break: named so by its layout, or a few short texts led by a section number."""
+    if re.search(r"section|divider|chapter", s["layout"], re.I):
+        return True
+    texts = [sh for sh in _texts(s) if sh["id"] != s.get("page_number")]
+    if not texts or len(texts) > 8:
+        return False
+    biggest = max(texts, key=lambda sh: sh.get("size") or 0)
+    numbered = any(SECTION_NO.fullmatch(sh["text"]) for sh in texts)
+    return numbered and _words(biggest) <= 6 and bool(re.search(r"[^\W\d_]", biggest["text"]))
+
+
+def _role_numbers(slides: list[dict[str, Any]], h_in: float) -> dict[str, list[int]]:
+    """Guess roles from slide order, layout names, text structure and a few generic words
+    ("Agenda", "Thank you"); the reviewer corrects them."""
+    cover = slides[0]["number"]
+    rest = slides[1:]
+    # a closing says thanks in a few words; else the last slide
+    closing = [
         s["number"]
         for s in rest
-        if s["number"] not in divider and re.search(r"title only|blank", s["layout"], re.I)
+        if 0 < len(_texts(s)) <= 4 and any(CLOSING.search(sh["text"]) for sh in _texts(s))
+    ] or [slides[-1]["number"]]
+    rest = [s for s in rest if s["number"] not in closing]
+    divider = [s["number"] for s in rest if _is_divider(s)]
+    titles = {
+        max(_texts(s), key=lambda sh: sh.get("size") or 0)["text"].lower()
+        for s in rest
+        if s["number"] in divider and _texts(s)
+    }
+    # a summary is titled so, or lists the titles of at least two dividers
+    summary = [
+        s["number"]
+        for s in rest
+        if s["number"] not in divider
+        and (
+            any(SUMMARY.fullmatch(sh["text"].strip(" :.")) for sh in _texts(s))
+            or len(titles & {sh["text"].lower() for sh in _texts(s)}) >= 2
+        )
     ]
-    content = content or [s["number"] for s in rest if s["number"] not in divider][:1] or [cover]
-    roles = {"cover": [cover], "content": content, "closing": [closing]}
+    rest = [s for s in rest if s["number"] not in divider + summary]
+    content = [
+        s["number"] for s in rest if _texts(s) and re.search(r"title only|blank", s["layout"], re.I)
+    ]
+    if not content:
+        # the plainest slide whose biggest text is a title at the top: a canvas to compose on
+        titled = [
+            s
+            for s in rest
+            if _texts(s)
+            and max(_texts(s), key=lambda sh: sh.get("size") or 0)["bbox"][1] < h_in * 0.25
+        ]
+        content = [min(titled or rest or slides, key=lambda s: len(s["shapes"]))["number"]]
+    roles = {"cover": [cover], "content": content, "closing": closing}
+    if summary:
+        roles["summary"] = summary
     if divider:
         roles["divider"] = divider
     return roles
@@ -256,12 +351,15 @@ def _texts(slide: dict[str, Any]) -> list[dict[str, Any]]:
     return [sh for sh in slide["shapes"] if sh["kind"] == "text" and sh.get("text")]
 
 
-def draft_manifest(tmap: dict[str, Any], pack_id: str, name: str) -> dict[str, Any]:
+def draft_manifest(
+    tmap: dict[str, Any], pack_id: str, name: str, used: dict[str, list[str]] | None = None
+) -> dict[str, Any]:
     """A first pack.yaml for an imported template, and title/subtitle slots on its role slides
-    (written into `tmap`). Meant for review: roles, grid and placeholders are guesses."""
+    (written into `tmap`). Meant for review: roles, grid and placeholders are guesses.
+    `used`: the template's fonts and colours (`used_styles`), allowed by lint."""
     w_in, h_in = tmap["canvas"]["width_in"], tmap["canvas"]["height_in"]
     by_num = {s["number"]: s for s in tmap["slides"]}
-    roles = _role_numbers(tmap["slides"])
+    roles = _role_numbers(tmap["slides"], h_in)
     role_slides = sorted({n for ns in roles.values() for n in ns})
     for n in role_slides:
         s = by_num[n]
@@ -269,10 +367,18 @@ def draft_manifest(tmap: dict[str, Any], pack_id: str, name: str) -> dict[str, A
             continue
         texts = sorted(_texts(s), key=lambda sh: (-(sh.get("size") or 0), sh["bbox"][1]))
         page = s.get("page_number")
-        texts = [sh for sh in texts if sh["id"] != page]
+        # not the page number, a section number or a footer
+        texts = [
+            sh
+            for sh in texts
+            if sh["id"] != page
+            and not SECTION_NO.fullmatch(sh["text"])
+            and sh["bbox"][1] < h_in * 0.85
+        ]
         if texts:
             s["slots"] = {"title": texts[0]["id"]}
-            if len(texts) > 1:
+            # a summary's entries are reviewed into slots (ch1_title...), not guessed
+            if len(texts) > 1 and n not in roles.get("summary", []):
                 s["slots"]["subtitle"] = texts[1]["id"]
 
     content = by_num[roles["content"][0]]
@@ -304,18 +410,41 @@ def draft_manifest(tmap: dict[str, Any], pack_id: str, name: str) -> dict[str, A
     if page:
         grid["page_number"] = {"left_in": page["bbox"][0], "top_in": page["bbox"][1]}
 
-    # sample copy ("Presentation title") must not survive in a deck; single words and the closing
-    # slide's text ("Contact", "Thank you") are often kept as they are
+    # sample copy in the slots a deck fills ("Presentation title") must not survive in a deck.
+    # Single words, the closing slide's text ("Contact", "Thank you") and text a clone keeps
+    # (a footer, a summary's entries) are real copy, not placeholders.
+    slotted = {
+        n: set(by_num[n].get("slots", {}).values())
+        for n in role_slides
+        if n not in roles["closing"]
+    }
+    kept = [
+        sh["text"].lower()
+        for n in role_slides
+        for sh in _texts(by_num[n])
+        if sh["id"] not in slotted.get(n, ())
+    ]
     placeholders = sorted(
         {
             sh["text"]
-            for n in role_slides
-            if n not in roles["closing"]
+            for n, ids in slotted.items()
             for sh in _texts(by_num[n])
-            if len(sh["text"].split()) >= 2 and not sh["text"].endswith("...")
+            if sh["id"] in ids
+            and _words(sh) >= 2
+            and not sh["text"].endswith("...")
+            and not any(sh["text"].lower() in k for k in kept)
         }
     )
     fonts = tmap["theme"]["fonts"]
+    theme_colors = set(tmap["theme"]["colors"].values())
+    lint: dict[str, Any] = {"placeholders": placeholders}
+    if used:  # the template's own faces and colours are the charter
+        extra_fonts = [f for f in used["fonts"] if f not in fonts.values()]
+        extra_colors = [c for c in used["colors"] if c not in theme_colors]
+        if extra_fonts:
+            lint["extra_fonts"] = extra_fonts
+        if extra_colors:
+            lint["extra_colors"] = extra_colors
     return {
         "id": pack_id,
         "name": name,
@@ -332,5 +461,5 @@ def draft_manifest(tmap: dict[str, Any], pack_id: str, name: str) -> dict[str, A
                 "label": fonts.get("minor", "sans-serif"),
             }
         },
-        "lint": {"placeholders": placeholders},
+        "lint": lint,
     }

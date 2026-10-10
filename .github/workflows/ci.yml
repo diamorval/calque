@@ -32,3 +32,18 @@ jobs:
       - run: uv sync --locked
       - run: uv run ruff check . && uv run ruff format --check .
       - run: uv run pytest
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - run: docker build -t calque .
+      # no issuer: the server listens on loopback, the runner's with --network host
+      - run: docker run -d --name calque --network host -e CALQUE_SECRET=ci calque
+      - run: until [ "$(docker inspect -f '{{.State.Health.Status}}' calque)" = healthy ]; do sleep 2; done
+        timeout-minutes: 2
+      - run: node scripts/docker-smoke.ts packs/diametral/tests/golden/data-fr.json
+      - if: failure()
+        run: docker logs calque

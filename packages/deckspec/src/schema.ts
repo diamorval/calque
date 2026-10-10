@@ -71,7 +71,7 @@ export const ShapeValue = z.union([
     bold: z.boolean().optional(),
     size: z.union([z.string(), z.number().positive()]).optional().describe("A size role or points."),
     fit: z.boolean().optional().describe("Grow the box to keep the text on one line."),
-    image: z.string().optional().describe("Path or asset id of an image replacing a picture, cropped to fill."),
+    image: z.string().optional().describe("Image replacing a picture, cropped to fill: an uploaded file as `file:<file_id>`, or a path relative to the deck's, the uploads' or the pack's folder."),
     table: z.array(z.array(z.string())).optional(),
     width_frac: z.number().min(0).max(1).optional().describe("Bar/progress width as a fraction of the original."),
   }),
@@ -115,7 +115,7 @@ export const DeckSpec = z.strictObject({
   pack_id: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
   language: z.string().min(2).describe("BCP 47 code of the deck language."),
   title: text,
-  base: z.string().optional().describe("Imported deck this spec edits (set by import_pptx)."),
+  base: z.string().regex(/^[\w-]+\.pptx$/).optional().describe("Imported deck this spec edits, a file in the deck's folder (set by import_pptx)."),
   slides: z.array(Slide).min(1),
 });
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -67,10 +68,14 @@ def build(
     out: str | Path,
     base: str | Path | None = None,
     check: bool = True,
+    image_roots: list[str | Path] | None = None,
+    author: str | None = None,
 ) -> BuildReport:
     """Build a deck. `base` is the imported PPTX a DeckSpec with `base` edits: its slides are
     edited in place, template clones and drawn slides are copied in from the pack template.
-    `check=False` skips the doctrine rules (schema only), for internal reference builds."""
+    `check=False` skips the doctrine rules (schema only), for internal reference builds. Image
+    values are paths relative to `image_roots` (default: the pack, and the base's folder).
+    `author` goes in the document properties (else they name no one)."""
     _load_renderers()
     raw = data.model_dump(exclude_none=True) if isinstance(data, DeckSpec) else data
     if check:
@@ -80,6 +85,8 @@ def build(
     st = Style(pack)
     report = BuildReport(path=Path(out), warnings=list(warnings))
 
+    if image_roots is None:
+        image_roots = [pack.dir, *([Path(base).parent] if base else [])]
     prs = Presentation(str(base or pack.template))
     base_map = {s["number"]: s for s in extract(base)["slides"]} if base else {}
     pack_map = {s["number"]: s for s in pack.template_map["slides"]}
@@ -128,7 +135,9 @@ def build(
                 except ValueError as e:
                     raise ValueError(f"[{s.id}] {e}") from None
                 tslide = pack_map[n]
-            _apply_clone(new, s, st, deck.language, report, tslide, holes=not from_base)
+            _apply_clone(
+                new, s, st, deck.language, report, tslide, image_roots, holes=not from_base
+            )
         else:
             n = pack.slides_for("content")[0]
             new = from_template(n)
@@ -149,8 +158,32 @@ def build(
         pn = tslide.get("page_number")
         if pn is not None:
             _renumber(new, pn, pos)
+    _own_properties(prs, deck.title, author)
     prs.save(str(out))
     return report
+
+
+# presentation parts holding the template's edit history (who changed what, when)
+HISTORY_RELS = ("/changesInfo", "/revisionInfo")
+
+
+def _own_properties(prs, title: str, author: str | None) -> None:
+    """The deck's document properties, not the template's: no template authors, no python-pptx
+    defaults, no revision history parts (dropped with their relationship, so with their content
+    type on save)."""
+    core = prs.core_properties
+    for child in list(core._element):
+        core._element.remove(child)
+    now = datetime.now(UTC).replace(tzinfo=None, microsecond=0)
+    core.title = title
+    core.author = author or ""
+    core.last_modified_by = author or ""
+    core.revision = 1
+    core.created = now
+    core.modified = now
+    rels = prs.part.rels
+    for rid in [r for r, rel in rels.items() if rel.reltype.endswith(HISTORY_RELS)]:
+        rels.pop(rid)
 
 
 def _apply_clone(
@@ -160,6 +193,7 @@ def _apply_clone(
     language: str,
     report: BuildReport,
     tslide: dict[str, Any],
+    image_roots: list[str | Path],
     holes: bool = True,
 ) -> None:
     values: dict[str, Any] = s.source.get("values", {})
@@ -169,7 +203,7 @@ def _apply_clone(
         if value is None:
             sl.delete_shape(shape)
             continue
-        sl.apply_value(shape, value, st)
+        sl.apply_value(shape, value, st, image_roots)
         if int(key) in fit and not (isinstance(value, dict) and "fit" in value):
             sl.fit_box(shape, st)
     if holes:

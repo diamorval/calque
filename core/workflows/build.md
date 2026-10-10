@@ -22,8 +22,11 @@ do not fill it: signatures are cloned for identity, content slides are derived f
 ## Steps
 
 0. **Pack.** If no pack is active, `list_packs` and ask which one (one pack → use it).
-1. **Ingest.** Read every supplied document and image; mine the facts before speaking. If an
-   agreed storyline exists, it is the outline: do not re-argue it.
+1. **Ingest.** Read every supplied document and image; mine the facts before speaking. Files the
+   user attached are listed under "Attached files" (documents with their text). An uploaded image
+   goes into a picture slot as `"image": "file:<file_id>"`; a file you hold yourself is uploaded
+   through `upload_url` first, never pasted as base64. If an agreed storyline exists, it is the
+   outline: do not re-argue it.
 2. **See what good looks like.** Read the exemplar: the moves (title length, eyebrow, where a
    number may be huge, imagery density), never the copy.
 3. **Deck type and narrative.** Name the type (pitch, proposal, debrief, internal, plenary…), the

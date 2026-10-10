@@ -80,7 +80,12 @@ export interface RunInput {
   messages: Message[];
   tools: ToolDef[];
   maxSteps?: number;
-  onStep?: (step: { text: string; toolCalls: { toolName: string; input: unknown }[] }) => void;
+  /** after each step; a tool call whose execute threw carries its `error` message */
+  onStep?: (step: Step) => void;
+}
+export interface Step {
+  text: string;
+  toolCalls: { toolName: string; input: unknown; error?: string }[];
 }
 
 /** A tool-calling loop until the model answers in text (a question, or the end of the job). */
@@ -100,7 +105,20 @@ export async function runTools(i: RunInput): Promise<{ text: string; messages: M
       ]),
     ),
     stopWhen: stepCountIs(i.maxSteps ?? 40),
-    ...(i.onStep ? { onStepFinish: i.onStep } : {}),
+    ...(i.onStep
+      ? {
+          onStepFinish: (s) => {
+            const failed = new Map(s.content.flatMap((p) => (p.type === "tool-error" ? [[p.toolCallId, p.error]] : [])));
+            i.onStep?.({
+              text: s.text,
+              toolCalls: s.toolCalls.map((c) => {
+                const e = failed.get(c.toolCallId);
+                return { toolName: c.toolName, input: c.input, ...(failed.has(c.toolCallId) ? { error: e instanceof Error ? e.message : String(e) } : {}) };
+              }),
+            });
+          },
+        }
+      : {}),
   });
   return { text: r.text, messages: r.responseMessages };
 }

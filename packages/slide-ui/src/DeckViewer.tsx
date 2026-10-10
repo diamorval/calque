@@ -12,7 +12,8 @@ with the open comments, plus the host's agent when it has one. Comments anchor o
 if one is picked, a shape_id. */
 export function DeckViewer(props: {
   deck: DeckView;
-  onComment: (c: NewComment) => Promise<void>;
+  /** Post a comment; without it (a viewer) there is no comment box. */
+  onComment?: (c: NewComment) => Promise<void>;
   /** Hand the open comments to the agent (MCP Apps: a message to the model). */
   onApply?: () => Promise<void>;
   /** The host's own actions, right of the title (web: lint, history, present, export). */
@@ -58,7 +59,7 @@ export function DeckViewer(props: {
 
   async function submit(e?: FormEvent) {
     e?.preventDefault();
-    if (!text.trim() || !slide) return;
+    if (!text.trim() || !slide || !props.onComment) return;
     setBusy(true);
     try {
       await props.onComment({ slide_id: slide.id, ...(shape !== null ? { shape_id: shape } : {}), text: text.trim() });
@@ -108,7 +109,7 @@ export function DeckViewer(props: {
             <ChevronRight />
           </button>
           <span className="cq-spacer" />
-          <span className="cq-stagebar-hint">Click an element to comment on it</span>
+          {props.onComment && <span className="cq-stagebar-hint">Click an element to comment on it</span>}
           <button
             type="button"
             className="cq-btn"
@@ -131,46 +132,48 @@ export function DeckViewer(props: {
             </div>
           )}
         </div>
-        <form onSubmit={submit} className="cq-comment">
-          <div>
-            <span className="cq-anchor">
-              <MessageSquarePlus />
-              <span>
-                Slide {slide.number}
+        {props.onComment && (
+          <form onSubmit={submit} className="cq-comment">
+            <div>
+              <span className="cq-anchor">
+                <MessageSquarePlus />
+                <span>
+                  Slide {slide.number}
+                  {picked && (
+                    <>
+                      {" · "}
+                      <b>{shapeLabel(picked)}</b> <span className="cq-mono">#{picked.shape_id}</span>
+                    </>
+                  )}
+                  {!picked && <span className="cq-muted"> · whole slide</span>}
+                </span>
                 {picked && (
-                  <>
-                    {" · "}
-                    <b>{shapeLabel(picked)}</b> <span className="cq-mono">#{picked.shape_id}</span>
-                  </>
+                  <button type="button" aria-label="Comment on the whole slide" onClick={() => setShape(null)}>
+                    <X size={14} />
+                  </button>
                 )}
-                {!picked && <span className="cq-muted"> · whole slide</span>}
               </span>
-              {picked && (
-                <button type="button" aria-label="Comment on the whole slide" onClick={() => setShape(null)}>
-                  <X size={14} />
+              <div className="cq-comment-row">
+                <textarea
+                  aria-label={`Comment on slide ${slide.number}${shape !== null ? `, shape ${shape}` : ""}`}
+                  placeholder={picked ? `What should change in this ${shapeLabel(picked)}?` : "What should change on this slide?"}
+                  value={text}
+                  rows={1}
+                  onChange={(e) => setText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      void submit();
+                    }
+                  }}
+                />
+                <button type="submit" className="cq-btn" data-variant="primary" data-size="sm" disabled={busy || !text.trim()}>
+                  Comment
                 </button>
-              )}
-            </span>
-            <div className="cq-comment-row">
-              <textarea
-                aria-label={`Comment on slide ${slide.number}${shape !== null ? `, shape ${shape}` : ""}`}
-                placeholder={picked ? `What should change in this ${shapeLabel(picked)}?` : "What should change on this slide?"}
-                value={text}
-                rows={1}
-                onChange={(e) => setText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    void submit();
-                  }
-                }}
-              />
-              <button type="submit" className="cq-btn" data-variant="primary" data-size="sm" disabled={busy || !text.trim()}>
-                Comment
-              </button>
+              </div>
             </div>
-          </div>
-        </form>
+          </form>
+        )}
       </section>
 
       <aside className="cq-panel" aria-label="Side panel">

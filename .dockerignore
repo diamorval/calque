@@ -1,0 +1,20 @@
+# Only what the image builds from: sources, lockfiles, core/ and the packs.
+.git
+.github
+.claude
+**/node_modules
+**/dist
+**/.turbo
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+.data
+.env
+docs
+apps/web/demo/out
+apps/web/test-results
+apps/web/playwright-report
+# test fixtures, not packs to serve
+packs/acme-test
+packs/*/tests

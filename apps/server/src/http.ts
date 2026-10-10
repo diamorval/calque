@@ -3,30 +3,31 @@ import { readFile } from "node:fs/promises";
 import { join, normalize } from "node:path";
 import { Readable } from "node:stream";
 import { Hono, type Context } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { stream } from "hono/streaming";
 import { Client } from "@modelcontextprotocol/client";
 import { createMcpHandler, InMemoryTransport, oauthMetadataResponse } from "@modelcontextprotocol/server";
 import { applyComments, chat, type Message } from "@calque/agent";
-import { PROVIDERS, type ModelConfig, type ProviderId } from "@calque/llm";
+import { PROVIDERS, type ModelConfig, type ProviderId, type Step } from "@calque/llm";
 import { z } from "zod";
 import { discovery, gate, userOf, type AuthConfig } from "./auth.ts";
 import { Conflict } from "./decks.ts";
 import { EngineError, REPO } from "./engine.ts";
+import { attachment, MAX_UPLOAD, saveFile, ticketUser, TooLarge } from "./files.ts";
 import { buildServer, UI_HTML } from "./mcp.ts";
 import { InvalidModel, isAdmin } from "./models.ts";
 import { addFont, draftDir, draftPack, editPack, Forbidden, NotFound, publishDraft, setVisibility, type User } from "./packs.ts";
+import { tokenUser } from "./preview.ts";
 import type { Sessions } from "./session.ts";
+import { resetLink, setGeneralAccess, shares, transfer } from "./shares.ts";
 import { TOOLS, toolNamed, type App } from "./tools.ts";
 
-/** The preview link is a capability URL: knowing a deck's id (random UUID) opens its preview,
-reads it and comments on it, nothing else. The MCP App inside Claude loads its PNGs from here,
-where no web session exists. */
-const PREVIEW: User = { id: "preview", teams: [], local: true };
 const LOCAL: User = { id: "local", name: "Local", teams: [], local: true };
 export const WEB_DIST = join(REPO, "apps/web/dist");
 
-function status(e: unknown): 400 | 403 | 404 | 409 | 422 {
+function status(e: unknown): 400 | 403 | 404 | 409 | 413 | 422 {
   if (e instanceof Forbidden) return 403;
+  if (e instanceof TooLarge) return 413;
   if (e instanceof NotFound) return 404;
   if (e instanceof Conflict) return 409;
   if (e instanceof EngineError || e instanceof InvalidModel || e instanceof z.ZodError) return 422;
@@ -61,6 +62,7 @@ const ChatBody = z.object({
   pack_id: z.string().optional(),
   deck_id: z.string().optional(),
   model: z.string().optional().describe("A configured model id; default: the workspace default."),
+  files: z.array(z.string()).optional().describe("Uploaded file ids attached to the conversation (POST /api/files)."),
 });
 const Visibility = z.object({ visibility: z.enum(["workspace", "team"]), teams: z.array(z.string()).optional() });
 
@@ -76,6 +78,19 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
     if (s) return s;
     const a = await check(c.req.raw);
     return a instanceof Response ? a : userOf(a);
+  }
+
+  /** A preview route's caller: the user a per-user URL token (`?t=`) was minted for; else, with the
+  deck's share link key (`?k=`), the signed-in caller or an anonymous one presenting it; else `who`.
+  Their access to the deck is checked as usual. Without auth (local only) neither is checked. */
+  async function viewer(c: Context): Promise<User | Response> {
+    if (!check) return who(c);
+    const t = c.req.query("t");
+    if (t) return tokenUser(app.secret, t, param(c, "id")) ?? c.json({ error: "Unauthorized", message: "preview link expired or invalid" }, 401);
+    const k = c.req.query("k");
+    if (!k) return who(c);
+    const user = await who(c);
+    return user instanceof Response ? { id: "guest", teams: [], anonymous: true, key: k } : { ...user, key: k };
   }
 
   const mcp = createMcpHandler(({ authInfo }) => buildServer(app, userOf(authInfo)));
@@ -121,10 +136,29 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
     const form = await c.req.parseBody();
     const f = form[field];
     if (!(f instanceof File)) throw new Error(`missing file field ${JSON.stringify(field)}`);
-    return { form, name: f.name, bytes: Buffer.from(await f.arrayBuffer()) };
+    return { form, name: f.name, type: f.type, bytes: Buffer.from(await f.arrayBuffer()) };
   };
 
   http.get("/api/me", route(async (_, user) => ({ ...user, admin: isAdmin(user), auth: !!check })));
+
+  // Uploads: a file in (multipart field `file`), its file_id out, usable only by its uploader.
+  // `?ticket=` (from the upload_url tool) stands in for the caller's credentials.
+  const limit = bodyLimit({
+    maxSize: MAX_UPLOAD + 1024 * 1024, // + multipart framing; saveFile checks the file itself
+    onError: (c) => c.json({ error: "TooLarge", message: `file over ${MAX_UPLOAD / 1024 / 1024} MB` }, 413),
+  });
+  http.post("/api/files", limit, async (c) => {
+    const ticket = c.req.query("ticket");
+    const user = ticket ? await ticketUser(app.secret, ticket) : await who(c);
+    if (!user) return c.json({ error: "Unauthorized", message: "invalid or expired upload ticket" }, 401);
+    if (user instanceof Response) return user;
+    try {
+      const f = await upload(c, "file");
+      return c.json(await saveFile(app.db, app.data, user, f.name, f.type || "application/octet-stream", f.bytes));
+    } catch (e) {
+      return fail(c, e);
+    }
+  });
 
   // REST: the same tools as MCP, one endpoint each.
   http.get("/api/tools", (c) =>
@@ -141,12 +175,41 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
 
   http.get("/api/decks", route(async (_, user) => ({ decks: await app.decks.list(user) })));
 
+  // Admins (CALQUE_ADMIN_TEAM): who has access to a deck (never its link nor its content), make it
+  // private, reset its link, transfer it.
+  const admin = (fn: (c: Context, user: User) => Promise<unknown>) =>
+    route(async (c, user) => {
+      if (!isAdmin(user)) throw new Forbidden("admins only");
+      return fn(c, user);
+    });
+  http.get(
+    "/api/admin/decks/:id/access",
+    admin(async (c, user) => {
+      const { owner, people, general } = await shares(app.decks, user, param(c, "id")); // never the link, even to an owner
+      return { owner, people, general };
+    }),
+  );
+  http.post("/api/admin/decks/:id/private", admin((c, user) => setGeneralAccess(app.decks, user, param(c, "id"), "private", "viewer")));
+  http.post(
+    "/api/admin/decks/:id/reset-link",
+    admin(async (c, user) => {
+      await resetLink(app.decks, user, param(c, "id"));
+      return { deck_id: param(c, "id"), reset: true };
+    }),
+  );
+  http.post(
+    "/api/admin/decks/:id/transfer",
+    admin(async (c, user) => transfer(app.decks, user, param(c, "id"), z.object({ to: z.string().min(1) }).parse(await body(c)).to)),
+  );
+
   // Settings > Brand packs: draft from a template, review, publish; visibility per pack.
   http.post(
     "/api/packs/drafts",
     route(async (c, user) => {
       const { form, bytes } = await upload(c, "template");
-      return draftPack(user, app.data, bytes, String(form.id ?? ""), String(form.name ?? form.id ?? ""));
+      // optional: the company's own tokens.json instead of the drafted one
+      const tokens = form.tokens instanceof File ? (JSON.parse(await form.tokens.text()) as Record<string, unknown>) : undefined;
+      return draftPack(user, app.data, bytes, String(form.id ?? ""), String(form.name ?? form.id ?? ""), tokens);
     }),
   );
   http.get("/api/packs/drafts/:id/slides/:png", async (c) => {
@@ -194,7 +257,7 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
   /** Run the web agent as `user`. With `Accept: application/x-ndjson`, streams one line per step
   ({"step": {tools}}), then {"done": result} or {"error": …}; else answers JSON when done. */
   const agent =
-    (parse: (b: unknown) => { model?: string | undefined }, run: (client: Client, model: ModelConfig, b: never, onStep: OnStep) => Promise<object>) =>
+    (parse: (b: unknown) => { model?: string | undefined }, run: (client: Client, model: ModelConfig, b: never, onStep: OnStep, user: User) => Promise<object>) =>
     async (c: Context) => {
       const user = await who(c);
       if (user instanceof Response) return user;
@@ -203,7 +266,7 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
         const model = await app.models.resolve(b.model);
         const client = await connect(app, user);
         try {
-          return { model: model.id, ...(await run(client, model, b as never, onStep)) };
+          return { model: model.id, ...(await run(client, model, b as never, onStep, user)) };
         } finally {
           await client.close();
         }
@@ -219,19 +282,22 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
       return stream(c, async (s) => {
         const line = (o: object) => s.write(`${JSON.stringify(o)}\n`);
         try {
-          await line({ done: await go((st) => void line({ step: { text: st.text, tools: st.toolCalls.map((t) => t.toolName) } })) });
+          // each tool: its name, and its error when it failed
+          const tools = (st: Step) => st.toolCalls.map((t) => ({ name: t.toolName, ...(t.error !== undefined ? { error: t.error } : {}) }));
+          await line({ done: await go((st) => void line({ step: { text: st.text, tools: tools(st) } })) });
         } catch (e) {
           await line({ error: failure(e) });
         }
       });
     };
-  type OnStep = (s: { text: string; toolCalls: { toolName: string }[] }) => void;
+  type OnStep = (s: Step) => void;
 
   http.post(
     "/api/agent/chat",
-    agent(ChatBody.parse, (client, model, b: z.infer<typeof ChatBody>, onStep) =>
-      chat({ client, model, onStep, messages: b.messages as Message[], workflow: b.workflow, pack_id: b.pack_id, deck_id: b.deck_id }),
-    ),
+    agent(ChatBody.parse, async (client, model, b: z.infer<typeof ChatBody>, onStep, user) => {
+      const files = await Promise.all((b.files ?? []).map((id) => attachment(app.db, app.data, user, id)));
+      return chat({ client, model, onStep, messages: b.messages as Message[], workflow: b.workflow, pack_id: b.pack_id, deck_id: b.deck_id, files });
+    }),
   );
   const ApplyBody = z.object({ deck_id: z.string(), model: z.string().optional() });
   http.post(
@@ -245,24 +311,30 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
     return c.html(await readFile(UI_HTML, "utf8"));
   });
   http.get("/decks/:id/data", async (c) => {
+    const user = await viewer(c);
+    if (user instanceof Response) return user;
     try {
-      return c.json(await TOOLS.open_deck.run(app, PREVIEW, { deck_id: param(c, "id"), render: true }));
+      return c.json(await TOOLS.open_deck.run(app, user, { deck_id: param(c, "id"), render: true }));
     } catch (e) {
       return fail(c, e);
     }
   });
   http.post("/decks/:id/comments", async (c) => {
+    const user = await viewer(c);
+    if (user instanceof Response) return user;
     try {
       const b = TOOLS.add_comment.input.parse({ ...(await c.req.json()), deck_id: param(c, "id") });
-      return c.json(await TOOLS.add_comment.run(app, PREVIEW, b));
+      return c.json(await TOOLS.add_comment.run(app, user, b));
     } catch (e) {
       return fail(c, e);
     }
   });
   http.get("/decks/:id/slides/:png", async (c) => {
+    const user = await viewer(c);
+    if (user instanceof Response) return user;
     const n = Number(param(c, "png").replace(/\.png$/, ""));
     try {
-      const { slides } = await app.decks.render(PREVIEW, param(c, "id"));
+      const { slides } = await app.decks.render(user, param(c, "id"));
       const s = slides.find((x) => x.number === n);
       if (!s) return c.notFound();
       return new Response(Readable.toWeb(createReadStream(s.png)) as ReadableStream, {
@@ -273,10 +345,12 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
     }
   });
   http.get("/decks/:id/deck.pptx", async (c) => {
+    const user = await viewer(c);
+    if (user instanceof Response) return user;
     try {
       const v = c.req.query("v");
-      const { path, version } = await app.decks.exportPath(PREVIEW, param(c, "id"), v ? Number(v) : undefined);
-      const deck = await app.decks.deck(PREVIEW, param(c, "id"));
+      const { path, version } = await app.decks.exportPath(user, param(c, "id"), v ? Number(v) : undefined);
+      const deck = await app.decks.deck(user, param(c, "id"), "viewer");
       const name = `${deck.title.replace(/[^\p{L}\p{N} _-]+/gu, "").trim() || "deck"} v${version}.pptx`;
       return new Response(Readable.toWeb(createReadStream(path)) as ReadableStream, {
         headers: {

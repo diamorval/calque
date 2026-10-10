@@ -2,7 +2,7 @@
 // It holds no business logic (rule 1) and no provider SDK (rule 2): knowledge comes from the server's
 // core:// and pack:// resources and prompts, every action is an MCP tool call.
 import type { Client } from "@modelcontextprotocol/client";
-import { runTools, type Message, type ModelConfig, type ToolDef } from "@calque/llm";
+import { runTools, type Message, type ModelConfig, type Step, type ToolDef } from "@calque/llm";
 
 export type { Message } from "@calque/llm";
 
@@ -17,7 +17,10 @@ export interface ChatInput {
   pack_id?: string | undefined;
   /** The deck the user has open: the chat edits it rather than building a new one. */
   deck_id?: string | undefined;
-  onStep?: ((step: { text: string; toolCalls: { toolName: string; input: unknown }[] }) => void) | undefined;
+  /** Files the user attached, as the server prepared them: an image's `ref`, a document's `text`. */
+  files?: Attachment[] | undefined;
+  /** after each step: the tools called, a failed one with its `error` */
+  onStep?: ((step: Step) => void) | undefined;
 }
 
 const ROLE = `You are Calque's slide co-editor, inside its web app. You work with the user on a deck that
@@ -33,11 +36,32 @@ must follow their company's brand pack.
   role slides and the shape_ids of their slots).
 - Answer in the user's language; the deck language is the DeckSpec's.`;
 
+export interface Attachment {
+  file_id: string;
+  name: string;
+  type: string;
+  ref?: string;
+  text?: string;
+  truncated?: boolean;
+  error?: string;
+}
+
+/** The attached files, for the workflow's Ingest step: documents inline, images by reference. */
+function attachments(files: Attachment[]): string {
+  if (!files.length) return "";
+  const one = (f: Attachment) => {
+    if (f.ref) return `<file name="${f.name}" type="${f.type}">Image: place it in a clone value as "image": "${f.ref}".</file>`;
+    if (f.error) return `<file name="${f.name}" type="${f.type}">Could not be read: ${f.error}</file>`;
+    return `<file name="${f.name}" type="${f.type}"${f.truncated ? ' truncated="true"' : ""}>\n${f.text}\n</file>`;
+  };
+  return `# Attached files\n\nThe user attached these files: they are the supplied documents and images to ingest first.\n\n${files.map(one).join("\n\n")}`;
+}
+
 const text = (r: { contents: unknown[] }) =>
   r.contents.map((c) => (c as { text?: string }).text ?? "").join("\n");
 
 /** The system prompt: role, the workflow (MCP prompt) and the always-needed knowledge, inlined. */
-export async function instructions(client: Client, workflow: Workflow, pack_id?: string, deck_id?: string): Promise<string> {
+export async function instructions(client: Client, workflow: Workflow, pack_id?: string, deck_id?: string, files: Attachment[] = []): Promise<string> {
   const prompt = await client.getPrompt({ name: workflow, arguments: pack_id ? { pack_id } : {} });
   const steps = prompt.messages.map((m) => (m.content as { text?: string }).text ?? "").join("\n\n");
   const uris = ["core://doctrine", "core://forms", "core://compositions", "core://anti-slop"];
@@ -48,7 +72,7 @@ export async function instructions(client: Client, workflow: Workflow, pack_id?:
   const deck = deck_id
     ? `# Open deck\n\nThe user has deck \`${deck_id}\` open next to this chat: open_deck it before changing it, change it with patch_deck or add_slides (never a new deck), and pass the comment ids a patch answers in \`resolves\`.`
     : "";
-  return [ROLE, "# Workflow", steps, deck, "# Knowledge", ...knowledge].filter(Boolean).join("\n\n");
+  return [ROLE, "# Workflow", steps, deck, attachments(files), "# Knowledge", ...knowledge].filter(Boolean).join("\n\n");
 }
 
 /** The server's tools the model may call (not the UI-only ones), plus read_resource. */
@@ -62,9 +86,10 @@ async function tools(client: Client): Promise<ToolDef[]> {
       name: t.name,
       description: t.description,
       inputSchema: t.inputSchema as Record<string, unknown>,
-      // a failed call goes back to the model as a result, so it can correct itself
+      // a failed call goes back to the model as an error result (the full JSON), so it can correct itself
       execute: async (args: Record<string, unknown>) => {
         const r = await client.callTool({ name: t.name, arguments: args });
+        if (r.isError) throw new Error(JSON.stringify(r.structuredContent ?? r.content));
         return r.structuredContent ?? r.content;
       },
     })),
@@ -81,7 +106,7 @@ async function tools(client: Client): Promise<ToolDef[]> {
 export async function chat(i: ChatInput): Promise<{ text: string; messages: Message[] }> {
   return runTools({
     model: i.model,
-    instructions: await instructions(i.client, i.workflow ?? (i.deck_id ? "edit-slides" : "build-presentation"), i.pack_id, i.deck_id),
+    instructions: await instructions(i.client, i.workflow ?? (i.deck_id ? "edit-slides" : "build-presentation"), i.pack_id, i.deck_id, i.files),
     messages: i.messages,
     tools: await tools(i.client),
     ...(i.onStep ? { onStep: i.onStep } : {}),

@@ -36,6 +36,7 @@ export function Models({ me }: { me: Me }) {
   const [data, setData] = useState<{ providers: Provider[]; models: Model[] } | null>(null);
   const [tab, setTab] = useState<"configured" | "providers">("configured");
   const [editing, setEditing] = useState<Provider | null>(null);
+  const [removing, setRemoving] = useState<Model | null>(null);
   const [error, setError] = useState<string | null>(null);
   const reload = useCallback(() => api<{ providers: Provider[]; models: Model[] }>("/api/models").then(setData), []);
   useEffect(() => {
@@ -116,7 +117,7 @@ export function Models({ me }: { me: Me }) {
                     </TableCell>
                     <TableCell>
                       {me.admin && (
-                        <Button size="sm" variant="ghost" onClick={() => act(() => api(`/api/models/${encodeURIComponent(m.id)}`, undefined, "DELETE"))}>
+                        <Button size="sm" variant="ghost" onClick={() => setRemoving(m)}>
                           <Trash2 /> Remove
                         </Button>
                       )}
@@ -149,6 +150,31 @@ export function Models({ me }: { me: Me }) {
             </li>
           ))}
         </ul>
+      )}
+      {removing && (
+        <Dialog title={`Remove ${label(removing.provider)} ${removing.model}?`} onClose={() => setRemoving(null)}>
+          <div className="cq-dialog-body">
+            <p>
+              The agent stops running on it, and its key is deleted.
+              {removing.is_default && " It is the default: the most recently configured model takes over."}
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRemoving(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                const id = removing.id;
+                setRemoving(null);
+                void act(() => api(`/api/models/${encodeURIComponent(id)}`, undefined, "DELETE"));
+              }}
+            >
+              <Trash2 /> Remove
+            </Button>
+          </DialogFooter>
+        </Dialog>
       )}
       {editing && (
         <Configure
