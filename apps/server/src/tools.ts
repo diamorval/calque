@@ -407,10 +407,14 @@ export const TOOLS = {
 
   list_decks: tool({
     title: "List decks",
-    description: "Your decks and the decks shared with you, newest change first: id, title, pack, owner, version and your role (owner, editor, commenter, viewer).",
-    input: z.object({}),
+    description:
+      "Your decks and the decks shared with you, newest change first: id, title, pack, owner, version and your role (owner, editor, commenter, viewer). Find one with `query` (words in its title or slides, e.g. the client's name) and `pack_id`.",
+    input: z.object({
+      query: z.string().optional().describe("Words the deck's title or slide text must all contain (case and accents ignored)."),
+      pack_id: z.string().optional().describe("Only the decks on this pack."),
+    }),
     readOnly: true,
-    run: async (app, user) => ({ decks: await app.decks.list(user) }),
+    run: async (app, user, a) => ({ decks: await app.decks.list(user, a) }),
   }),
 
   delete_deck: tool({
@@ -419,6 +423,28 @@ export const TOOLS = {
       "The deck's owner, or an admin: delete the deck for good, with every version, comment, share and file built from it. Cannot be undone: ask the user to confirm first.",
     input: z.object({ deck_id: deckId }),
     run: (app, user, a) => app.decks.remove(user, a.deck_id),
+  }),
+
+  rename_deck: tool({
+    title: "Rename deck",
+    description:
+      "Editor access. Give the deck the name lists show (by default its DeckSpec title); the slides do not change and no version is added. An empty title goes back to the default.",
+    input: z.object({ deck_id: deckId, title: z.string().max(200) }),
+    role: "editor",
+    run: (app, user, a) => app.decks.rename(user, a.deck_id, a.title),
+  }),
+
+  duplicate_deck: tool({
+    title: "Duplicate deck",
+    description:
+      "View access. A new deck you own, a copy of this deck's current version: its history starts fresh at v1, without the original's comments or shares. Default title: the original's + \" (copy)\".",
+    input: z.object({ deck_id: deckId, title: z.string().max(200).optional() }),
+    ui: true,
+    role: "viewer",
+    run: async (app, user, a) => {
+      const r = await app.decks.duplicate(user, a.deck_id, a.title);
+      return { ...r, ...links(app, user, r.deck_id) };
+    },
   }),
 
   share_deck: tool({

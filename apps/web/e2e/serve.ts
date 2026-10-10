@@ -51,6 +51,7 @@ const model = await fakeModel(script, port + 1); // e2e/models.spec.ts configure
 process.env.CALQUE_LLM_BASE_URL = model.url;
 process.env.CALQUE_LLM_API_KEY = "good-key";
 process.env.CALQUE_LLM_MODEL = "gateway-e2e";
+process.env.CALQUE_TEST_PACKS = "1"; // the acme-test pack the scripted agent builds on
 const app = await createApp({ data: mkdtempSync(join(tmpdir(), "calque-e2e-")), db: "memory://", publicUrl });
 const auth = { issuer: idp.issuer, audience: "calque", resource: new URL("/mcp", publicUrl), teamsClaim: "groups" };
 const web = sessions({ issuer: idp.issuer, clientId: "calque-web", publicUrl, teamsClaim: "groups", secret: app.secret });

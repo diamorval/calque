@@ -25,6 +25,9 @@ services:
       CALQUE_LLM_PROVIDER:
       CALQUE_LLM_BASE_URL:
       CALQUE_LLM_API_KEY:
+      CALQUE_DEFAULT_PACK:
+      CALQUE_APP_NAME:
+      CALQUE_APP_LOGO:
     volumes:
       - calque-data:/data # decks, renders, uploads, imported packs
       # the packs are baked in /app/packs; to serve others without a rebuild:

@@ -32,6 +32,8 @@ export interface PackRow {
   version: number;
   /** Hidden from pickers; decks already on it still open. */
   archived: boolean;
+  /** The pack /new preselects (one per workspace). */
+  is_default: boolean;
 }
 
 export class NotFound extends Error {}
@@ -52,15 +54,28 @@ export function visible(p: PackRow, user: User): boolean {
   );
 }
 
-/** Register the packs shipped in `packs/` (CALQUE_PACKS) for the whole workspace, once. */
-export async function seedPacks(db: Db, dir = process.env.CALQUE_PACKS ?? join(REPO, "packs")): Promise<void> {
+/** Register the packs shipped in `packs/` (CALQUE_PACKS) for the whole workspace, once. Test packs
+(`test: true` in pack.yaml, e.g. acme-test) only with CALQUE_TEST_PACKS=1 (tests, e2e, dev); else a
+copy seeded earlier is archived. CALQUE_DEFAULT_PACK: the default pack, unless an admin chose one. */
+export async function seedPacks(
+  db: Db,
+  dir = process.env.CALQUE_PACKS ?? join(REPO, "packs"),
+  opts = { tests: process.env.CALQUE_TEST_PACKS === "1", defaultPack: process.env.CALQUE_DEFAULT_PACK },
+): Promise<void> {
   for (const id of await readdir(dir)) {
-    if (!existsSync(join(dir, id, "pack.yaml"))) continue;
+    const manifest = join(dir, id, "pack.yaml");
+    if (!existsSync(manifest)) continue;
+    if (parse(await readFile(manifest, "utf8"))?.test === true && !opts.tests) {
+      await db.query("update packs set archived = true where id = $1 and owner is null", [id]);
+      continue;
+    }
     await db.query(
       "insert into packs (id, dir, visibility) values ($1, $2, 'workspace') on conflict (id) do nothing",
       [id, join(dir, id)],
     );
   }
+  if (opts.defaultPack)
+    await db.query("update packs set is_default = true where id = $1 and not exists (select 1 from packs where is_default)", [opts.defaultPack]);
   // every pack has its first release on record (seeded, or published before versions existed)
   await db.query(
     "insert into pack_versions (pack_id, version, dir, note) select id, version, dir, 'initial version' from packs on conflict do nothing",
@@ -117,6 +132,7 @@ export async function listPacks(db: Db, user: User, opts: { archived?: boolean; 
           owner: r.owner,
           pack_version: r.version,
           archived: r.archived,
+          default: r.is_default,
           editable: manages(r, user),
         };
       }),
@@ -467,8 +483,21 @@ export async function setVisibility(db: Db, user: User, id: string, visibility: 
 already on it still open, build and export. Owner or admin; `archived: false` brings it back. */
 export async function archivePack(db: Db, user: User, id: string, archived: boolean) {
   await managedPack(db, user, id, "archive it");
-  await db.query("update packs set archived = $2 where id = $1", [id, archived]);
+  // an archived pack is no one's default
+  await db.query("update packs set archived = $2, is_default = is_default and not $2 where id = $1", [id, archived]);
   return { id, archived };
+}
+
+/** Admins: make pack `id` the one /new preselects for everyone (it must be workspace-wide, so all
+see it); `on: false` leaves the workspace with no default. */
+export async function setDefaultPack(db: Db, user: User, id: string, on = true) {
+  if (!isAdmin(user)) throw new Forbidden(`only ${ADMIN_TEAM} set the default pack`);
+  const pack = await getPack(db, user, id);
+  if (on && (pack.archived || pack.visibility !== "workspace")) throw new Error(`the default pack must be workspace-wide and not archived: ${id} is not`);
+  if (on) await db.query("update packs set is_default = false where is_default and id <> $1", [id]);
+  await db.query("update packs set is_default = $2 where id = $1", [id, on]);
+  await audit(db, user, "default", "pack", id, { on });
+  return { id, default: on };
 }
 
 /** A pack's releases, newest first: the changelog, and what `restorePack` can go back to. */

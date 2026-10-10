@@ -282,6 +282,11 @@
       "type": "boolean",
       "default": false
     },
+    "test": {
+      "description": "A test fixture: the server seeds it only when CALQUE_TEST_PACKS=1, never in a client workspace. Default off.",
+      "type": "boolean",
+      "default": false
+    },
     "reconciliation": {
       "description": "Arbitrated gaps between the template theme and tokens.json.",
       "type": "array",

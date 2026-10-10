@@ -13,7 +13,11 @@ node apps/server/src/stdio.ts          # stdio, for a local MCP client (bridge t
 | --- | --- | --- |
 | `DATABASE_URL` | PGlite in `$CALQUE_DATA/pg` | `postgres://…` in production |
 | `CALQUE_DATA` | `.data/` | decks, renders, uploads, imported packs |
-| `CALQUE_PACKS` | `packs/` | packs registered for the whole workspace at start-up |
+| `CALQUE_PACKS` | `packs/` | packs registered for the whole workspace at start-up (see [Client workspaces](#client-workspaces-white-label)) |
+| `CALQUE_TEST_PACKS` | unset | `1`: also seed the test packs (`test: true` in pack.yaml, e.g. `acme-test`); the tests and e2e set it. Unset, a test pack seeded earlier is archived |
+| `CALQUE_DEFAULT_PACK` | unset | the pack New deck preselects, until an admin chooses another (Brand packs page) |
+| `CALQUE_APP_NAME` | `Calque` | the app's name in the web chrome (sign-in page, sidebar, tab title) |
+| `CALQUE_APP_LOGO` | unset: Calque's mark | an image URL for the logo in the web chrome |
 | `CALQUE_PUBLIC_URL` | `http://localhost:$PORT` | base of preview, PNG and download links |
 | `CALQUE_ENGINE` | `uv run … calque_engine call` | engine command (e.g. `python -m calque_engine call`) |
 | `CALQUE_OIDC_ISSUER` | unset: no auth, loopback only | e.g. `https://sso.example.com/realms/<realm>` |
@@ -59,6 +63,23 @@ node scripts/docker-smoke.ts   # a deck built and rendered end to end (also run 
 
 Put an HTTPS reverse proxy in front of `:8787` at `CALQUE_PUBLIC_URL`; the health check is
 `GET /api/tools`.
+
+### Client workspaces (white-label)
+
+A deployment for a client shows neither Diametral nor its pack unless it chooses to:
+
+- **Packs**: every folder of `CALQUE_PACKS` with a `pack.yaml` is seeded workspace-wide at
+  start-up. Point it at a folder holding only the client's pack(s) (mount it, e.g.
+  `-v ./client-packs:/app/client-packs:ro -e CALQUE_PACKS=/app/client-packs`) so the `diametral`
+  pack is not offered; or import the client's template on the Brand packs page and archive the
+  others. Test packs (`test: true`, e.g. `acme-test`) are never seeded unless `CALQUE_TEST_PACKS=1`.
+  A pack already seeded stays registered when it leaves `CALQUE_PACKS`: archive it there.
+- **Default pack**: `CALQUE_DEFAULT_PACK=<id>` (or an admin's "Make default" on the Brand packs
+  page) preselects it in New deck and Import PPTX.
+- **App chrome**: the name and logo on the sign-in page, the sidebar and the tab title come from
+  `CALQUE_APP_NAME` (default `Calque`) and `CALQUE_APP_LOGO` (an image URL; default Calque's
+  mark), served at `GET /api/branding`. The web app keeps its UI kit (diametral-ds) but shows no
+  Diametral mark: Diametral appears only as a pack, when that pack is seeded.
 
 ## Connect
 
@@ -152,10 +173,24 @@ Every grant, revocation, general access change, link reset and transfer is logge
   answers `lint_errors` (and a `warning` without `reason`) and logs `export_with_errors` (version,
   error count, `reason` or null) in the `audit` table. The web app asks for the reason before exporting.
 
+### Finding and managing decks
+
+- **Search**: `list_decks {query?, pack_id?}` (or `GET /api/decks?q=&pack_id=`, the search box and
+  pack filter on the Decks page) keeps the decks whose name or current slides contain every word of
+  `query`, case and accents ignored: a client's name finds the decks made for it (cover, slide
+  text), with no client field to fill in.
+- **Rename** (`rename_deck {deck_id, title}`, editor): the name the lists, the editor and the export
+  file names show. It is stored on the deck, apart from its DeckSpec: no new version, and later
+  versions keep it. By default (and after renaming to `""`) a deck shows its DeckSpec title.
+- **Duplicate** (`duplicate_deck {deck_id, title?}`, viewer, signed in): a new deck owned by the
+  caller, a copy of the current version as its v1, titled `<name> (copy)` by default. History,
+  comments, shares and approval stay with the original. An imported deck's file comes along, and the
+  uploaded images it places are copied to the caller's uploads.
+
 ### Audit log and deletion
 
 The `audit` table records who did what, never the content: deck `create`, `edit` (version, note),
-`export`, `delete`, the sharing actions above; pack `publish`, `edit`, `visibility`; model `add`,
+`export`, `rename`, `delete`, the sharing actions above; pack `publish`, `edit`, `visibility`, `default`; model `add`,
 `update`, `default`, `remove`; `sign_in`; retention `purge`. Rows outlive what they name. Admins
 read it at `GET /api/admin/audit?actor=&action=&target_type=&target_id=&since=&until=&limit=`
 (newest first, at most 1000).
@@ -224,7 +259,8 @@ no server-side session: a user removed from Entra keeps access until the 8-hour 
 | Route | |
 | --- | --- |
 | `GET /api/me` | the signed-in user, their teams, `admin` |
-| `GET /api/decks` | the user's decks and the decks shared with them, each with `role` and `owner` |
+| `GET /api/decks` | the user's decks and the decks shared with them, each with `role` and `owner`; `?q=` and `?pack_id=` filter them as `list_decks` does |
+| `GET /api/branding` | `{name, logo}` for the web chrome (`CALQUE_APP_NAME`, `CALQUE_APP_LOGO`), no sign-in needed |
 | `POST /api/files` | multipart `file` (50 MB max, else 413) → `{file_id, name, size, type}`, owned by the caller; `?ticket=` from `upload_url` instead of credentials |
 | `POST /api/packs/drafts` | multipart `template` (.pptx or .potx), `id`, `name`, optional `tokens` (tokens.json): extracted draft (manifest with guessed roles and the fonts/colours the slides use, resolved colours and fonts to review, archetype names, one PNG per template slide) |
 | `POST /api/packs/drafts/:id/fonts` | multipart `font` (.ttf, .otf): its family is allowed by lint (`lint.extra_fonts`) on publish |
@@ -235,6 +271,7 @@ no server-side session: a user removed from Entra keeps access until the 8-hour 
 | `POST /api/packs/:id/edit` | an edit draft of the current release, owner or admin |
 | `POST /api/packs/:id/visibility` | `{visibility, teams?}`, owner or admin |
 | `POST /api/packs/:id/archive` | `{archived}`: hidden from pickers and new decks, its decks still open; owner or admin |
+| `POST /api/packs/:id/default` | `{default}` (default `true`): the pack New deck preselects for everyone (workspace-wide, not archived); `false` clears it; admins. `list_packs` and `GET /api/packs` mark it `default` |
 | `GET /api/packs/:id/versions` | the pack's releases (changelog), newest first; owner or admin |
 | `POST /api/packs/:id/restore` | `{version, note?}`: that release becomes current again, as a new release; owner or admin |
 

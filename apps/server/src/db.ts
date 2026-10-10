@@ -118,7 +118,12 @@ end $$;
 -- replaced by the deck's share link and general access
 drop table if exists deck_links;
 delete from deck_shares where principal_type not in ('user', 'team');
-create unique index if not exists one_default_model on models (is_default) where is_default;`;
+create unique index if not exists one_default_model on models (is_default) where is_default;
+-- a deck's name set by rename_deck; null: the title of its current DeckSpec
+alter table decks add column if not exists name text;
+-- the pack /new preselects (CALQUE_DEFAULT_PACK, or an admin's choice)
+alter table packs add column if not exists is_default boolean not null default false;
+create unique index if not exists one_default_pack on packs (is_default) where is_default;`;
 
 /** Postgres when `url` is a postgres:// URL, else embedded PGlite (a data dir, or in memory). */
 export async function openDb(url = process.env.DATABASE_URL): Promise<Db> {
