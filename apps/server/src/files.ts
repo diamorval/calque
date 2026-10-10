@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { jwtVerify, SignJWT } from "jose";
 import type { Db } from "./db.ts";
@@ -38,6 +38,15 @@ export async function getFile(db: Db, data: string, user: User, id: string): Pro
   const f = rows[0];
   if (!f) throw new NotFound(`no file ${JSON.stringify(id)}`);
   return { file_id: f.id, name: f.name, size: Number(f.size), type: f.type, path: uploadPath(data, f.id) };
+}
+
+/** A copy of upload `id` (whoever owns it) for `user`: a slide copied from a deck they may read
+places its images as their own files. The caller checks they may read the slide. */
+export async function copyFile(db: Db, data: string, user: User, id: string): Promise<StoredFile> {
+  const { rows } = await db.query<{ name: string; type: string }>("select name, type from files where id = $1", [id]).catch(() => ({ rows: [] }));
+  const f = rows[0];
+  if (!f) throw new NotFound(`no file ${JSON.stringify(id)}`);
+  return saveFile(db, data, user, f.name, f.type, await readFile(uploadPath(data, id)));
 }
 
 export class TooLarge extends Error {}

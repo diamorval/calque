@@ -7,7 +7,7 @@ import { audit } from "./audit.ts";
 import { recordLint } from "./compliance.ts";
 import type { Db } from "./db.ts";
 import { engine } from "./engine.ts";
-import { FILE_REF, getFile, saveFile, uploadPath } from "./files.ts";
+import { copyFile, FILE_REF, getFile, saveFile, uploadPath } from "./files.ts";
 import { isAdmin } from "./models.ts";
 import { Forbidden, getPack, listPacks, NotFound, visible, type PackRow, type User } from "./packs.ts";
 
@@ -559,13 +559,62 @@ export class Decks {
   /** Copy slides of deck `from` (viewer access) into deck `to` (editor access) at `at`, as the next
   version of `to`. Drawn slides copy to any pack (they are redrawn on the target's); template and
   imported clones only to a deck on the same pack. Imported slides are grafted into the target's
-  base file. Ids taken in the target get a `-copy` suffix; the result maps old ids to new ones. */
-  copySlides(user: User, from: string, ids: string[], to: string, at?: number, version?: number) {
-    return this.serial(to, () => this.copyNow(user, from, ids, to, at, version));
+  base file. Ids taken in the target get a `-copy` suffix; the result maps old ids to new ones.
+  Images uploaded by someone else are copied to the caller's uploads. `reader`: who must be able to
+  read `from` (default the caller; the slide library reads its own decks, library.ts). */
+  copySlides(user: User, from: string, ids: string[], to: string, at?: number, version?: number, reader: User = user) {
+    return this.serial(to, () => this.copyNow(user, from, ids, to, at, version, reader));
   }
 
-  private async copyNow(user: User, from: string, ids: string[], to: string, at?: number, version?: number) {
+  /** `slides` with the `file:<id>` images `user` does not own rewritten to copies of their own. */
+  private async adoptFiles(user: User, slides: DeckSpec["slides"]): Promise<DeckSpec["slides"]> {
+    const ids = new Set<string>();
+    mapFileRefs({ slides } as DeckSpec, (fid) => (ids.add(fid), fid));
+    const copies = new Map<string, string>();
+    for (const fid of ids) {
+      const mine = await getFile(this.db, this.data, user, fid).then(
+        () => true,
+        () => false,
+      );
+      if (!mine) copies.set(fid, (await copyFile(this.db, this.data, user, fid)).file_id);
+    }
+    return copies.size ? mapFileRefs({ slides } as DeckSpec, (fid) => `${FILE_REF}${copies.get(fid) ?? fid}`).slides : slides;
+  }
+
+  /** A one-slide deck owned by `owner` (a slide library's), holding a copy of slide `slideId` of
+  deck `from` (viewer access): its images copied to `owner`, an imported slide grafted into a file
+  of its own. Returns the new deck's id. */
+  async snapshot(user: User, from: string, slideId: string, owner: User, title: string): Promise<string> {
     const src = await this.deck(user, from, "viewer");
+    const spec = await this.spec(from, src.head);
+    const found = spec.slides.find((x) => x.id === slideId);
+    if (!found) throw new NotFound(`deck ${from} has no slide ${JSON.stringify(slideId)}`);
+    const [slide] = (await this.adoptFiles(owner, [structuredClone(found)])) as [DeckSpec["slides"][number]];
+    const id = randomUUID();
+    await mkdir(this.dir(id), { recursive: true });
+    const one: DeckSpec = { ...spec, title, slides: [slide] };
+    delete one.base;
+    try {
+      if (slide.source.kind === "clone" && slide.source.from === "base") {
+        if (!spec.base) throw new Error(`deck ${from} has no imported file`);
+        one.base = "base.pptx";
+        const res = await engine<{ slides: number[] }>("graft", {
+          pack: src.packDir,
+          out: join(this.dir(id), one.base),
+          sources: [{ pptx: this.basePath(from, spec.base), slide: slide.source.slide }],
+        });
+        slide.source.slide = res.slides[0] as number;
+      }
+      await this.create(owner, one, `from ${src.title}`, id);
+    } catch (e) {
+      await rm(this.dir(id), { recursive: true, force: true });
+      throw e;
+    }
+    return id;
+  }
+
+  private async copyNow(user: User, from: string, ids: string[], to: string, at?: number, version?: number, reader: User = user) {
+    const src = await this.deck(reader, from, "viewer");
     const srcSpec = await this.spec(from, version ?? src.head);
     const dst = await this.deck(user, to, "editor");
     const spec = structuredClone(await this.spec(to, dst.head));
@@ -574,6 +623,7 @@ export class Decks {
       if (!s) throw new NotFound(`deck ${from} has no slide ${JSON.stringify(sid)}`);
       return structuredClone(s);
     });
+    picked.splice(0, picked.length, ...(await this.adoptFiles(user, picked)));
     const clones = picked.filter((s) => s.source.kind === "clone");
     if (clones.length && src.pack_id !== dst.pack_id)
       throw new Error(

@@ -1,9 +1,9 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { PROVIDERS, testModel, type ModelConfig, type ModelOptions, type ProviderId, type ProviderInfo } from "@calque/llm";
 import { audit } from "./audit.ts";
 import type { Db } from "./db.ts";
 import { allowedHosts, checkEndpoint } from "./egress.ts";
 import { ADMIN_TEAM, Forbidden, isAdmin, NotFound, type User } from "./packs.ts";
+import { sealer } from "./seal.ts";
 
 export { Forbidden, isAdmin };
 
@@ -71,25 +71,14 @@ const options = (i: Pick<ModelInput, "resource" | "api_version" | "managed_ident
 
 export class Models {
   private readonly db: Db;
-  private readonly key: Buffer;
+  private readonly seal: (text: string) => string;
+  private readonly open: (sealed: string) => string;
 
   constructor(db: Db, secret: string) {
     this.db = db;
-    this.key = createHash("sha256").update(secret).digest();
-  }
-
-  private seal(text: string): string {
-    const iv = randomBytes(12);
-    const c = createCipheriv("aes-256-gcm", this.key, iv);
-    const body = Buffer.concat([c.update(text, "utf8"), c.final()]);
-    return Buffer.concat([iv, c.getAuthTag(), body]).toString("base64");
-  }
-
-  private open(sealed: string): string {
-    const b = Buffer.from(sealed, "base64");
-    const d = createDecipheriv("aes-256-gcm", this.key, b.subarray(0, 12));
-    d.setAuthTag(b.subarray(12, 28));
-    return Buffer.concat([d.update(b.subarray(28)), d.final()]).toString("utf8");
+    const s = sealer(secret);
+    this.seal = s.seal;
+    this.open = s.open;
   }
 
   private config(r: Row): ModelConfig {

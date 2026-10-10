@@ -1,9 +1,10 @@
 import { Alert, AlertDescription } from "diametral-ds/alert";
 import { Button } from "diametral-ds/button";
 import { Kbd } from "diametral-ds/kbd";
-import { ArrowUp, Check, Paperclip, Sparkles, X } from "lucide-react";
+import { ArrowUp, Check, Cloud, Paperclip, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { agent, api, upload, type ToolStep } from "../api.ts";
+import { M365Picker, useM365 } from "./M365.tsx";
 
 /** A file attached to the conversation, uploaded to /api/files. */
 interface Attached {
@@ -11,6 +12,7 @@ interface Attached {
   name: string;
 }
 const ACCEPT = "image/*,.pptx,.pdf,.docx,.xlsx,.csv,.txt,.md";
+const M365_ACCEPT = /\.(pptx|pdf|docx|xlsx|csv|txt|md|png|jpe?g|gif|webp|svg)$/i;
 
 /** An AI SDK model message, as the server returns them; the client keeps the conversation. */
 export interface ChatMessage {
@@ -168,6 +170,8 @@ export function Chat(props: {
   const [files, setFiles] = useState<Attached[]>(() => load<Attached>(`${props.storageKey}:files`));
   const [pending, setPending] = useState<Attached[]>([]);
   const [uploading, setUploading] = useState(false);
+  const m365 = useM365();
+  const [picking, setPicking] = useState(false);
   const log = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
@@ -342,6 +346,19 @@ export function Chat(props: {
           >
             {uploading ? <span className="cq-spinner" /> : <Paperclip />}
           </Button>
+          {m365 && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label="From Microsoft 365"
+              title="Attach a file from OneDrive or SharePoint"
+              disabled={uploading || !!steps || props.disabled}
+              onClick={() => setPicking(true)}
+            >
+              <Cloud />
+            </Button>
+          )}
           {props.footer}
           {choice.models.length > 1 && (
             <select className="cq-select cq-model-pick" aria-label="AI model" value={choice.picked} onChange={(e) => choice.pick(e.target.value)}>
@@ -365,6 +382,15 @@ export function Chat(props: {
           </Button>
         </div>
       </form>
+      {picking && m365 && (
+        <M365Picker
+          status={m365}
+          accept={M365_ACCEPT}
+          title="Attach from Microsoft 365"
+          onPick={(f) => setPending((p) => [...p, { file_id: f.file_id, name: f.name }])}
+          onClose={() => setPicking(false)}
+        />
+      )}
     </section>
   );
 }

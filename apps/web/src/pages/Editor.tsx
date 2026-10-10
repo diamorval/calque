@@ -3,12 +3,14 @@ import { Alert, AlertDescription } from "diametral-ds/alert";
 import { Button } from "diametral-ds/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "diametral-ds/table";
 import { Tag } from "diametral-ds/tag";
-import { BadgeCheck, CircleCheck, Download, FileText, History, ListChecks, ListPlus, Play, Send, Share2, Sparkles, TriangleAlert, Undo2, X } from "lucide-react";
+import { BadgeCheck, BookMarked, CircleCheck, Cloud, Download, FileText, History, ListChecks, ListPlus, Play, Send, Share2, Sparkles, TriangleAlert, Undo2, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { agent, tool } from "../api.ts";
+import { agent, api, tool, type Me, type Pack } from "../api.ts";
 import { Chat, type Ask } from "../components/Chat.tsx";
 import { AddSlides, ReviewDeck } from "../components/DeckActions.tsx";
 import { ExportWithErrors } from "../components/ExportGate.tsx";
+import { AddToLibrary, LibraryPanel } from "../components/Library.tsx";
+import { SaveToM365, useM365 } from "../components/M365.tsx";
 import { ShareDeck } from "../components/Share.tsx";
 import { bySeverity, type Finding, lintSummary } from "../lint.ts";
 import { navigate } from "../nav.ts";
@@ -29,7 +31,17 @@ export function Editor({ id }: { id: string }) {
   const [history, setHistory] = useState(false);
   // toolbar actions that go through the agent chat, and their dialogs
   const [ask, setAsk] = useState<Ask | null>(null);
-  const [dialog, setDialog] = useState<"add" | "review" | "share" | "export" | null>(null);
+  const [dialog, setDialog] = useState<"add" | "review" | "share" | "export" | "m365" | null>(null);
+  // the slide library: the slide being added, who the viewer is and whether they manage the pack
+  const [adding, setAdding] = useState<{ id: string; number: number } | null>(null);
+  const [library, setLibrary] = useState(0);
+  const [me, setMe] = useState<Me | null>(null);
+  const [packs, setPacks] = useState<Pack[]>([]);
+  const m365 = useM365();
+  useEffect(() => {
+    api<Me>("/api/me").then(setMe, () => setMe(null));
+    tool<{ packs: Pack[] }>("list_packs").then((r) => setPacks(r.packs), () => setPacks([]));
+  }, []);
 
   const reload = useCallback(async () => {
     try {
@@ -78,6 +90,7 @@ export function Editor({ id }: { id: string }) {
   const approval = deck.approval?.enabled ? deck.approval : null;
   const setApproval = (status: "draft" | "in_review" | "approved", label: string) =>
     void run(label, () => tool("set_approval", { deck_id: id, status }));
+  const manages = packs.find((p) => p.id === deck.pack_id)?.editable ?? false;
   return (
     <>
       <DeckViewer
@@ -161,6 +174,11 @@ export function Editor({ id }: { id: string }) {
             <Button onClick={() => (errors.length ? setDialog("export") : void exportPptx().catch((e: Error) => setError(e.message)))}>
               <Download /> Export PPTX
             </Button>
+            {m365 && (
+              <Button variant="outline" onClick={() => setDialog("m365")}>
+                <Cloud /> Save to SharePoint
+              </Button>
+            )}
             {role === "owner" && (
               <Button variant="outline" onClick={() => setDialog("share")}>
                 <Share2 /> Share
@@ -188,6 +206,23 @@ export function Editor({ id }: { id: string }) {
             />
           )
         }
+        tabs={[
+          {
+            id: "library",
+            label: "Library",
+            icon: <BookMarked />,
+            content: <LibraryPanel key={library} pack_id={deck.pack_id} deck_id={id} canEdit={edits} manages={manages} me={me?.id ?? null} onInserted={() => void reload()} />,
+          },
+        ]}
+        {...(edits
+          ? {
+              slideActions: (s: { id: string; number: number }) => (
+                <Button variant="ghost" size="sm" onClick={() => setAdding({ id: s.id, number: s.number })}>
+                  <BookMarked /> Add to library
+                </Button>
+              ),
+            }
+          : {})}
         {...(role !== "viewer"
           ? {
               onComment: async (c: NewComment) => {
@@ -218,6 +253,10 @@ export function Editor({ id }: { id: string }) {
       )}
       {dialog === "share" && <ShareDeck deck_id={id} onClose={() => setDialog(null)} />}
       {dialog === "export" && <ExportWithErrors errors={errors} onClose={() => setDialog(null)} onExport={exportPptx} />}
+      {dialog === "m365" && m365 && <SaveToM365 status={m365} deck_id={id} errors={errors.length} onClose={() => setDialog(null)} />}
+      {adding && (
+        <AddToLibrary deck_id={id} slide_id={adding.id} number={adding.number} manages={manages} onClose={() => setAdding(null)} onAdded={() => setLibrary((n) => n + 1)} />
+      )}
       {dialog === "add" && <AddSlides onClose={() => setDialog(null)} onAsk={setAsk} />}
       {dialog === "review" && (
         <ReviewDeck

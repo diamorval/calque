@@ -17,7 +17,9 @@ no deck ceremony.
 0. **Pack.** If none is active, `list_packs` and ask (one pack → use it).
 1. **Understand the ask.** Read the exemplar: the slide must pass for a finished slide, not a
    filled template. For each slide: what does it say, which message type, which form (doctrine
-   table). Mine any supplied facts. One question at a time, with your recommended answer, only on
+   table). Mine any supplied facts. A proof slide (case study, reference, team bio,
+   boilerplate) may already exist approved: `library_list` first, and `library_insert` a match
+   rather than redrawing it. One question at a time, with your recommended answer, only on
    a real blind spot (a missing figure, the audience). A clear ask means zero questions.
 2. **Write the DeckSpec**: one entry per slide, `{message, message_type, form, source}`. No
    `cover`, `summary`, `divider` or `closing` unless that exact slide was requested. Copy fitted to

@@ -133,6 +133,23 @@ describe("DeckViewer", () => {
     expect(onResolve).toHaveBeenLastCalledWith([3], "open");
   });
 
+  it("adds the host's side-panel tabs and actions on the slide shown", () => {
+    const act = vi.fn();
+    render(
+      <DeckViewer
+        deck={deck}
+        tabs={[{ id: "library", label: "Library", content: <p>Approved slides</p> }]}
+        slideActions={(s) => <button onClick={() => act(s.id)}>Add to library</button>}
+      />,
+    );
+    expect(screen.queryByRole("tabpanel", { name: "Library" })).toBeNull(); // hidden until picked
+    fireEvent.click(screen.getByRole("tab", { name: "Library" }));
+    expect(screen.getByRole("tabpanel", { name: "Library" }).textContent).toBe("Approved slides");
+    fireEvent.click(screen.getByRole("button", { name: "Next slide" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add to library" }));
+    expect(act).toHaveBeenCalledWith("regions");
+  });
+
   it("shows the approval status when the pack turns it on", () => {
     render(<DeckViewer deck={{ ...deck, approval: { enabled: true, status: "in_review", can_request: false, can_withdraw: true, can_approve: false } }} />);
     expect(screen.getByText("In review")).toBeTruthy();

@@ -27,6 +27,11 @@ do not fill it: signatures are cloned for identity, content slides are derived f
    goes into a picture slot as `"image": "file:<file_id>"`; a file you hold yourself is uploaded
    through `upload_url` first, never pasted as base64. If an agreed storyline exists, it is the
    outline: do not re-argue it.
+   **Proof comes from the slide library.** Before naming a gap for a proof point (a case study, a
+   reference, a client logo, a team bio, standard boilerplate), search the pack's approved slides
+   with `library_list` (words of the audience's sector, function or offer; then tags). A match is
+   placed with `library_insert` after `create_deck` and adapted with `patch_deck`; only when
+   nothing fits does the beat become a named gap.
 2. **See what good looks like.** Read the exemplar: the moves (title length, eyebrow, where a
    number may be huge, imagery density), never the copy.
 3. **Deck type and narrative.** Name the type (pitch, proposal, debrief, internal, plenary…), the

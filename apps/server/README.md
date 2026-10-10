@@ -27,12 +27,16 @@ node apps/server/src/stdio.ts          # stdio, for a local MCP client (bridge t
 | `CALQUE_TEAMS_MAP_ONLY` | unset | `1`: drop the groups the map does not name |
 | `CALQUE_OIDC_CLIENT_ID` | the audience | the web app's OIDC client (authorization code + PKCE) |
 | `CALQUE_OIDC_CLIENT_SECRET` | unset: public client | its secret, for a confidential client |
-| `CALQUE_SECRET` | random, in `$CALQUE_DATA/secret` | seals model API keys at rest (AES-256-GCM) and sessions: required when `CALQUE_OIDC_ISSUER` is set (the server refuses to start without it) |
+| `CALQUE_SECRET` | random, in `$CALQUE_DATA/secret` | seals model API keys and Microsoft 365 refresh tokens at rest (AES-256-GCM) and sessions: required when `CALQUE_OIDC_ISSUER` is set (the server refuses to start without it) |
 | `CALQUE_ADMIN_TEAM` | `calque-admins` | team allowed to configure AI models, to manage every brand pack (seeded ones included) and, on any deck, see who has access, make it private, reset its link and transfer it (never to read it) |
 | `CALQUE_LLM_MODEL` | unset | preconfigured gateway, saved as model `env`, default unless another is set |
 | `CALQUE_LLM_PROVIDER` / `_BASE_URL` / `_API_KEY` | `openai-compatible` / – / – | the gateway's provider, endpoint and key |
 | `CALQUE_LLM_HEADERS` | unset | JSON object of extra request headers (e.g. `{"Ocp-Apim-Subscription-Key": "…"}`), sealed at rest |
 | `CALQUE_LLM_AZURE_RESOURCE` / `_API_VERSION` / `_MANAGED_IDENTITY` | – / `v1` / – | Azure OpenAI (`CALQUE_LLM_PROVIDER=azure`, the model is the deployment): resource name, `api-version`, `1` to sign in with the managed identity |
+| `CALQUE_M365_CLIENT_ID` | unset: no Microsoft 365 | the Entra app registration that lets users connect OneDrive and SharePoint (see [Microsoft 365](#microsoft-365-onedrive-and-sharepoint)) |
+| `CALQUE_M365_CLIENT_SECRET` | unset: public client | its secret, for a confidential (Web) client |
+| `CALQUE_M365_TENANT` | `organizations` | tenant id or domain to sign in against (`organizations`: any work account) |
+| `CALQUE_M365_AUTHORITY` / `_GRAPH` | `https://login.microsoftonline.com` / `https://graph.microsoft.com/v1.0` | sign-in and Graph endpoints (national clouds, tests) |
 | `CALQUE_RETENTION_DAYS` | unset: keep everything | delete decks untouched for that many days and uploads older than that, at start and daily (the audit log is kept) |
 | `CALQUE_RATE_LIMIT` | on | `off` lifts the per-minute limits on `/auth/*` (30 per address), agent runs (30 per user) and model tests (10 per user) |
 | `CALQUE_TRUST_PROXY` | unset | `1`: rate-limit by the first `X-Forwarded-For` hop (behind your reverse proxy) instead of the socket address |
@@ -114,7 +118,22 @@ removed, moved, resized or restyled, or whose text the spec cannot hold, becomes
 clone kept exactly as the client left it. The result's `import` report lists `drawn`, `imported`,
 `demoted` (with the reason) and `conflicts` (drawn slides changed in Calque after the export: the
 file wins). `copy_slides` copies slides between decks: drawn slides to any pack, template and
-imported clones to the same pack (imported ones are grafted into the target's base file).
+imported clones to the same pack (imported ones are grafted into the target's base file). Images
+another user uploaded are copied into the caller's uploads.
+
+### Slide library
+
+Each brand pack has a library of approved slides people reuse: case studies, references, client
+logos, team bios, boilerplate. `library_add` copies one slide of a deck you edit into it, with a
+title and tags; the pack's owner or an admin approves it (`library_review`, `approve`), and their
+own additions are approved at once. Everyone who sees the pack searches the approved entries
+(`library_list`: words of the title or tags, `tags`) and inserts one into a deck
+(`library_insert`, the `copy_slides` rules). A pending entry is visible only to its author and the
+pack's managers; `library_review` `remove` rejects or retires an entry (its author may withdraw a
+pending one). An entry is a copy: a hidden one-slide deck owned by `library:<pack id>` (its images
+and imported slide copied with it), so editing or deleting the source deck leaves it as it was, and
+`CALQUE_RETENTION_DAYS` keeps it. `GET /api/library/:id/slide.png` is its thumbnail. The workflows
+(core/workflows) look there for proof points before naming a gap.
 
 ### Sharing
 
@@ -219,8 +238,48 @@ Files are capped at 50 MB, stored under `$CALQUE_DATA/uploads/<file_id>`, and us
 uploader. `{base64}` (and `{path}` on a stdio server) still work.
 
 Outputs: `export_pptx` (`/decks/:id/deck.pptx`) and `export_pdf` (`/decks/:id/deck.pdf`, rendered by
-LibreOffice with the pack's fonts, like the previews; one file per version). Saving to
-SharePoint/OneDrive/Teams is not built: it needs Microsoft Graph credentials.
+LibreOffice with the pack's fonts, like the previews; one file per version), and `m365_save` to
+OneDrive or SharePoint (below).
+
+### Microsoft 365: OneDrive and SharePoint
+
+With `CALQUE_M365_CLIENT_ID` set, each user connects their own Microsoft 365 account once, then:
+
+- `m365_list` browses their OneDrive (default), a folder (`folder_id`, `drive_id`), a search in a
+  drive (`search`), SharePoint sites by name (`sites`) and a site's document libraries (`site_id`).
+- `m365_import` copies a file (PowerPoint, Word, Excel, PDF, CSV, text, image; 50 MB max) into
+  their uploads and returns a `file_id`, used like an upload: `import_pptx`, `import_pack`, chat
+  attachments, `file:<file_id>` images.
+- `m365_save` saves a deck as PPTX or PDF into a folder (default: their OneDrive root) through an
+  upload session, never overwriting (a taken name gets a new one), and returns its `web_url`. A
+  PPTX with lint ERRORs takes a `reason`, recorded like `export_pptx`.
+
+In the web app: *From Microsoft 365* in the Import PPTX dialog and next to the chat's attach button,
+and *Save to SharePoint* next to Export.
+
+**Connecting.** This is separate from sign-in (which may use another issuer, and keeps no token):
+OAuth authorization code + PKCE against Entra, scopes `offline_access User.Read
+Files.ReadWrite.All Sites.Read.All` (delegated, no admin consent needed; `Files.ReadWrite.All`
+because saving into a SharePoint library is a write outside the user's OneDrive). The web app links
+to `/auth/m365/connect?return=<path>`; an MCP client gets that URL in the tool's error, for the
+user to open in a browser (signed in to Calque first, through `/auth/login`: a bearer link could
+bind a Microsoft account to the wrong Calque user). The callback,
+`<public url>/auth/m365/callback`, stores the user's refresh token sealed with AES-256-GCM under
+`CALQUE_SECRET` (set it: a rotated secret means reconnecting), keeps access tokens in memory only,
+and calls Graph with plain `fetch` as the user, so Calque reaches only what they can open. A
+revoked or expired grant deletes the stored token and asks to connect again.
+
+**App registration.** In Entra, *App registrations > New registration*: redirect URI (Web)
+`<public url>/auth/m365/callback`; *API permissions* > Microsoft Graph > Delegated: `User.Read`,
+`Files.ReadWrite.All`, `Sites.Read.All`, `offline_access`; a client secret for
+`CALQUE_M365_CLIENT_SECRET`. It may be the sign-in registration with this redirect URI added.
+
+| Route | |
+| --- | --- |
+| `GET /api/m365` | `{configured, connected, account}` for the caller |
+| `DELETE /api/m365` | disconnect: the stored refresh token is deleted |
+| `GET /auth/m365/connect` | start connecting as the signed-in user (else sign-in first); `?return=` a path on this site |
+| `GET /auth/m365/callback` | Entra's redirect: tokens kept, back to `return` |
 
 ## Web app
 
@@ -273,6 +332,7 @@ access before their 8-hour cookie expires, provision the enterprise application 
 | `GET /api/decks` | the user's decks and the decks shared with them, each with `role` and `owner`; `?q=` and `?pack_id=` filter them as `list_decks` does |
 | `GET /api/branding` | `{name, logo}` for the web chrome (`CALQUE_APP_NAME`, `CALQUE_APP_LOGO`), no sign-in needed |
 | `POST /api/files` | multipart `file` (50 MB max, else 413) → `{file_id, name, size, type}`, owned by the caller; `?ticket=` from `upload_url` instead of credentials |
+| `GET /api/library/:id/slide.png` | a slide library entry's image, for whoever may see the entry |
 | `POST /api/packs/drafts` | multipart `template` (.pptx or .potx), `id`, `name`, optional `tokens` (tokens.json): extracted draft (manifest with guessed roles and the fonts/colours the slides use, resolved colours and fonts to review, archetype names, one PNG per template slide) |
 | `POST /api/packs/drafts/:id/fonts` | multipart `font` (.ttf, .otf): its family is allowed by lint (`lint.extra_fonts`) on publish |
 | `POST /api/packs/drafts/:id/template` | multipart `template`: a new template.pptx; the map and template-bound manifest fields are re-extracted |

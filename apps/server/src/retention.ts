@@ -20,7 +20,9 @@ export function retentionDays(env = process.env): number | undefined {
 export async function purge(app: App, days: number, now = new Date()) {
   const cutoff = new Date(now.getTime() - days * 86_400_000);
   const { rows } = await app.db.query<{ id: string }>(
-    `select d.id from decks d join deck_versions v on v.deck_id = d.id and v.version = d.head where v.created_at < $1`,
+    // a slide library's entries (library.ts) stay until removed from the library
+    `select d.id from decks d join deck_versions v on v.deck_id = d.id and v.version = d.head
+     where v.created_at < $1 and d.owner not like 'library:%'`,
     [cutoff.toISOString()],
   );
   for (const { id } of rows) await app.decks.remove(RETENTION, id);

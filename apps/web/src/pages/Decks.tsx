@@ -3,9 +3,10 @@ import { Button } from "diametral-ds/button";
 import { DialogFooter } from "diametral-ds/dialog";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "diametral-ds/empty";
 import { Input } from "diametral-ds/input";
-import { Copy, FileUp, LayoutGrid, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { Cloud, Copy, FileUp, LayoutGrid, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { api, fileArg, tool, type Pack } from "../api.ts";
+import { M365Picker, useM365 } from "../components/M365.tsx";
 import { go, navigate } from "../nav.ts";
 import { ago, Dialog, Field, FileDrop, PageHead, Spinner } from "../ui.tsx";
 
@@ -270,6 +271,10 @@ function ImportPptx({ onClose }: { onClose: () => void }) {
   const [pack, setPack] = useState("");
   const [language, setLanguage] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  // a file picked in OneDrive or SharePoint, already copied into Calque
+  const [cloud, setCloud] = useState<{ file_id: string; name: string } | null>(null);
+  const [picking, setPicking] = useState(false);
+  const m365 = useM365();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pick = (p?: Pack) => {
@@ -286,11 +291,11 @@ function ImportPptx({ onClose }: { onClose: () => void }) {
 
   async function submit(e: FormEvent) {
     e.preventDefault();
-    if (!file || !pack) return;
+    if (!(file || cloud) || !pack) return;
     setBusy(true);
     setError(null);
     try {
-      const r = await tool<{ deck_id: string }>("import_pptx", { file: await fileArg(file), pack_id: pack, language });
+      const r = await tool<{ deck_id: string }>("import_pptx", { file: cloud ? { file_id: cloud.file_id } : await fileArg(file as File), pack_id: pack, language });
       navigate(`/d/${r.deck_id}`);
     } catch (err) {
       setError((err as Error).message);
@@ -305,10 +310,18 @@ function ImportPptx({ onClose }: { onClose: () => void }) {
           <FileDrop
             label="PPTX file"
             accept=".pptx"
-            title={file ? file.name : "Drop the .pptx here"}
+            title={cloud ? cloud.name : file ? file.name : "Drop the .pptx here"}
             hint="Calque edits its own copy: your file is never overwritten."
-            onFiles={(f) => setFile(f[0] ?? null)}
+            onFiles={(f) => {
+              setFile(f[0] ?? null);
+              setCloud(null);
+            }}
           />
+          {m365 && (
+            <Button type="button" variant="outline" onClick={() => setPicking(true)}>
+              <Cloud /> From Microsoft 365
+            </Button>
+          )}
           <Field label="Brand pack" htmlFor="i-pack" hint="Lint and the agent check the deck against this pack.">
             <select id="i-pack" className="cq-select" required value={pack} onChange={(e) => pick(packs.find((p) => p.id === e.target.value))}>
               <option value="" disabled>
@@ -335,11 +348,12 @@ function ImportPptx({ onClose }: { onClose: () => void }) {
           <Button variant="outline" type="button" onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" disabled={!file || !pack || busy}>
+          <Button type="submit" disabled={!(file || cloud) || !pack || busy}>
             <FileUp /> Import
           </Button>
         </DialogFooter>
       </form>
+      {picking && m365 && <M365Picker status={m365} accept={/\.pptx$/i} title="Import from Microsoft 365" onPick={setCloud} onClose={() => setPicking(false)} />}
     </Dialog>
   );
 }

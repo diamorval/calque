@@ -4,7 +4,7 @@ import { join, normalize } from "node:path";
 import { Readable } from "node:stream";
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { getCookie } from "hono/cookie";
+import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { stream } from "hono/streaming";
 import { Client } from "@modelcontextprotocol/client";
 import { createMcpHandler, InMemoryTransport, oauthMetadataResponse } from "@modelcontextprotocol/server";
@@ -17,6 +17,7 @@ import { discovery, gate, identityOf, userOf, type AuthConfig } from "./auth.ts"
 import { Conflict } from "./decks.ts";
 import { EngineError, REPO } from "./engine.ts";
 import { attachment, MAX_UPLOAD, saveFile, ticketUser, TooLarge } from "./files.ts";
+import { librarySlide } from "./library.ts";
 import { buildServer, UI_HTML } from "./mcp.ts";
 import { InvalidModel, isAdmin } from "./models.ts";
 import {
@@ -190,6 +191,36 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
   const scimToken = process.env.CALQUE_SCIM_TOKEN;
   if (scimToken) scimRoutes(http, app.access, scimToken, app.publicUrl);
 
+  // Microsoft 365 (m365.ts): each user connects their own account, in a browser signed in to
+  // Calque (an MCP user signs in first: the link a tool gives goes through /auth/login). The login
+  // state rides in a short-lived cookie scoped to /auth/m365.
+  const M365_LOGIN = "calque_m365";
+  const m365Cookie = { httpOnly: true, sameSite: "Lax", secure: app.publicUrl.startsWith("https:"), path: "/auth/m365" } as const;
+  http.get("/auth/m365/connect", async (c) => {
+    if (!app.m365) return c.text("Microsoft 365 is not set up on this server", 404);
+    const user = await who(c);
+    if (user instanceof Response) {
+      const url = new URL(c.req.url);
+      return sessions ? c.redirect(`/auth/login?return=${encodeURIComponent(url.pathname + url.search)}`) : user;
+    }
+    const back = c.req.query("return") ?? "/";
+    // a path on this site only, as for sign-in
+    const { url, state } = await app.m365.start(user, /^\/(?![/\\])\P{Cc}*$/u.test(back) ? back : "/");
+    setCookie(c, M365_LOGIN, state, { ...m365Cookie, maxAge: 600 });
+    return c.redirect(url);
+  });
+  http.get("/auth/m365/callback", async (c) => {
+    if (!app.m365) return c.notFound();
+    try {
+      const q = c.req.query();
+      const back = await app.m365.finish(getCookie(c, M365_LOGIN), { code: q.code, state: q.state, error_description: q.error_description ?? q.error });
+      deleteCookie(c, M365_LOGIN, m365Cookie);
+      return c.redirect(back);
+    } catch (e) {
+      return c.text(`Microsoft 365 connection failed: ${(e as Error).message}`, 400);
+    }
+  });
+
   /** REST handler: authenticate, run, map errors to statuses. */
   const route = (fn: (c: Context, user: User) => Promise<unknown>) => async (c: Context) => {
     const user = await who(c);
@@ -215,6 +246,11 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
   // white-labels it (CALQUE_APP_NAME, CALQUE_APP_LOGO: an image URL).
   const branding = { name: process.env.CALQUE_APP_NAME || "Calque", logo: process.env.CALQUE_APP_LOGO || null };
   http.get("/api/branding", (c) => c.json(branding));
+
+  // The caller's Microsoft 365 connection: whether it is set up and connected, and to which account.
+  const M365_OFF = { configured: false, connected: false, account: null };
+  http.get("/api/m365", route(async (_, user) => (app.m365 ? app.m365.status(user) : M365_OFF)));
+  http.delete("/api/m365", route(async (_, user) => (app.m365 ? app.m365.disconnect(user) : M365_OFF)));
 
   // Uploads: a file in (multipart field `file`), its file_id out, usable only by its uploader.
   // `?ticket=` (from the upload_url tool) stands in for the caller's credentials.
@@ -523,6 +559,18 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
       return new Response(Readable.toWeb(createReadStream(path)) as ReadableStream, {
         headers: { "content-type": "application/pdf", "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(name)}` },
       });
+    } catch (e) {
+      return fail(c, e);
+    }
+  });
+
+  // A slide library entry's image (library_list's thumbnail_url), for whoever may see the entry.
+  http.get("/api/library/:id/slide.png", async (c) => {
+    const user = await who(c);
+    if (user instanceof Response) return user;
+    try {
+      const png = await librarySlide(app, user, param(c, "id"));
+      return new Response(Readable.toWeb(createReadStream(png)) as ReadableStream, { headers: { "content-type": "image/png", "cache-control": "no-cache" } });
     } catch (e) {
       return fail(c, e);
     }
