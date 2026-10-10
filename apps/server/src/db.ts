@@ -115,6 +115,27 @@ do $$ begin
     drop table deck_audit;
   end if;
 end $$;
+-- library.ts: a pack's approved slides, each a hidden one-slide deck owned by 'library:<pack_id>'
+create table if not exists library (
+  id uuid primary key,
+  pack_id text not null references packs(id),
+  deck_id uuid not null references decks(id),
+  title text not null,
+  tags jsonb not null default '[]',
+  status text not null default 'pending' check (status in ('pending', 'approved')),
+  added_by text not null,
+  approved_by text,
+  source_deck text,
+  source_slide text,
+  created_at timestamptz not null default now()
+);
+-- m365.ts: each user's Microsoft 365 connection, the refresh token sealed
+create table if not exists m365_tokens (
+  user_id text primary key,
+  refresh_token text not null,
+  account text,
+  updated_at timestamptz not null default now()
+);
 -- replaced by the deck's share link and general access
 drop table if exists deck_links;
 delete from deck_shares where principal_type not in ('user', 'team');

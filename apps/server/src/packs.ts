@@ -41,7 +41,7 @@ export const ADMIN_TEAM = process.env.CALQUE_ADMIN_TEAM ?? "calque-admins";
 export const isAdmin = (u: User) => u.local === true || u.teams.includes(ADMIN_TEAM);
 
 /** Edit, share, archive and restore a pack: its owner, or an admin (seeded packs have no owner). */
-const manages = (p: PackRow, user: User) => isAdmin(user) || p.owner === user.id;
+export const manages = (p: PackRow, user: User) => isAdmin(user) || p.owner === user.id;
 
 export function visible(p: PackRow, user: User): boolean {
   return (

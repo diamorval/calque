@@ -3,10 +3,13 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { DeckSpec, PatchOp, Slide } from "@calque/deckspec";
+import { audit } from "./audit.ts";
 import type { Db } from "./db.ts";
 import type { Decks, Finding, Role } from "./decks.ts";
 import { REPO } from "./engine.ts";
 import { getFile, MAX_UPLOAD, TooLarge, uploadTicket } from "./files.ts";
+import { libraryAdd, libraryApprove, libraryInsert, libraryList, libraryRemove } from "./library.ts";
+import { fileName, type M365 } from "./m365.ts";
 import type { Models } from "./models.ts";
 import { importPack, listPacks, type User } from "./packs.ts";
 import { userToken } from "./preview.ts";
@@ -21,6 +24,8 @@ export interface App {
   /** seals model keys and web sessions */
   secret: string;
   publicUrl: string;
+  /** Microsoft 365 (OneDrive, SharePoint), when CALQUE_M365_CLIENT_ID is set */
+  m365?: M365 | undefined;
 }
 
 export interface Tool<S extends z.ZodObject = z.ZodObject> {
@@ -514,6 +519,113 @@ export const TOOLS = {
     run: async (app, user, a) =>
       importPack(app.db, user, app.data, { ...a, template: await materialize(app, user, a.template) }),
   }),
+
+  library_list: tool({
+    title: "List slide library",
+    description:
+      "The approved slides of a brand pack's library (case studies, references, client logos, team bios, boilerplate), newest first: entry_id, title, tags and a thumbnail_url. Search with `query` (words of the title or tags) and `tags`. Look here for proof points before naming a gap. Pack managers pass status 'pending' to see the proposals to review.",
+    input: z.object({
+      pack_id: z.string().optional().describe("Default: every pack you see."),
+      query: z.string().optional(),
+      tags: z.array(z.string()).optional().describe("Entries carrying every one of these tags."),
+      status: z.enum(["approved", "pending", "all"]).default("approved"),
+    }),
+    readOnly: true,
+    run: (app, user, a) => libraryList(app, user, a),
+  }),
+
+  library_insert: tool({
+    title: "Insert library slide",
+    description:
+      "Insert an approved library slide into a deck, as a new version (like copy_slides): a chart, diagram or composition goes into a deck on any pack, a template or imported slide only into a deck on the entry's pack. `at` is the 0-based position (default: before the closing slide, else at the end). Adapt its text with patch_deck if the audience needs it.",
+    input: z.object({ entry_id: z.string(), deck_id: deckId, at: z.number().int().min(0).optional() }),
+    ui: true,
+    role: "editor",
+    run: async (app, user, a) => ({ ...(await libraryInsert(app, user, a)), ...links(app, user, a.deck_id) }),
+  }),
+
+  library_add: tool({
+    title: "Add to slide library",
+    description:
+      "Propose a slide of a deck you edit for its pack's library, with a title and tags (e.g. case-study, reference, team, boilerplate, the sector). The pack's owner or an admin approves it; their own additions are approved at once. Only add a slide the user asked to share: everyone who sees the pack will reuse it.",
+    input: z.object({
+      deck_id: deckId,
+      slide_id: z.string(),
+      title: z.string().min(1).max(200),
+      tags: z.array(z.string().max(40)).max(20).optional(),
+    }),
+    run: (app, user, a) => libraryAdd(app, user, a),
+  }),
+
+  library_review: tool({
+    title: "Review library entry",
+    description: "The pack's owner or an admin: approve a pending library entry, or remove an entry (rejecting a proposal). Its author may also withdraw a pending one (remove).",
+    input: z.object({ entry_id: z.string(), action: z.enum(["approve", "remove"]) }),
+    run: (app, user, a) => (a.action === "approve" ? libraryApprove(app, user, a.entry_id) : libraryRemove(app, user, a.entry_id)),
+  }),
+
+  m365_list: tool({
+    title: "Browse Microsoft 365",
+    description:
+      "Browse the user's OneDrive and SharePoint (as them: only what they can open). Default: their OneDrive root. `folder_id` (+ `drive_id`) lists a folder, `search` finds files in a drive, `sites` finds SharePoint sites by name and `site_id` lists a site's document libraries (each a drive_id). Items give drive_id, item_id, name, folder, web_url. When Microsoft 365 is not connected, the error gives the URL where the user connects it (in a browser signed in to Calque).",
+    input: z.object({
+      drive_id: z.string().optional().describe("A drive (a SharePoint document library); default: the user's OneDrive."),
+      folder_id: z.string().optional(),
+      search: z.string().optional(),
+      sites: z.string().optional().describe("Find SharePoint sites by name."),
+      site_id: z.string().optional(),
+    }),
+    readOnly: true,
+    run: (app, user, a) => m365(app).list(user, a),
+  }),
+
+  m365_import: tool({
+    title: "Import from Microsoft 365",
+    description:
+      "Copy a OneDrive or SharePoint file (PowerPoint, Word, Excel, PDF, CSV, text, image) into Calque: returns a file_id, used like an upload: import_pptx / import_pack `file`, an image as `file:<file_id>`, or a document to read in the web chat.",
+    input: z.object({ item_id: z.string(), drive_id: z.string().optional().describe("Default: the user's OneDrive.") }),
+    run: (app, user, a) => m365(app).import(user, app.data, a),
+  }),
+
+  m365_save: tool({
+    title: "Save to Microsoft 365",
+    description:
+      "Save the deck as PPTX (default) or PDF into a OneDrive or SharePoint folder (default: the user's OneDrive root) and return its `web_url`. A name already taken gets a new one: nothing is overwritten. Like export_pptx, a PPTX with lint ERRORs goes out with a `reason`, recorded.",
+    input: z.object({
+      deck_id: deckId,
+      version,
+      format: z.enum(["pptx", "pdf"]).default("pptx"),
+      drive_id: z.string().optional(),
+      folder_id: z.string().optional().describe("Default: the drive's root."),
+      name: z.string().optional().describe("File name; default: the deck title and version."),
+      reason: z.string().optional().describe("Why a version with lint ERRORs is saved anyway (recorded)."),
+    }),
+    role: "viewer",
+    run: async (app, user, a) => {
+      const client = m365(app);
+      const deck = await app.decks.deck(user, a.deck_id, "viewer");
+      const r = a.format === "pdf" ? await app.decks.exportPdf(user, a.deck_id, a.version) : await app.decks.exportPath(user, a.deck_id, a.version);
+      let errors = 0;
+      if (a.format === "pptx") {
+        errors = (await app.decks.lint(user, a.deck_id, r.version)).findings.filter((f) => f.severity === "ERROR").length;
+        await recordExport(app.decks, user, a.deck_id, r.version, errors, a.reason);
+      }
+      const name = fileName(a.name?.replace(/\.(pptx|pdf)$/i, "") || `${deck.title} v${r.version}`, `.${a.format}`);
+      const saved = await client.save(user, r.path, name, a);
+      await audit(app.db, user, "save_m365", "deck", a.deck_id, { version: r.version, format: a.format, name: saved.name, drive_id: saved.drive_id });
+      return {
+        version: r.version,
+        ...saved,
+        ...(a.format === "pptx" ? { lint_errors: errors } : {}),
+        ...(errors && !a.reason?.trim() ? { warning: `v${r.version} has ${errors} lint ERROR(s): pass \`reason\` to record why it goes out anyway` } : {}),
+      };
+    },
+  }),
 } satisfies Record<string, Tool>;
+
+function m365(app: App): M365 {
+  if (!app.m365) throw new Error("Microsoft 365 is not set up on this server (CALQUE_M365_CLIENT_ID, see apps/server/README.md)");
+  return app.m365;
+}
 
 export const toolNamed = (name: string): Tool | undefined => (TOOLS as Record<string, Tool>)[name];

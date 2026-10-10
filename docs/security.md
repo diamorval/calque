@@ -21,6 +21,23 @@ To keep deck content away from a third-party model, use only the web door, on a 
 server in Claude clients. The server has no switch that turns the MCP door off: only the
 clients you register reach it.
 
+### Microsoft 365 (OneDrive, SharePoint)
+
+Off unless `CALQUE_M365_CLIENT_ID` is set. Each user connects their own account (OAuth code +
+PKCE against Entra ID, delegated scopes `User.Read Files.ReadWrite.All Sites.Read.All
+offline_access`); the server then calls Microsoft Graph **as that user**, from its own network:
+
+- **In**: a file the user picks (`m365_import`) is downloaded once into their uploads, like a file
+  they uploaded, and follows the uploads' rules (owner only, 50 MB, retention). Through the web
+  door its text may then reach the configured model as an attachment.
+- **Out**: `m365_save` uploads the built PPTX or PDF into the folder the user picks. It never
+  overwrites a file, and is recorded in the audit log (`save_m365`: deck, version, format, file
+  name, drive; a PPTX with lint ERRORs also as an export with its reason).
+- **Stored**: the user's refresh token (sealed with AES-256-GCM under `CALQUE_SECRET`, deleted on
+  disconnect or when Entra refuses it) and their account name. Access tokens stay in memory. The
+  server reaches only the files and sites the user can, and only when the user calls a tool.
+  Revoking the app's consent in Entra, or `DELETE /api/m365`, ends it.
+
 Slide renders (LibreOffice and pdftoppm) and every PPTX operation run inside the server's
 container. The engine itself makes no network calls. A PPTX that links to remote content could
 make the renderer try to fetch it, so lint reports such links (see Controls).
@@ -31,7 +48,8 @@ Everything lives in two places the operator chooses:
 
 - **The database** (`DATABASE_URL`, Postgres in production; embedded PGlite in `$CALQUE_DATA/pg`
   otherwise): decks, every DeckSpec version (deck text, which may include personal data), comments,
-  shares, pack registry, uploaded files' metadata, AI model configuration, the audit log.
+  shares, pack registry, slide library entries, uploaded files' metadata, AI model configuration,
+  Microsoft 365 connections (sealed refresh tokens), the audit log.
 - **The data directory** (`CALQUE_DATA`, a volume): built PPTX per version, slide PNGs, imported
   decks, uploads, imported brand packs and pack drafts.
 
@@ -48,7 +66,8 @@ each turn.
 - **The audit log** (`audit` table): who did what, when, never the content itself. Deck create,
   edit (version and note), export, delete, share, unshare, general access change, link reset and
   transfer; pack publish, edit and visibility change; model add, update, default and remove;
-  sign-in; retention purges. Rows outlive what they name: a deleted deck's history stays. Admins
+  sign-in; Microsoft 365 connect, disconnect and saves; slide library add, approve and remove;
+  retention purges. Rows outlive what they name: a deleted deck's history stays. Admins
   (`CALQUE_ADMIN_TEAM`) read it at `GET /api/admin/audit`, filtered by `actor`, `action`,
   `target_type`, `target_id`, `since` and `until`.
 - **Process output** (stderr): start-up, retention summaries, and the engine's error output when an
@@ -65,7 +84,9 @@ each turn.
   who deleted it.
 - `CALQUE_RETENTION_DAYS=N` (off by default) runs at start-up and then daily. It deletes decks
   whose latest version is more than N days old, and uploads older than N days, including leftover
-  inline imports. An upload that a remaining deck still uses is kept.
+  inline imports. An upload that a remaining deck still uses is kept. Slide library entries are
+  kept until a pack manager removes them: an entry is a copy, so deleting its source deck does not
+  remove it.
 - Postgres backups and volume snapshots are the operator's to expire.
 
 ## Residency knobs

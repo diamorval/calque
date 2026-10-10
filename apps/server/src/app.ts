@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { openDb } from "./db.ts";
 import { Decks } from "./decks.ts";
 import { REPO } from "./engine.ts";
+import { M365, m365Config } from "./m365.ts";
 import { Models } from "./models.ts";
 import { seedPacks } from "./packs.ts";
 import type { App } from "./tools.ts";
@@ -23,7 +24,8 @@ export async function createApp(opts: { data?: string; db?: string; publicUrl?: 
   const secret = process.env.CALQUE_SECRET ?? localSecret(data);
   const models = new Models(db, secret);
   await models.seedFromEnv();
-  return { db, decks: new Decks(db, data), models, data, publicUrl, secret };
+  const m365 = m365Config();
+  return { db, decks: new Decks(db, data), models, data, publicUrl, secret, m365: m365 && new M365(db, secret, publicUrl, m365) };
 }
 
 /** Dev only: the key sealing model API keys, kept in the data dir. Set CALQUE_SECRET in production. */

@@ -54,7 +54,8 @@ for you → options → recommendation → proof → next step`, adapted to the 
 
 - Draft the beats from the archetype's skeleton, each **filled with this audience's evidence**: a
   sourced fact, a quote from the notes, or a named gap to probe. A beat without evidence is cut or
-  flagged.
+  flagged. For a proof beat, search the pack's slide library (`library_list`) first and cite the
+  entry found; a gap is named only when the library has nothing that fits.
 - Each beat carries a **one-line message** (a claim, not a topic) and a **slide intent** (a hint:
   "proof with a figure", "a question to the room"), never a layout.
 - The audience's part of the story gets the most room; what is true but not needed to advance the
