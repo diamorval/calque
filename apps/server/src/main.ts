@@ -4,11 +4,16 @@ import { createApp } from "./app.ts";
 import { audit } from "./audit.ts";
 import type { AuthConfig } from "./auth.ts";
 import { createHttp } from "./http.ts";
+import { seededPacks } from "./packs.ts";
 import { purge, retentionDays } from "./retention.ts";
 import { sessions } from "./session.ts";
 import { teamsConfig } from "./teams.ts";
 
 const app = await createApp();
+// a client deployment sets CALQUE_PACKS to its own packs: say which ones every user is offered
+console.error(
+  `packs seeded for the whole workspace from ${process.env.CALQUE_PACKS ?? "packs/ (CALQUE_PACKS unset)"}: ${(await seededPacks(app.db)).join(", ") || "none"}`,
+);
 const issuer = process.env.CALQUE_OIDC_ISSUER;
 const { claim, ...teams } = teamsConfig();
 const auth: AuthConfig | undefined = issuer

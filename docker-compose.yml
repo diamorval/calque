@@ -25,13 +25,17 @@ services:
       CALQUE_LLM_PROVIDER:
       CALQUE_LLM_BASE_URL:
       CALQUE_LLM_API_KEY:
+      # the packs offered to the whole workspace: every folder with a pack.yaml (default /app/packs,
+      # which holds the diametral pack). A client deployment points it at its own packs only:
+      # CALQUE_PACKS: /app/client-packs
+      CALQUE_PACKS:
       CALQUE_DEFAULT_PACK:
       CALQUE_APP_NAME:
       CALQUE_APP_LOGO:
     volumes:
       - calque-data:/data # decks, renders, uploads, imported packs
-      # the packs are baked in /app/packs; to serve others without a rebuild:
-      # - ./packs:/app/packs:ro
+      # the packs are baked in /app/packs; to serve a client's packs without a rebuild:
+      # - ./client-packs:/app/client-packs:ro   # with CALQUE_PACKS: /app/client-packs
 
   postgres:
     image: postgres:17
