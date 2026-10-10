@@ -214,7 +214,20 @@ def _apply_clone(
         if int(key) in fit and not (isinstance(value, dict) and "fit" in value):
             sl.fit_box(shape, st)
     if holes:
+        _localize(slide, st.pack, language, set(map(int, values)))
         _fill_holes(slide, s, st, language, report, set(map(int, values)))
+
+
+def _localize(slide, pack: Pack, language: str, done: set[int]) -> None:
+    """The template's own lines (a closing "thank you") in the deck language, from the pack's
+    `localized_text`, on the shapes the deck leaves as the template writes them."""
+    table = pack.manifest.get("localized_text") or {}
+    for shape in sl.iter_shapes(slide.shapes):
+        if shape.shape_id in done or not shape.has_text_frame:
+            continue
+        text = table.get(" ".join(shape.text_frame.text.split()), {}).get(language)
+        if text:
+            sl.set_text(shape, text)
 
 
 def _fill_holes(slide, s: Slide, st: Style, language: str, report: BuildReport, done: set[int]):

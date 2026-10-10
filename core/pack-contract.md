@@ -35,7 +35,9 @@ slides play (`cover`, `summary`, `divider`, `subsection`, `closing`, `appendix`,
 and optionally `grid.source`, the box of the source line under a chart), the font fallback, the
 lint rules specific to the pack (single-use colours, voice rules as `slop_rules`, literal
 placeholders, `chart_source` to warn on a chart without a source), and the arbitrated theme/token
-gaps.
+gaps. `localized_text` translates the template's own lines (a closing "thank you"): keyed by the
+line as the template writes it, then by language. A slide cloned from the template shows that
+line in the deck language unless the deck sets the shape, and lint exempts it like the original.
 
 `extends: <pack id>` makes the pack a subsidiary of a group pack: it inherits the group's
 `voice.md`, `storyline.md`, `exemplar.md` (with its `exemplar/` pages) and `lint.slop_rules`, each
