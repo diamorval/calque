@@ -5,6 +5,7 @@ import { Tag } from "diametral-ds/tag";
 import { Clock, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { tool } from "../api.ts";
+import { t } from "../i18n.ts";
 import { navigate } from "../nav.ts";
 import { Spinner } from "../ui.tsx";
 
@@ -46,39 +47,38 @@ export function Presenter({ id }: { id: string }) {
   if (!deck)
     return (
       <div className="cq-center">
-        <Spinner label="Loading deck" />
+        <Spinner label={t("Loading deck")} />
       </div>
     );
   const slide = deck.slides[i];
   const next = deck.slides[i + 1];
   if (!slide) return null;
   const notes = deck.spec.slides.find((s) => s.id === slide.id)?.notes;
-  const current = <img className="cq-present-slide" src={slide.image_url} alt={`Slide ${slide.number}`} />;
+  const current = <img className="cq-present-slide" src={slide.image_url} alt={t("Slide {n}", { n: slide.number })} />;
 
   if (!presenter) return <main className="cq-present">{current}</main>;
   return (
-    <main className="cq-presenter dark" aria-label="Presenter view">
+    <main className="cq-presenter dark" aria-label={t("Presenter view")}>
       <header>
         <strong className="cq-mono">
           {i + 1} / {deck.slides.length}
         </strong>
         <Tag tone="neutral" className="cq-mono">
-          <Clock /> <span aria-label="Elapsed">{clock(Math.floor((now - started) / 1000))}</span>
+          <Clock /> <span aria-label={t("Elapsed")}>{clock(Math.floor((now - started) / 1000))}</span>
         </Tag>
         <span className="cq-hint">
-          <Kbd>←</Kbd> <Kbd>→</Kbd> navigate · <Kbd>P</Kbd> audience view · <Kbd>F</Kbd> full
-          screen
+          <Kbd>←</Kbd> <Kbd>→</Kbd> {t("navigate")} · <Kbd>P</Kbd> {t("audience view")} · <Kbd>F</Kbd> {t("full screen")}
         </span>
         <Button variant="ghost" size="sm" onClick={() => navigate(`/d/${id}`)}>
-          <X /> Exit
+          <X /> {t("Exit")}
         </Button>
       </header>
       <div className="cq-presenter-now">{current}</div>
       <aside>
-        <h2>Next</h2>
-        {next ? <img src={next.image_url} alt={`Next: slide ${next.number}`} /> : <p className="cq-hint">End of deck</p>}
-        <h2>Notes</h2>
-        <p data-testid="notes">{notes || "No speaker notes."}</p>
+        <h2>{t("Next")}</h2>
+        {next ? <img src={next.image_url} alt={t("Next: slide {n}", { n: next.number })} /> : <p className="cq-hint">{t("End of deck")}</p>}
+        <h2>{t("Notes")}</h2>
+        <p data-testid="notes">{notes || t("No speaker notes.")}</p>
       </aside>
     </main>
   );

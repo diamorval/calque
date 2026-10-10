@@ -7,6 +7,7 @@ import { Tag } from "diametral-ds/tag";
 import { ArrowLeft, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { api } from "../api.ts";
+import { day, num, t, tn } from "../i18n.ts";
 import { go } from "../nav.ts";
 import { ago, PageHead, Spinner } from "../ui.tsx";
 
@@ -34,10 +35,11 @@ interface PackReport {
   }[];
 }
 
-const APPROVAL: Record<string, string> = { draft: "Draft", in_review: "In review", approved: "Approved" };
+const APPROVAL = { draft: "Draft", in_review: "In review", approved: "Approved" } as const;
+const approvalLabel = (k: string | undefined) => (k && k in APPROVAL ? t(APPROVAL[k as keyof typeof APPROVAL]) : k);
 
 const Count = ({ n, tone }: { n: number | null; tone: "danger" | "warning" }) =>
-  n === null ? <span className="cq-muted">not linted yet</span> : n ? <Tag tone={tone}>{n}</Tag> : <span className="cq-muted">0</span>;
+  n === null ? <span className="cq-muted">{t("not linted yet")}</span> : n ? <Tag tone={tone}>{n}</Tag> : <span className="cq-muted">0</span>;
 
 /** A small table of rows. */
 function Grid(props: { head: string[]; rows: ReactNode[][] }) {
@@ -93,12 +95,12 @@ export function Compliance() {
   const pending = p ? p.summary.decks - p.summary.linted : 0;
   return (
     <div className="cq-page">
-      <PageHead title="Brand compliance" description="Decks made on the packs you manage, and the lint ERRORs and WARNs of their latest version. Counts and titles only.">
+      <PageHead title={t("Brand compliance")} description={t("Decks made on the packs you manage, and the lint ERRORs and WARNs of their latest version. Counts and titles only.")}>
         <Button variant="ghost" onClick={(e) => go(e, "/settings/packs")}>
-          <ArrowLeft /> Brand packs
+          <ArrowLeft /> {t("Brand packs")}
         </Button>
         <Button variant="outline" disabled={busy} onClick={() => void load()}>
-          <RefreshCw /> Refresh
+          <RefreshCw /> {t("Refresh")}
         </Button>
       </PageHead>
       {error && (
@@ -106,12 +108,12 @@ export function Compliance() {
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
-      {busy && <Spinner label="Linting decks not linted yet" />}
+      {busy && <Spinner label={t("Linting decks not linted yet")} />}
       {report && (
-        <select className="cq-select" aria-label="Pack" value={pack ?? ""} onChange={(e) => setPack(e.target.value)}>
+        <select className="cq-select" aria-label={t("Pack")} value={pack ?? ""} onChange={(e) => setPack(e.target.value)}>
           {report.map((r) => (
             <option key={r.pack_id} value={r.pack_id}>
-              {r.name} ({r.summary.decks} decks)
+              {r.name} ({tn(r.summary.decks, "{n} deck", "{n} decks")})
             </option>
           ))}
         </select>
@@ -120,11 +122,11 @@ export function Compliance() {
         <>
           <div className="cq-stats" data-compliance={p.pack_id}>
             {[
-              ["Decks", p.summary.decks],
-              ["Lint clean", `${p.summary.clean} / ${p.summary.linted}`],
-              ["ERRORs", p.summary.errors],
-              ["WARNs", p.summary.warns],
-              ...(p.approval ? Object.entries(p.approval).map(([k, n]) => [APPROVAL[k] ?? k, n]) : []),
+              [t("Decks"), num(p.summary.decks)],
+              [t("Lint clean"), `${num(p.summary.clean)} / ${num(p.summary.linted)}`],
+              [t("ERRORs"), num(p.summary.errors)],
+              [t("WARNs"), num(p.summary.warns)],
+              ...(p.approval ? Object.entries(p.approval).map(([k, n]) => [approvalLabel(k), num(n)]) : []),
             ].map(([label, value]) => (
               <StatCard key={String(label)}>
                 <StatCardLabel>{label}</StatCardLabel>
@@ -132,11 +134,11 @@ export function Compliance() {
               </StatCard>
             ))}
           </div>
-          {pending > 0 && <p className="cq-hint">{pending} deck(s) not linted yet: refresh to lint the next ones.</p>}
+          {pending > 0 && <p className="cq-hint">{tn(pending, "{n} deck not linted yet: refresh to lint the next ones.", "{n} decks not linted yet: refresh to lint the next ones.")}</p>}
           {p.decks.length > 0 && (
             <>
               <Grid
-                head={["Deck", "Owner", "Teams", "Version", "Updated", "ERRORs", "WARNs", ...(p.approval ? ["Approval"] : [])]}
+                head={[t("Deck"), t("Owner"), t("Teams"), t("Version"), t("Updated"), t("ERRORs"), t("WARNs"), ...(p.approval ? [t("Approval")] : [])]}
                 rows={p.decks.map((d) => [
                   <strong key="t">{d.title}</strong>,
                   d.owner_name ?? d.owner,
@@ -145,22 +147,22 @@ export function Compliance() {
                   ago(d.updated_at),
                   <Count key="e" n={d.errors} tone="danger" />,
                   <Count key="w" n={d.warns} tone="warning" />,
-                  ...(p.approval ? [APPROVAL[d.approval ?? ""] ?? d.approval] : []),
+                  ...(p.approval ? [approvalLabel(d.approval)] : []),
                 ])}
               />
               <div className="cq-columns">
-                <Grid head={["Owner", "Decks", "ERRORs", "WARNs"]} rows={p.by_owner.map((o) => [o.name ?? o.owner, o.decks, o.errors, o.warns])} />
-                <Grid head={["Team", "Decks", "ERRORs", "WARNs"]} rows={p.by_team.map((t) => [t.team, t.decks, t.errors, t.warns])} />
+                <Grid head={[t("Owner"), t("Decks"), t("ERRORs"), t("WARNs")]} rows={p.by_owner.map((o) => [o.name ?? o.owner, o.decks, o.errors, o.warns])} />
+                <Grid head={[t("Team"), t("Decks"), t("ERRORs"), t("WARNs")]} rows={p.by_team.map((t) => [t.team, t.decks, t.errors, t.warns])} />
               </div>
               {p.trend.length > 0 && (
                 <Grid
-                  head={["Week of", "Versions linted", "Decks", "ERRORs", "WARNs", "ERRORs per version"]}
-                  rows={p.trend.map((t) => [t.week, t.versions, t.decks, t.errors, t.warns, (t.errors / t.versions).toFixed(1)])}
+                  head={[t("Week of"), t("Versions linted"), t("Decks"), t("ERRORs"), t("WARNs"), t("ERRORs per version")]}
+                  rows={p.trend.map((w) => [day(w.week), w.versions, w.decks, w.errors, w.warns, num(w.errors / w.versions, { minimumFractionDigits: 1, maximumFractionDigits: 1 })])}
                 />
               )}
             </>
           )}
-          {!p.decks.length && <p className="cq-hint">No deck on this pack yet.</p>}
+          {!p.decks.length && <p className="cq-hint">{t("No deck on this pack yet.")}</p>}
         </>
       )}
     </div>

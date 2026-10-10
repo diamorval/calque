@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { tool, type Pack } from "../api.ts";
 import { Chat, saveChat, type AgentResult, type ChatMessage } from "../components/Chat.tsx";
+import { t } from "../i18n.ts";
 import { navigate } from "../nav.ts";
 
 const KEY = "chat:new";
@@ -8,7 +9,7 @@ const BRIEFS = [
   "Quarterly review for the leadership team: results, wins, risks, next quarter's plan.",
   "Client pitch: their problem, our approach, three proof points, next steps.",
   "Project kickoff: goals, scope, timeline, team, how we work together.",
-];
+] as const;
 
 /** A new deck: pick its brand pack, then brief the agent; once it creates the deck, open it. */
 export function NewDeck() {
@@ -38,18 +39,18 @@ export function NewDeck() {
         storageKey={KEY}
         pack_id={pack || undefined}
         disabled={!pack}
-        placeholder="What is the deck for, who is it for, what must it say?"
-        suggestions={BRIEFS}
+        placeholder={t("What is the deck for, who is it for, what must it say?")}
+        suggestions={BRIEFS.map((b) => t(b))}
         empty={
           <div className="cq-brief-hero">
-            <h1>What are we presenting?</h1>
-            <p>Brief the agent: the audience, the goal, the key messages. It builds an editable deck on your brand pack, then you refine it together.</p>
+            <h1>{t("What are we presenting?")}</h1>
+            <p>{t("Brief the agent: the audience, the goal, the key messages. It builds an editable deck on your brand pack, then you refine it together.")}</p>
           </div>
         }
         footer={
-          <select className="cq-select cq-pack-pick" aria-label="Brand pack" value={pack} onChange={(e) => setPack(e.target.value)}>
+          <select className="cq-select cq-pack-pick" aria-label={t("Brand pack")} value={pack} onChange={(e) => setPack(e.target.value)}>
             <option value="" disabled>
-              Choose a brand pack
+              {t("Choose a brand pack")}
             </option>
             {packs.map((p) => (
               <option key={p.id} value={p.id}>

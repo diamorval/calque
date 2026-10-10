@@ -1,4 +1,6 @@
 // The web app's only door to Calque: the server's REST API (the same tools as MCP).
+import { t } from "./i18n.ts";
+
 export class ApiError extends Error {
   readonly status: number;
   readonly body: Record<string, unknown>;
@@ -63,7 +65,7 @@ export async function agent<T>(path: string, body: unknown, onStep: (tools: Tool
       if (line.done) done = line.done;
     }
   }
-  if (!done) throw new Error("the agent stopped without an answer");
+  if (!done) throw new Error(t("The agent stopped without an answer."));
   return done;
 }
 

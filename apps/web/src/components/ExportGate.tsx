@@ -6,6 +6,7 @@ import { DialogFooter } from "diametral-ds/dialog";
 import { Textarea } from "diametral-ds/textarea";
 import { Download } from "lucide-react";
 import { useState, type FormEvent } from "react";
+import { t, tn } from "../i18n.ts";
 import type { Finding } from "../lint.ts";
 import { Dialog, Field } from "../ui.tsx";
 
@@ -28,20 +29,20 @@ export function ExportWithErrors(props: { errors: Finding[]; onClose: () => void
     }
   }
   return (
-    <Dialog title={`Export with ${n} lint error${n === 1 ? "" : "s"}?`} onClose={props.onClose}>
+    <Dialog title={tn(n, "Export with {n} lint error?", "Export with {n} lint errors?")} onClose={props.onClose}>
       <form onSubmit={submit}>
         <div className="cq-dialog-body">
-          <p className="cq-hint">This version is off-charter. You can still export it: say why, the reason is recorded with the export.</p>
+          <p className="cq-hint">{t("This version is off-charter. You can still export it: say why, the reason is recorded with the export.")}</p>
           <ul className="cq-findings">
             {props.errors.slice(0, 5).map((f, i) => (
               <li key={i}>
-                <span className="cq-mono cq-muted">{f.slide ? `Slide ${f.slide}` : "Deck"}</span> <span>{f.message}</span>
+                <span className="cq-mono cq-muted">{f.slide ? t("Slide {n}", { n: f.slide }) : t("Deck")}</span> <span>{f.message}</span>
               </li>
             ))}
-            {n > 5 && <li className="cq-muted">and {n - 5} more</li>}
+            {n > 5 && <li className="cq-muted">{t("and {n} more", { n: n - 5 })}</li>}
           </ul>
-          <Field label="Why does it go out anyway?" htmlFor="x-reason">
-            <Textarea id="x-reason" rows={3} required value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Client draft for tonight, fixes in the final version" />
+          <Field label={t("Why does it go out anyway?")} htmlFor="x-reason">
+            <Textarea id="x-reason" rows={3} required value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t("Client draft for tonight, fixes in the final version")} />
           </Field>
           {error && (
             <Alert variant="destructive">
@@ -51,10 +52,10 @@ export function ExportWithErrors(props: { errors: Finding[]; onClose: () => void
         </div>
         <DialogFooter>
           <Button variant="outline" type="button" onClick={props.onClose}>
-            Cancel
+            {t("Cancel")}
           </Button>
           <Button type="submit" disabled={busy || !reason.trim()}>
-            <Download /> Export anyway
+            <Download /> {t("Export anyway")}
           </Button>
         </DialogFooter>
       </form>

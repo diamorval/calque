@@ -9,6 +9,7 @@ import { Textarea } from "diametral-ds/textarea";
 import { ChevronRight, Cloud, ExternalLink, File as FileIcon, Folder, Globe, HardDrive, Search } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { api, tool } from "../api.ts";
+import { t, tn } from "../i18n.ts";
 import { Dialog, Field, Spinner } from "../ui.tsx";
 
 export interface M365Status {
@@ -35,9 +36,9 @@ const connectHref = () => `/auth/m365/connect?return=${encodeURIComponent(locati
 function Connect() {
   return (
     <div className="cq-m365-connect">
-      <p>Connect your Microsoft 365 account to open files from OneDrive and SharePoint, and save decks there. Calque only reaches what you can open.</p>
+      <p>{t("Connect your Microsoft 365 account to open files from OneDrive and SharePoint, and save decks there. Calque only reaches what you can open.")}</p>
       <a className={buttonVariants()} href={connectHref()}>
-        <Cloud /> Connect Microsoft 365
+        <Cloud /> {t("Connect Microsoft 365")}
       </a>
     </div>
   );
@@ -114,17 +115,17 @@ function Browser(props: { files?: RegExp; onPlace?: (p: Place) => void; onFile?:
           <HardDrive /> OneDrive
         </Button>
         <Button size="sm" variant={place.kind !== "drive" || place.drive_id ? "default" : "outline"} onClick={() => go({ kind: "sites", query: "" })}>
-          <Globe /> SharePoint sites
+          <Globe /> {t("SharePoint sites")}
         </Button>
       </div>
       <form className="cq-m365-search" onSubmit={search}>
-        <Input aria-label="Search" value={query} placeholder={place.kind === "drive" ? "Search this drive" : "Find a site by name"} onChange={(e) => setQuery(e.target.value)} />
-        <Button type="submit" size="icon" variant="outline" aria-label="Search">
+        <Input aria-label={t("Search")} value={query} placeholder={place.kind === "drive" ? t("Search this drive") : t("Find a site by name")} onChange={(e) => setQuery(e.target.value)} />
+        <Button type="submit" size="icon" variant="outline" aria-label={t("Search")}>
           <Search />
         </Button>
       </form>
       {place.kind === "drive" && (
-        <nav className="cq-m365-trail" aria-label="Folder">
+        <nav className="cq-m365-trail" aria-label={t("Folder")}>
           <button type="button" onClick={() => go({ ...place, trail: [], search: undefined })}>
             {place.label}
           </button>
@@ -148,10 +149,10 @@ function Browser(props: { files?: RegExp; onPlace?: (p: Place) => void; onFile?:
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
-      {!rows && !error && <Spinner label="Loading" />}
+      {!rows && !error && <Spinner label={t("Loading")} />}
       {rows && (
         <ul className="cq-m365-list">
-          {rows.length === 0 && <li className="cq-muted">{place.kind === "sites" ? "No site found." : "Nothing here."}</li>}
+          {rows.length === 0 && <li className="cq-muted">{place.kind === "sites" ? t("No site found.") : t("Nothing here.")}</li>}
           {rows.map((r) => (
             <li key={r.key}>
               <button type="button" disabled={props.busy || (r.icon === "file" && !props.onFile)} onClick={r.open}>
@@ -182,18 +183,18 @@ export function M365Picker(props: { status: M365Status; accept: RegExp; title?: 
     }
   }
   return (
-    <Dialog title={props.title ?? "From Microsoft 365"} wide onClose={props.onClose}>
+    <Dialog title={props.title ?? t("From Microsoft 365")} wide onClose={props.onClose}>
       <div className="cq-dialog-body">
         {props.status.connected ? (
           <>
             <Browser files={props.accept} onFile={(i) => void pick(i)} busy={!!busy} />
-            {busy && <Spinner label={`Copying ${busy}`} />}
+            {busy && <Spinner label={t("Copying {name}", { name: busy })} />}
             {error && (
               <Alert variant="destructive">
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             )}
-            {props.status.account && <p className="cq-hint">Signed in as {props.status.account}</p>}
+            {props.status.account && <p className="cq-hint">{t("Signed in as {name}", { name: props.status.account })}</p>}
           </>
         ) : (
           <Connect />
@@ -237,28 +238,28 @@ export function SaveToM365(props: { status: M365Status; deck_id: string; errors:
   }
   if (!props.status.connected)
     return (
-      <Dialog title="Save to SharePoint" onClose={props.onClose}>
+      <Dialog title={t("Save to SharePoint")} onClose={props.onClose}>
         <div className="cq-dialog-body">
           <Connect />
         </div>
       </Dialog>
     );
   return (
-    <Dialog title="Save to SharePoint" wide onClose={props.onClose}>
+    <Dialog title={t("Save to SharePoint")} wide onClose={props.onClose}>
       {saved ? (
         <>
           <div className="cq-dialog-body">
             <p>
-              Saved as <strong>{saved.name}</strong>.
+              {t("Saved as")} <strong>{saved.name}</strong>.
             </p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={props.onClose}>
-              Close
+              {t("Close")}
             </Button>
             {saved.web_url && (
               <a className={buttonVariants()} href={saved.web_url} target="_blank" rel="noreferrer">
-                <ExternalLink /> Open
+                <ExternalLink /> {t("Open")}
               </a>
             )}
           </DialogFooter>
@@ -268,20 +269,21 @@ export function SaveToM365(props: { status: M365Status; deck_id: string; errors:
           <div className="cq-dialog-body">
             <Browser onPlace={setPlace} />
             <p className="cq-hint">
-              Saves into {folder ? [folder.label, ...folder.trail.map((f) => f.name)].join(" › ") : "a document library: open one"}. A name already taken gets a new one: nothing is overwritten.
+              {t("Saves into {place}.", { place: folder ? [folder.label, ...folder.trail.map((f) => f.name)].join(" › ") : t("a document library: open one") })}{" "}
+              {t("A name already taken gets a new one: nothing is overwritten.")}
             </p>
-            <Field label="Format" htmlFor="m-format">
+            <Field label={t("Format")} htmlFor="m-format">
               <select id="m-format" className="cq-select" value={format} onChange={(e) => setFormat(e.target.value as "pptx" | "pdf")}>
                 <option value="pptx">PowerPoint (.pptx)</option>
                 <option value="pdf">PDF</option>
               </select>
             </Field>
             {gate && (
-              <Field label={`This version has ${props.errors} lint error${props.errors === 1 ? "" : "s"}: why does it go out anyway?`} htmlFor="m-reason">
+              <Field label={tn(props.errors, "This version has {n} lint error: why does it go out anyway?", "This version has {n} lint errors: why does it go out anyway?")} htmlFor="m-reason">
                 <Textarea id="m-reason" rows={2} required value={reason} onChange={(e) => setReason(e.target.value)} />
               </Field>
             )}
-            {busy && <Spinner label="Saving" />}
+            {busy && <Spinner label={t("Saving")} />}
             {error && (
               <Alert variant="destructive">
                 <AlertDescription>{error}</AlertDescription>
@@ -290,10 +292,10 @@ export function SaveToM365(props: { status: M365Status; deck_id: string; errors:
           </div>
           <DialogFooter>
             <Button variant="outline" type="button" onClick={props.onClose}>
-              Cancel
+              {t("Cancel")}
             </Button>
             <Button type="submit" disabled={busy || !folder || (gate && !reason.trim())}>
-              <Cloud /> Save here
+              <Cloud /> {t("Save here")}
             </Button>
           </DialogFooter>
         </form>

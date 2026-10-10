@@ -2,10 +2,9 @@ import { Check, ChevronLeft, ChevronRight, MessageSquare, MessageSquarePlus, Rep
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { shapeLabel, SlideCanvas } from "./SlideCanvas.tsx";
 import { Thumbnails } from "./Thumbnails.tsx";
+import { EN_STRINGS, type SlideUiStrings } from "./strings.ts";
 import type { Comment, DeckView, NewComment, NewReply, SlideView } from "./types.ts";
 
-const plural = (n: number, word: string) => `${n} ${word}${n > 1 ? "s" : ""}`;
-const APPROVAL = { draft: "Draft", in_review: "In review", approved: "Approved" } as const;
 const typing = (t: EventTarget | null) => t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
 
 /** The deck workspace: top bar, slide rail, stage (preview + inspector + comment box) and a side panel
@@ -32,8 +31,11 @@ export function DeckViewer(props: {
   slideActions?: (slide: SlideView) => ReactNode;
   /** What the agent is doing to the deck right now, shown over the slide. */
   working?: string | null;
+  /** The words shown, in the host's language; English by default. */
+  strings?: SlideUiStrings | undefined;
 }) {
   const { deck } = props;
+  const s = props.strings ?? EN_STRINGS;
   const [current, setCurrent] = useState(0);
   const [shape, setShape] = useState<number | null>(null);
   const [text, setText] = useState("");
@@ -63,7 +65,7 @@ export function DeckViewer(props: {
     return () => removeEventListener("keydown", on);
   }, [last]);
 
-  if (!slide) return <div className="cq-empty">Empty deck.</div>;
+  if (!slide) return <div className="cq-empty">{s.emptyDeck}</div>;
   const here = deck.open_comments.filter((c) => c.slide_id === slide.id);
   const picked = shape !== null ? slide.shapes.find((s) => s.shape_id === shape) : undefined;
   const open = deck.open_comments.length;
@@ -84,6 +86,7 @@ export function DeckViewer(props: {
   const comments = (
     <Comments
       deck={deck}
+      strings={s}
       current={slide.id}
       selected={shape}
       onPick={(slideId, shapeId) => {
@@ -107,7 +110,7 @@ export function DeckViewer(props: {
               <>
                 {" · "}
                 <span className="cq-approval" data-status={deck.approval.status}>
-                  {APPROVAL[deck.approval.status]}
+                  {s.approval[deck.approval.status]}
                 </span>
               </>
             )}
@@ -116,21 +119,21 @@ export function DeckViewer(props: {
         <div className="cq-bar-actions">{props.actions}</div>
       </header>
 
-      <Thumbnails slides={deck.slides} current={index} comments={deck.open_comments} onSelect={go} />
+      <Thumbnails strings={s} slides={deck.slides} current={index} comments={deck.open_comments} onSelect={go} />
 
-      <section className="cq-stage" aria-label="Slide">
+      <section className="cq-stage" aria-label={s.stage}>
         <div className="cq-stagebar">
-          <button type="button" className="cq-btn" data-variant="ghost" data-icon data-size="sm" aria-label="Previous slide" disabled={index === 0} onClick={() => go(index - 1)}>
+          <button type="button" className="cq-btn" data-variant="ghost" data-icon data-size="sm" aria-label={s.previousSlide} disabled={index === 0} onClick={() => go(index - 1)}>
             <ChevronLeft />
           </button>
           <span className="cq-pos">
             {slide.number} / {deck.slides.length}
           </span>
-          <button type="button" className="cq-btn" data-variant="ghost" data-icon data-size="sm" aria-label="Next slide" disabled={index === last} onClick={() => go(index + 1)}>
+          <button type="button" className="cq-btn" data-variant="ghost" data-icon data-size="sm" aria-label={s.nextSlide} disabled={index === last} onClick={() => go(index + 1)}>
             <ChevronRight />
           </button>
           <span className="cq-spacer" />
-          {props.onComment && <span className="cq-stagebar-hint">Click an element to comment on it</span>}
+          {props.onComment && <span className="cq-stagebar-hint">{s.clickToComment}</span>}
           {props.slideActions?.(slide)}
           <button
             type="button"
@@ -138,14 +141,14 @@ export function DeckViewer(props: {
             data-variant="ghost"
             data-size="sm"
             aria-pressed={outline}
-            title="Outline every shape"
+            title={s.outlineShapes}
             onClick={() => setOutline((o) => !o)}
           >
-            <SquareDashed /> Shapes
+            <SquareDashed /> {s.shapes}
           </button>
         </div>
         <div className="cq-stage-view">
-          <SlideCanvas slide={slide} selected={shape} comments={here} outline={outline} onSelect={setShape} />
+          <SlideCanvas strings={s} slide={slide} selected={shape} comments={here} outline={outline} onSelect={setShape} />
           {props.working && (
             <div className="cq-working" role="status">
               <div>
@@ -160,25 +163,25 @@ export function DeckViewer(props: {
               <span className="cq-anchor">
                 <MessageSquarePlus />
                 <span>
-                  Slide {slide.number}
+                  {s.slide(slide.number)}
                   {picked && (
                     <>
                       {" · "}
                       <b>{shapeLabel(picked)}</b> <span className="cq-mono">#{picked.shape_id}</span>
                     </>
                   )}
-                  {!picked && <span className="cq-muted"> · whole slide</span>}
+                  {!picked && <span className="cq-muted"> · {s.wholeSlide}</span>}
                 </span>
                 {picked && (
-                  <button type="button" aria-label="Comment on the whole slide" onClick={() => setShape(null)}>
+                  <button type="button" aria-label={s.commentWholeSlide} onClick={() => setShape(null)}>
                     <X size={14} />
                   </button>
                 )}
               </span>
               <div className="cq-comment-row">
                 <textarea
-                  aria-label={`Comment on slide ${slide.number}${shape !== null ? `, shape ${shape}` : ""}`}
-                  placeholder={picked ? `What should change in this ${shapeLabel(picked)}?` : "What should change on this slide?"}
+                  aria-label={s.commentOn(slide.number, shape)}
+                  placeholder={picked ? s.askShape(shapeLabel(picked)) : s.askSlide}
                   value={text}
                   rows={1}
                   onChange={(e) => setText(e.target.value)}
@@ -190,7 +193,7 @@ export function DeckViewer(props: {
                   }}
                 />
                 <button type="submit" className="cq-btn" data-variant="primary" data-size="sm" disabled={busy || !text.trim()}>
-                  Comment
+                  {s.comment}
                 </button>
               </div>
             </div>
@@ -198,16 +201,16 @@ export function DeckViewer(props: {
         )}
       </section>
 
-      <aside className="cq-panel" aria-label="Side panel">
+      <aside className="cq-panel" aria-label={s.sidePanel}>
         <div className="cq-panel-head">
           <div className="cq-tabs" role="tablist">
             {props.agent && (
               <button type="button" role="tab" aria-selected={tab === "agent"} onClick={() => setTab("agent")}>
-                <Sparkles /> Agent
+                <Sparkles /> {s.agent}
               </button>
             )}
             <button type="button" role="tab" aria-selected={tab === "comments"} onClick={() => setTab("comments")}>
-              <MessageSquare /> Comments {open > 0 && <span className="cq-count">{open}</span>}
+              <MessageSquare /> {s.comments} {open > 0 && <span className="cq-count">{open}</span>}
             </button>
             {props.tabs?.map((t) => (
               <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} onClick={() => setTab(t.id)}>
@@ -218,11 +221,11 @@ export function DeckViewer(props: {
         </div>
         <div className="cq-panel-body">
           {props.agent && (
-            <div role="tabpanel" aria-label="Agent" hidden={tab !== "agent"}>
+            <div role="tabpanel" aria-label={s.agent} hidden={tab !== "agent"}>
               {props.agent}
             </div>
           )}
-          <div role="tabpanel" aria-label="Comments" hidden={tab !== "comments"}>
+          <div role="tabpanel" aria-label={s.comments} hidden={tab !== "comments"}>
             {comments}
           </div>
           {props.tabs?.map((t) => (
@@ -243,6 +246,7 @@ resolved, or picked for the agent. The foot button hands the picked threads (els
 Resolved threads stay one click away, to reopen. */
 function Comments(props: {
   deck: DeckView;
+  strings: SlideUiStrings;
   current: string;
   selected: number | null;
   onPick: (slideId: string, shapeId: number | null) => void;
@@ -250,7 +254,7 @@ function Comments(props: {
   onReply?: (r: NewReply) => Promise<void>;
   onResolve?: (ids: number[], status: "open" | "resolved") => Promise<void>;
 }) {
-  const { deck } = props;
+  const { deck, strings: s } = props;
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const [replying, setReplying] = useState<number | null>(null);
   const [reply, setReply] = useState("");
@@ -293,34 +297,34 @@ function Comments(props: {
         {groups.length === 0 && (
           <div className="cq-empty">
             <MessageSquare />
-            <strong>No open comment</strong>
-            <span>Click an element on the slide, say what should change, then let the agent apply it.</span>
+            <strong>{s.noOpenComment}</strong>
+            <span>{s.noOpenCommentHint}</span>
           </div>
         )}
         {groups.map(({ slide, items }) => (
           <section key={slide.id}>
-            <h3>Slide {slide.number}</h3>
+            <h3>{s.slide(slide.number)}</h3>
             <ul>
               {items.map((c) => {
-                const s = c.shape_id !== null ? slide.shapes.find((x) => x.shape_id === c.shape_id) : undefined;
+                const sh = c.shape_id !== null ? slide.shapes.find((x) => x.shape_id === c.shape_id) : undefined;
                 return (
                   <li key={c.id}>
                     <button type="button" aria-current={slide.id === props.current && c.shape_id === props.selected && c.shape_id !== null} onClick={() => props.onPick(slide.id, c.shape_id)}>
                       <span className="cq-comment-meta">
                         <b>{who(c)}</b>
                         <span>·</span>
-                        {s ? (
+                        {sh ? (
                           <span>
-                            {shapeLabel(s)} <span className="cq-mono">#{s.shape_id}</span>
+                            {shapeLabel(sh)} <span className="cq-mono">#{sh.shape_id}</span>
                           </span>
                         ) : (
-                          <span>whole slide</span>
+                          <span>{s.wholeSlide}</span>
                         )}
                       </span>
                       <span>{c.text}</span>
                     </button>
                     {!!c.replies?.length && (
-                      <ol className="cq-replies" aria-label={`Replies to comment ${c.id}`}>
+                      <ol className="cq-replies" aria-label={s.repliesTo(c.id)}>
                         {c.replies.map((r) => (
                           <li key={r.id}>
                             <b>{who(r)}</b> {r.text}
@@ -332,13 +336,13 @@ function Comments(props: {
                       <div className="cq-comment-actions">
                         {props.onApply && (
                           <label>
-                            <input type="checkbox" checked={picked.has(c.id)} onChange={() => toggle(c.id)} aria-label={`Select comment ${c.id}`} /> Select
+                            <input type="checkbox" checked={picked.has(c.id)} onChange={() => toggle(c.id)} aria-label={s.selectComment(c.id)} /> {s.select}
                           </label>
                         )}
                         <span className="cq-spacer" />
                         {props.onReply && (
-                          <button type="button" className="cq-btn" data-variant="ghost" data-size="sm" aria-label={`Reply to comment ${c.id}`} onClick={() => setReplying(replying === c.id ? null : c.id)}>
-                            <Reply /> Reply
+                          <button type="button" className="cq-btn" data-variant="ghost" data-size="sm" aria-label={s.replyTo(c.id)} onClick={() => setReplying(replying === c.id ? null : c.id)}>
+                            <Reply /> {s.reply}
                           </button>
                         )}
                         {props.onResolve && (
@@ -347,20 +351,20 @@ function Comments(props: {
                             className="cq-btn"
                             data-variant="ghost"
                             data-size="sm"
-                            aria-label={`Resolve comment ${c.id}`}
+                            aria-label={s.resolveComment(c.id)}
                             disabled={busy}
                             onClick={() => void act(() => props.onResolve?.([c.id], "resolved") ?? Promise.resolve())}
                           >
-                            <Check /> Resolve
+                            <Check /> {s.resolve}
                           </button>
                         )}
                       </div>
                     )}
                     {replying === c.id && (
                       <form className="cq-reply" onSubmit={(e) => void send(e, c.id)}>
-                        <textarea aria-label={`Reply to comment ${c.id}`} rows={2} value={reply} placeholder="Reply…" onChange={(e) => setReply(e.target.value)} />
+                        <textarea aria-label={s.replyTo(c.id)} rows={2} value={reply} placeholder={s.replyPlaceholder} onChange={(e) => setReply(e.target.value)} />
                         <button type="submit" className="cq-btn" data-variant="primary" data-size="sm" disabled={busy || !reply.trim()}>
-                          Send
+                          {s.send}
                         </button>
                       </form>
                     )}
@@ -373,7 +377,7 @@ function Comments(props: {
         {resolved.length > 0 && (
           <section className="cq-resolved">
             <button type="button" className="cq-btn" data-variant="ghost" data-size="sm" aria-expanded={showResolved} onClick={() => setShowResolved((v) => !v)}>
-              {plural(resolved.length, "resolved comment")}
+              {s.resolvedComments(resolved.length)}
             </button>
             {showResolved && (
               <ul>
@@ -382,7 +386,7 @@ function Comments(props: {
                     <span className="cq-comment-meta">
                       <b>{who(c)}</b>
                       <span>·</span>
-                      <span>Slide {deck.slides.find((s) => s.id === c.slide_id)?.number ?? "?"}</span>
+                      <span>{s.slide(deck.slides.find((x) => x.id === c.slide_id)?.number ?? "?")}</span>
                     </span>
                     <span>{c.text}</span>
                     {props.onResolve && (
@@ -391,11 +395,11 @@ function Comments(props: {
                         className="cq-btn"
                         data-variant="ghost"
                         data-size="sm"
-                        aria-label={`Reopen comment ${c.id}`}
+                        aria-label={s.reopenComment(c.id)}
                         disabled={busy}
                         onClick={() => void act(() => props.onResolve?.([c.id], "open") ?? Promise.resolve())}
                       >
-                        <RotateCcw /> Reopen
+                        <RotateCcw /> {s.reopen}
                       </button>
                     )}
                   </li>
@@ -408,10 +412,10 @@ function Comments(props: {
       {props.onApply && open > 0 && (
         <div className="cq-comments-foot">
           <button type="button" className="cq-btn" data-variant="accent" onClick={() => void props.onApply?.(chosen.length ? chosen : undefined)}>
-            <Sparkles /> {chosen.length ? `Apply ${chosen.length} selected` : `Apply ${plural(open, "comment")}`}
+            <Sparkles /> {chosen.length ? s.applySelected(chosen.length) : s.applyAll(open)}
           </button>
           <span className="cq-hint">
-            {chosen.length ? "The agent edits the deck for the selected comments only." : "The agent edits the deck, then resolves each comment."}
+            {chosen.length ? s.applySelectedHint : s.applyAllHint}
           </span>
         </div>
       )}
