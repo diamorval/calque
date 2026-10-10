@@ -1,3 +1,5 @@
 packages:
   - apps/*
   - packages/*
+minimumReleaseAgeExclude:
+  - diametral-ds@0.3.1

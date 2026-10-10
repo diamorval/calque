@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DeckViewer } from "./DeckViewer.tsx";
 import type { DeckView } from "./types.ts";
@@ -53,6 +53,17 @@ describe("DeckViewer", () => {
     expect(onComment).toHaveBeenCalledWith({ slide_id: "cover", text: "Too dense" });
   });
 
+  it("marks a comment required (it blocks approval), and shows required threads", () => {
+    const onComment = vi.fn().mockResolvedValue(undefined);
+    const flagged = { ...deck, open_comments: deck.open_comments.map((c) => ({ ...c, type: "required" as const })) };
+    render(<DeckViewer deck={flagged} onComment={onComment} />);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Legal mention missing" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: /Required/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Comment" }));
+    expect(onComment).toHaveBeenCalledWith({ slide_id: "cover", text: "Legal mention missing", type: "required" });
+    expect(screen.getAllByText("Required", { selector: ".cq-required" }).length).toBe(flagged.open_comments.length);
+  });
+
   it("jumps to a comment's slide and shape from the comments panel", () => {
     render(<DeckViewer deck={deck} onComment={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /Sort bars/ }));
@@ -68,6 +79,13 @@ describe("DeckViewer", () => {
     expect(screen.queryByRole("tabpanel", { name: "Agent" })).toBeNull();
   });
 
+  it("has no comment box for a viewer (no onComment)", () => {
+    render(<DeckViewer deck={{ ...deck, role: "viewer" }} />);
+    expect(screen.getByRole("button", { name: "Shape 2 (title)" })).toBeTruthy();
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.queryByText("Click an element to comment on it")).toBeNull();
+  });
+
   it("switches slides from the thumbnails and shows that slide's comments", () => {
     render(<DeckViewer deck={deck} onComment={vi.fn()} onApply={vi.fn()} />);
     expect(screen.getByLabelText("1 comment")).toBeTruthy();
@@ -76,5 +94,78 @@ describe("DeckViewer", () => {
     expect(screen.getByRole("button", { name: "Shape 5 (drawn)" }).dataset.commented).toBe("1"); // one pin
     expect(screen.getByText("Sort bars")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Apply 1 comment" })).toBeTruthy();
+  });
+
+  const threads: DeckView = {
+    ...deck,
+    open_comments: [
+      { id: 7, slide_id: "regions", shape_id: 5, text: "Sort bars", author: "u-7f3a", author_name: "Bob Durand", status: "open", replies: [
+        { id: 9, slide_id: "regions", shape_id: 5, text: "By growth?", author: "alice", author_name: "Alice Martin", status: "open" },
+      ] },
+      { id: 8, slide_id: "cover", shape_id: null, text: "Too long", author: "guest", author_name: null, status: "open" },
+    ],
+    resolved_comments: [{ id: 3, slide_id: "cover", shape_id: null, text: "Typo", author: "alice", status: "resolved" }],
+  };
+
+  it("opens on the Comments tab when comments are open, and shows names, not ids", () => {
+    render(<DeckViewer deck={threads} agent={<p>chat here</p>} onComment={vi.fn()} />);
+    expect(screen.getByRole("tabpanel", { name: "Comments" })).toBeTruthy();
+    expect(screen.getByText("Bob Durand")).toBeTruthy();
+    expect(screen.queryByText("u-7f3a")).toBeNull();
+    expect(screen.getByText("guest")).toBeTruthy(); // a guest-link comment keeps its label
+    expect(screen.getByRole("list", { name: "Replies to comment 7" }).textContent).toContain("By growth?");
+  });
+
+  it("applies the selected comments only, else all", () => {
+    const onApply = vi.fn().mockResolvedValue(undefined);
+    render(<DeckViewer deck={threads} onApply={onApply} />);
+    fireEvent.click(screen.getByRole("button", { name: "Apply 2 comments" }));
+    expect(onApply).toHaveBeenLastCalledWith(undefined);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select comment 8" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply 1 selected" }));
+    expect(onApply).toHaveBeenLastCalledWith([8]);
+  });
+
+  it("replies in a thread, resolves and reopens one comment", async () => {
+    const onReply = vi.fn().mockResolvedValue(undefined);
+    const onResolve = vi.fn().mockResolvedValue(undefined);
+    render(<DeckViewer deck={threads} onReply={onReply} onResolve={onResolve} />);
+    fireEvent.click(screen.getByRole("button", { name: "Reply to comment 7" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Reply to comment 7" }), { target: { value: "By growth" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(onReply).toHaveBeenCalledWith({ parent_id: 7, text: "By growth" });
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: "Reply to comment 7" })).toBeNull()); // sent: the box closes
+
+    fireEvent.click(screen.getByRole("button", { name: "Resolve comment 8" }));
+    expect(onResolve).toHaveBeenCalledWith([8], "resolved");
+    fireEvent.click(screen.getByRole("button", { name: "1 resolved comment" }));
+    await screen.findByText("Typo");
+    fireEvent.click(screen.getByRole("button", { name: "Reopen comment 3" }));
+    expect(onResolve).toHaveBeenLastCalledWith([3], "open");
+  });
+
+  it("adds the host's side-panel tabs and actions on the slide shown", () => {
+    const act = vi.fn();
+    render(
+      <DeckViewer
+        deck={deck}
+        tabs={[{ id: "library", label: "Library", content: <p>Approved slides</p> }]}
+        slideActions={(s) => <button onClick={() => act(s.id)}>Add to library</button>}
+      />,
+    );
+    expect(screen.queryByRole("tabpanel", { name: "Library" })).toBeNull(); // hidden until picked
+    fireEvent.click(screen.getByRole("tab", { name: "Library" }));
+    expect(screen.getByRole("tabpanel", { name: "Library" }).textContent).toBe("Approved slides");
+    fireEvent.click(screen.getByRole("button", { name: "Next slide" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add to library" }));
+    expect(act).toHaveBeenCalledWith("regions");
+  });
+
+  it("shows the approval status when the pack turns it on", () => {
+    render(<DeckViewer deck={{ ...deck, approval: { enabled: true, status: "in_review", can_request: false, can_withdraw: true, can_approve: false } }} />);
+    expect(screen.getByText("In review")).toBeTruthy();
+    cleanup();
+    render(<DeckViewer deck={{ ...deck, approval: { enabled: false } }} />);
+    expect(screen.queryByText(/Draft|In review|Approved/)).toBeNull();
   });
 });

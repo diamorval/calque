@@ -310,6 +310,24 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .cq-comment-meta .cq-mono { font-size: 11px; color: var(--cq-faint); }
 .cq-comments-foot { padding: 12px; border-top: 1px solid var(--cq-line); display: grid; gap: 8px; background: var(--cq-surface-2); }
 .cq-comments-foot .cq-btn { width: 100%; }
+/* threads: replies, per-comment actions, the resolved list; the approval status in the bar */
+.cq-replies { list-style: none; margin: 4px 0 0 12px; padding: 0 0 0 10px; border-left: 2px solid var(--cq-line); display: grid; gap: 4px; font-size: 13px; }
+.cq-replies b { font-weight: 600; margin-right: 4px; }
+.cq-comment-actions { display: flex; align-items: center; gap: 4px; margin-top: 2px; font-size: 12px; color: var(--cq-muted); }
+.cq-comment-actions label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.cq-comment-actions .cq-spacer { flex: 1; }
+.cq-reply { display: grid; gap: 6px; margin-top: 4px; }
+.cq-reply textarea { width: 100%; resize: vertical; font: inherit; padding: 6px 8px; border: 1px solid var(--cq-line-strong); border-radius: var(--cq-r-sm); background: var(--cq-surface); color: var(--cq-fg); }
+.cq-reply .cq-btn { justify-self: end; }
+.cq-resolved ul { margin-top: 6px; }
+.cq-resolved li { display: grid; gap: 2px; padding: 8px 10px; border: 1px solid var(--cq-line); border-left: 3px solid var(--cq-ok); border-radius: var(--cq-r-sm); color: var(--cq-muted); }
+.cq-resolved li .cq-btn { justify-self: start; }
+.cq-approval { font-weight: 600; }
+/* a required comment blocks approval; a suggestion never does */
+.cq-comment-type { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--cq-muted); cursor: pointer; white-space: nowrap; }
+.cq-required { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: var(--cq-danger); background: var(--cq-danger-soft); border-radius: 4px; padding: 0 5px; }
+.cq-approval[data-status="in_review"] { color: var(--cq-note); }
+.cq-approval[data-status="approved"] { color: var(--cq-ok); }
 .cq-empty { display: grid; justify-items: center; gap: 8px; padding: 40px 20px; text-align: center; color: var(--cq-muted); }
 .cq-empty svg { width: 22px; height: 22px; color: var(--cq-faint); }
 .cq-empty strong { color: var(--cq-fg); font-weight: 600; }

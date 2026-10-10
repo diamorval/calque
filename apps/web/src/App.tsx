@@ -1,7 +1,8 @@
 import { Avatar, AvatarFallback } from "diametral-ds/avatar";
-import { Cpu, LayoutGrid, LogOut, Moon, Palette, Plus, Sun, type LucideIcon } from "lucide-react";
+import { Cpu, Languages, LayoutGrid, LogOut, Moon, Palette, Plus, Sun, type LucideIcon } from "lucide-react";
 import { useEffect, useState } from "react";
-import { api, ApiError, type Me } from "./api.ts";
+import { api, ApiError, NEUTRAL, type Branding, type Me } from "./api.ts";
+import { LANGS, setLang, t, useLang } from "./i18n.ts";
 import { go, usePath } from "./nav.ts";
 import { Decks } from "./pages/Decks.tsx";
 import { Editor } from "./pages/Editor.tsx";
@@ -9,8 +10,10 @@ import { Login } from "./pages/Login.tsx";
 import { Models } from "./pages/Models.tsx";
 import { NewDeck } from "./pages/NewDeck.tsx";
 import { Packs } from "./pages/Packs.tsx";
+import { PackPortal } from "./pages/PackPortal.tsx";
+import { Compliance } from "./pages/Compliance.tsx";
 import { Presenter } from "./pages/Presenter.tsx";
-import { Mark, Spinner } from "./ui.tsx";
+import { Logo, Spinner } from "./ui.tsx";
 
 function page(path: string, me: Me) {
   const deck = path.match(/^\/d\/([^/]+)/)?.[1];
@@ -18,6 +21,9 @@ function page(path: string, me: Me) {
   if (path === "/new") return <NewDeck />;
   if (path === "/settings/models") return <Models me={me} />;
   if (path === "/settings/packs") return <Packs me={me} />;
+  const pack = path.match(/^\/settings\/packs\/([^/]+)$/)?.[1];
+  if (pack) return <PackPortal id={decodeURIComponent(pack)} />;
+  if (path === "/settings/compliance") return <Compliance />;
   return <Decks />;
 }
 
@@ -62,17 +68,24 @@ function useTheme(): [Theme, () => void] {
 
 export function App() {
   const path = usePath();
+  const lang = useLang(); // a switch re-renders every page in the new language
   const [theme, toggleTheme] = useTheme();
   const [me, setMe] = useState<Me | null | "signed-out">(null);
+  const [brand, setBrand] = useState<Branding>(NEUTRAL);
   useEffect(() => {
     api<Me>("/api/me").then(setMe, (e) => setMe(e instanceof ApiError && e.status === 401 ? "signed-out" : null));
+    // the deployment's name and logo (white-label); the neutral one if it cannot be read
+    api<Branding>("/api/branding").then(setBrand, () => setBrand(NEUTRAL));
   }, []);
+  useEffect(() => {
+    document.title = brand.name;
+  }, [brand.name]);
 
-  if (me === "signed-out") return <Login />;
+  if (me === "signed-out") return <Login brand={brand} />;
   if (!me)
     return (
       <div className="cq-center">
-        <Spinner label="Loading" />
+        <Spinner label={t("Loading")} />
       </div>
     );
   const present = path.match(/^\/present\/([^/]+)/)?.[1];
@@ -81,24 +94,34 @@ export function App() {
   const name = me.name ?? me.id;
   return (
     <div className="cq-app">
-      <nav className="cq-side" aria-label="Main">
-        <a className="cq-logo" href="/" aria-label="Calque home" onClick={(e) => go(e, "/")}>
-          <Mark />
+      <nav className="cq-side" aria-label={t("Main")}>
+        <a className="cq-logo" href="/" aria-label={t("{name} home", { name: brand.name })} title={brand.name} onClick={(e) => go(e, "/")}>
+          <Logo brand={brand} />
         </a>
-        <NavItem href="/" label="Decks" short="Decks" icon={LayoutGrid} active={path === "/" || path.startsWith("/d/")} />
-        <NavItem href="/new" label="New deck" short="New" icon={Plus} active={path === "/new"} />
+        <NavItem href="/" label={t("Decks")} short={t("Decks (short)")} icon={LayoutGrid} active={path === "/" || path.startsWith("/d/")} />
+        <NavItem href="/new" label={t("New deck")} short={t("New (short)")} icon={Plus} active={path === "/new"} />
         <span className="cq-side-gap" />
-        <NavItem href="/settings/models" label="AI models" short="Models" icon={Cpu} active={path === "/settings/models"} />
-        <NavItem href="/settings/packs" label="Brand packs" short="Packs" icon={Palette} active={path === "/settings/packs"} />
+        <NavItem href="/settings/models" label={t("AI models")} short={t("Models (short)")} icon={Cpu} active={path === "/settings/models"} />
+        <NavItem href="/settings/packs" label={t("Brand packs")} short={t("Packs (short)")} icon={Palette} active={path.startsWith("/settings/packs") || path === "/settings/compliance"} />
         <span className="cq-side-rule" />
-        <button type="button" className="cq-nav" aria-label={theme === "dark" ? "Light theme" : "Dark theme"} title="Switch theme" onClick={toggleTheme}>
+        <button type="button" className="cq-nav" aria-label={theme === "dark" ? t("Light theme") : t("Dark theme")} title={t("Switch theme")} onClick={toggleTheme}>
           {theme === "dark" ? <Sun /> : <Moon />}
         </button>
-        <Avatar className="cq-avatar" aria-label={`Signed in as ${name}`} title={name}>
+        <button
+          type="button"
+          className="cq-nav"
+          aria-label={t("Language: {name}", { name: LANGS[lang] })}
+          title={t("Switch to {name}", { name: LANGS[lang === "fr" ? "en" : "fr"] })}
+          onClick={() => setLang(lang === "fr" ? "en" : "fr")}
+        >
+          <Languages />
+          <span aria-hidden>{lang.toUpperCase()}</span>
+        </button>
+        <Avatar className="cq-avatar" aria-label={t("Signed in as {name}", { name })} title={name}>
           <AvatarFallback>{name.slice(0, 2).toUpperCase()}</AvatarFallback>
         </Avatar>
         {me.auth && (
-          <button type="button" className="cq-nav" aria-label="Sign out" title="Sign out" onClick={() => location.assign("/auth/logout")}>
+          <button type="button" className="cq-nav" aria-label={t("Sign out")} title={t("Sign out")} onClick={() => location.assign("/auth/logout")}>
             <LogOut />
           </button>
         )}

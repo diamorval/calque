@@ -1,4 +1,5 @@
-"""PPTX -> one PNG per slide (headless LibreOffice + pdftoppm) and a shape map, incrementally.
+"""PPTX -> one PNG per slide (headless LibreOffice + pdftoppm) and a shape map, incrementally;
+PPTX -> PDF for export.
 
 Each slide is keyed by a hash of its XML, every part it reaches (layout, master, theme, images,
 charts), its position (slide-number fields), the canvas, the DPI and the pack fonts. Only slides
@@ -200,10 +201,9 @@ def _shape_map(prs, pngs, sources, tmap) -> list[dict[str, Any]]:
 # --- conversion ------------------------------------------------------------------------------
 
 
-def _convert(deck: Path, pack: Pack, pages: list[int], dpi: int, work: Path) -> list[Path]:
-    """Render `pages` (1-based) of `deck` to PNGs, in that order."""
+def _pdf(deck: Path, pack: Pack, work: Path, pages: list[int] | None = None) -> Path:
+    """`deck` (only `pages`, 1-based, if given) to a PDF in `work`, with the pack's fonts."""
     soffice = _tool("soffice", "/Applications/LibreOffice.app/Contents/MacOS/soffice")
-    pdftoppm = _tool("pdftoppm")
     profile = work / "profile"
     (profile / "user").mkdir(parents=True)
     fonts = pack.dir / "fonts"
@@ -214,10 +214,9 @@ def _convert(deck: Path, pack: Pack, pages: list[int], dpi: int, work: Path) -> 
         swapped = work / "deck.pptx"
         _swap_fonts(deck, swapped, swaps)
         deck = swapped
-    opts = {
-        "PageRange": {"type": "string", "value": ",".join(map(str, pages))},
-        "ExportHiddenSlides": {"type": "boolean", "value": "true"},
-    }
+    opts: dict[str, Any] = {"ExportHiddenSlides": {"type": "boolean", "value": "true"}}
+    if pages is not None:
+        opts["PageRange"] = {"type": "string", "value": ",".join(map(str, pages))}
     pdf_dir = work / "pdf"
     cmd = [
         soffice,
@@ -234,6 +233,13 @@ def _convert(deck: Path, pack: Pack, pages: list[int], dpi: int, work: Path) -> 
     pdf = pdf_dir / (deck.stem + ".pdf")
     if not pdf.is_file():
         raise RenderError(f"LibreOffice produced no PDF for {deck}: {run.stderr or run.stdout}")
+    return pdf
+
+
+def _convert(deck: Path, pack: Pack, pages: list[int], dpi: int, work: Path) -> list[Path]:
+    """Render `pages` (1-based) of `deck` to PNGs, in that order."""
+    pdftoppm = _tool("pdftoppm")
+    pdf = _pdf(deck, pack, work, pages)
     subprocess.run(
         [pdftoppm, "-png", "-r", str(dpi), str(pdf), str(work / "page")],
         check=True,
@@ -243,6 +249,15 @@ def _convert(deck: Path, pack: Pack, pages: list[int], dpi: int, work: Path) -> 
     out = sorted(work.glob("page-*.png"), key=lambda p: int(p.stem.rsplit("-", 1)[1]))
     if len(out) != len(pages):
         raise RenderError(f"expected {len(pages)} pages from {deck}, got {len(out)}")
+    return out
+
+
+def export_pdf(pptx_path: str | Path, out_path: str | Path, pack: Pack) -> Path:
+    """The whole deck as one PDF (hidden slides included), rendered as the previews are."""
+    out = Path(out_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="calque-pdf-") as tmp:
+        shutil.move(_pdf(Path(pptx_path), pack, Path(tmp)), out)
     return out
 
 

@@ -92,6 +92,7 @@ Rules:
 - **Respect capacities.** Each slot in `template-map.yaml` carries an estimated capacity; the
   title box carries `grid.title.max_chars`. Write the copy to fit before building: tightening
   copy is cheaper than a QA loop. Overflow is failure #1. Never enlarge a box to rescue copy.
+  Lint warns (`capacity`) on a slot over its capacity and on a fit label grown into other text.
 - **Narrow labels fit to content** and keep their grid edge; judge them across slides (four
   dividers must not end up with four different label positions).
 - **Text in blocks, not fragments.** One text frame per idea group (a label paragraph, then its
@@ -101,9 +102,18 @@ Rules:
   never typed glyphs or hand-written "1.". One sub-level at most.
 - **Never fabricate a fact.** Unknown value → the pack's `missing_value[<lang>]` placeholder, kept
   in the format of the slot (unit, ordinal, date pattern), and listed in the delivery report.
+- **Cite where the numbers come from.** A chart or composition whose figures come from a document,
+  a system or a study carries `params.source`, written in full in the deck language ("Source: CRM,
+  Sept. 2026"): who measured it, and when. The engine draws it as a small line at the bottom of
+  the body band (the pack's `source` slot, or `grid.source`) and shrinks the drawing above it. An
+  unknown source is a `missing_value[<lang>]` in that line, never omitted silently. A comment
+  asking for a source is a `set_params` patch with `source`. On a cloned archetype, write the
+  source into one of its caption slots. A pack may opt in to a lint WARN on any chart without one
+  (`lint.chart_source`).
 - **Keep the decoration.** Grid rules, background rectangles and icons on a cloned slide are its
   frame; replace only the text and picture slots.
-- **Reorder, then renumber** page-number footers (`grid.page_number`), or blank them.
+- **Reorder, then renumber** page-number footers (`grid.page_number`), or blank them. A build
+  writes every page number as a slide-number field, so PowerPoint keeps it right after a reorder.
 - **Fonts.** Display role (`role.font.display`) for titles and large numerals, body role for text
   and figures, label role for eyebrows and small labels. Never set a font outside the pack; if the
   pack font file is absent, rendering uses `fonts.fallback` and the report says so.

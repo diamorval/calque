@@ -1,31 +1,63 @@
-import { DeckViewer, type DeckView } from "@calque/slide-ui";
+import { DeckViewer, type DeckView, type NewComment, type NewReply } from "@calque/slide-ui";
 import { Alert, AlertDescription } from "diametral-ds/alert";
 import { Button } from "diametral-ds/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "diametral-ds/table";
 import { Tag } from "diametral-ds/tag";
-import { CircleCheck, Download, History, Play, Sparkles, TriangleAlert, X } from "lucide-react";
+import { BadgeCheck, BookMarked, CircleCheck, Cloud, Download, FileText, History, ListChecks, ListPlus, MessageSquareShare, Play, RefreshCw, Send, Share2, Sparkles, TriangleAlert, Undo2, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { agent, tool } from "../api.ts";
-import { Chat } from "../components/Chat.tsx";
+import { agent, api, tool, type Me, type Pack } from "../api.ts";
+import { Chat, type Ask } from "../components/Chat.tsx";
+import { AddSlides, ReviewDeck } from "../components/DeckActions.tsx";
+import { ExportWithErrors } from "../components/ExportGate.tsx";
+import { AddToLibrary, LibraryPanel } from "../components/Library.tsx";
+import { SaveToM365, ShareToTeams, useM365 } from "../components/M365.tsx";
+import { ShareDeck } from "../components/Share.tsx";
+import { slideUiStrings, t, tn } from "../i18n.ts";
+import { bySeverity, type Finding, lintSummary } from "../lint.ts";
 import { navigate } from "../nav.ts";
 import { ago, Dialog, Spinner } from "../ui.tsx";
 
-type Deck = DeckView & { versions: { version: number; note: string; author: string; created_at: string }[] };
+type Deck = DeckView & {
+  versions: { version: number; note: string; author: string; author_name: string | null; created_at: string; pack_version: number | null }[];
+  /** The pack release the deck is built on, and the pack's latest one (update_pack_release). */
+  pack_version?: number | null;
+  pack_latest?: number;
+  /** the deck's type, and the types its pack offers (approval may apply to some only) */
+  kind?: string | null;
+  kinds?: string[];
+};
+const APPROVAL = { draft: "Draft", in_review: "In review", approved: "Approved" } as const;
 
-const EDITS = ["Tighten every title to one line", "Add an agenda slide after the cover", "Review the deck against the brand pack"];
+const EDITS = ["Tighten every title to one line", "Add an agenda slide after the cover", "Review the deck against the brand pack"] as const;
 
 /** The editor: the deck workspace (slide-ui) with the agent chat in its side panel. */
 export function Editor({ id }: { id: string }) {
   const [deck, setDeck] = useState<Deck | null>(null);
-  const [errors, setErrors] = useState<number | null>(null);
+  const [findings, setFindings] = useState<Finding[] | null>(null);
+  const [report, setReport] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [history, setHistory] = useState(false);
+  // toolbar actions that go through the agent chat, and their dialogs
+  const [ask, setAsk] = useState<Ask | null>(null);
+  const [dialog, setDialog] = useState<"add" | "review" | "share" | "export" | "m365" | "teams" | null>(null);
+  // the saved file a Teams post links to, after Save to SharePoint
+  const [teamsFile, setTeamsFile] = useState<string | undefined>(undefined);
+  // the slide library: the slide being added, who the viewer is and whether they manage the pack
+  const [adding, setAdding] = useState<{ id: string; number: number } | null>(null);
+  const [library, setLibrary] = useState(0);
+  const [me, setMe] = useState<Me | null>(null);
+  const [packs, setPacks] = useState<Pack[]>([]);
+  const m365 = useM365();
+  useEffect(() => {
+    api<Me>("/api/me").then(setMe, () => setMe(null));
+    tool<{ packs: Pack[] }>("list_packs").then((r) => setPacks(r.packs), () => setPacks([]));
+  }, []);
 
   const reload = useCallback(async () => {
     try {
       setDeck(await tool<Deck>("open_deck", { deck_id: id }));
-      setErrors((await tool<{ errors: number }>("lint_deck", { deck_id: id })).errors);
+      setFindings((await tool<{ findings: Finding[] }>("lint_deck", { deck_id: id })).findings);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -55,80 +87,267 @@ export function Editor({ id }: { id: string }) {
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         ) : (
-          <Spinner label="Loading deck" />
+          <Spinner label={t("Loading deck")} />
         )}
       </div>
     );
+  const summary = findings && lintSummary(findings);
+  // a deck shared with the user: viewers read, commenters also comment, editors change it
+  const role = deck.role ?? "owner";
+  const edits = role === "editor" || role === "owner";
+  const errors = findings?.filter((f) => f.severity === "ERROR") ?? [];
+  const exportPptx = async (reason?: string) =>
+    location.assign((await tool<{ download_url: string }>("export_pptx", { deck_id: id, ...(reason ? { reason } : {}) })).download_url);
+  const approval = deck.approval?.enabled ? deck.approval : null;
+  const setApproval = (status: "draft" | "in_review" | "approved", label: string) =>
+    void run(label, () => tool("set_approval", { deck_id: id, status }));
+  const manages = packs.find((p) => p.id === deck.pack_id)?.editable ?? false;
+  // the deck stays on its pack release until its author moves it to the latest one
+  const newRelease = edits && deck.pack_version != null && deck.pack_latest !== undefined && deck.pack_latest > deck.pack_version ? deck.pack_latest : null;
   return (
     <>
       <DeckViewer
         deck={deck}
+        strings={slideUiStrings()}
         working={busy}
         actions={
           <>
-            {errors !== null &&
-              (errors ? (
-                <Tag tone="danger">
-                  <TriangleAlert /> {errors} lint error{errors > 1 ? "s" : ""}
-                </Tag>
+            {summary &&
+              (findings?.length ? (
+                <Button variant="ghost" aria-label={t("Lint: {summary}", { summary: summary.label })} onClick={() => setReport(true)}>
+                  <Tag tone={summary.tone}>
+                    <TriangleAlert /> {summary.label}
+                  </Tag>
+                </Button>
               ) : (
                 <Tag tone="success">
-                  <CircleCheck /> Lint clean
+                  <CircleCheck /> {summary.label}
                 </Tag>
               ))}
+            {edits ? (
+              <>
+                <Button variant="ghost" onClick={() => setDialog("add")}>
+                  <ListPlus /> {t("Add slides")}
+                </Button>
+                <Button variant="ghost" onClick={() => setDialog("review")}>
+                  <ListChecks /> {t("Review")}
+                </Button>
+              </>
+            ) : (
+              <Tag>{role === "viewer" ? t("Viewer") : t("Commenter")}</Tag>
+            )}
             <Button variant="ghost" onClick={() => setHistory(true)}>
-              <History /> History
+              <History /> {t("History")}
             </Button>
+            {newRelease !== null && (
+              <Button
+                variant="outline"
+                title={t("The {pack} pack has a new release: rebuild this deck on it, as a new version (Restore goes back)", { pack: deck.pack_id })}
+                onClick={() => void run(t("Updating to the latest pack release"), () => tool("update_pack_release", { deck_id: id }))}
+              >
+                <RefreshCw /> {t("Update to pack release {n}", { n: newRelease })}
+              </Button>
+            )}
             <Button variant="outline" onClick={() => navigate(`/present/${id}`)}>
-              <Play /> Present
+              <Play /> {t("Present")}
             </Button>
+            {edits && !!deck.kinds?.length ? (
+              <select
+                className="cq-select"
+                aria-label={t("Deck type")}
+                title={t("The deck's type: the brand pack may require approval for some types")}
+                value={deck.kind ?? ""}
+                disabled={busy !== null}
+                onChange={(e) => void run(t("Setting the deck type"), () => tool("set_deck_kind", { deck_id: id, kind: e.target.value || null }))}
+              >
+                <option value="">{t("No type")}</option>
+                {deck.kinds.map((k) => (
+                  <option key={k} value={k}>
+                    {k}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              deck.kind && <Tag>{deck.kind}</Tag>
+            )}
+            {approval && (
+              <>
+                <Tag tone={approval.status === "approved" ? "success" : approval.status === "in_review" ? "warning" : "neutral"}>{t(APPROVAL[approval.status])}</Tag>
+                {approval.status === "in_review" && !!approval.blocking?.length && (
+                  <Tag tone="danger" title={t("Required comments block approval until they are resolved")}>
+                    {tn(approval.blocking.length, "{n} required comment open", "{n} required comments open")}
+                  </Tag>
+                )}
+                {approval.can_request && (
+                  <Button variant="ghost" onClick={() => setApproval("in_review", t("Requesting review"))}>
+                    <Send /> {t("Request review")}
+                  </Button>
+                )}
+                {approval.can_approve && (
+                  <>
+                    <Button variant="ghost" onClick={() => setApproval("approved", t("Approving"))}>
+                      <BadgeCheck /> {t("Approve")}
+                    </Button>
+                    <Button variant="ghost" onClick={() => setApproval("draft", t("Requesting changes"))}>
+                      <Undo2 /> {t("Request changes")}
+                    </Button>
+                  </>
+                )}
+                {approval.can_withdraw && !approval.can_approve && (
+                  <Button variant="ghost" onClick={() => setApproval("draft", t("Back to draft"))}>
+                    <Undo2 /> {t("Back to draft")}
+                  </Button>
+                )}
+              </>
+            )}
             <Button
-              onClick={async () => location.assign((await tool<{ download_url: string }>("export_pptx", { deck_id: id })).download_url)}
+              variant="outline"
+              disabled={busy !== null}
+              onClick={async () => {
+                setBusy(t("Exporting PDF"));
+                setError(null);
+                try {
+                  location.assign((await tool<{ download_url: string }>("export_pdf", { deck_id: id })).download_url);
+                } catch (e) {
+                  setError((e as Error).message);
+                } finally {
+                  setBusy(null);
+                }
+              }}
             >
-              <Download /> Export PPTX
+              <FileText /> {t("Export PDF")}
             </Button>
+            {/* the soft gate: lint ERRORs ask for a reason, recorded with the export, never a block */}
+            <Button onClick={() => (errors.length ? setDialog("export") : void exportPptx().catch((e: Error) => setError(e.message)))}>
+              <Download /> {t("Export PPTX")}
+            </Button>
+            {m365 && (
+              <Button variant="outline" onClick={() => setDialog("m365")}>
+                <Cloud /> {t("Save to SharePoint")}
+              </Button>
+            )}
+            {m365 && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setTeamsFile(undefined);
+                  setDialog("teams");
+                }}
+              >
+                <MessageSquareShare /> {t("Share to Teams")}
+              </Button>
+            )}
+            {role === "owner" && (
+              <Button variant="outline" onClick={() => setDialog("share")}>
+                <Share2 /> {t("Share")}
+              </Button>
+            )}
           </>
         }
+        // the deck's conversation: everyone with access reads it, editors continue it
         agent={
           <Chat
-            storageKey={`chat:${id}`}
             deck_id={id}
             pack_id={deck.pack_id}
-            placeholder="Ask for a change: reword, add a slide, review…"
-            suggestions={EDITS}
+            placeholder={t("Ask for a change: reword, add a slide, review…")}
+            suggestions={EDITS.map((e) => t(e))}
+            ask={ask}
             empty={
               <div className="cq-empty">
                 <Sparkles />
-                <strong>Edit with the agent</strong>
-                <span>Ask for a change in your words. Comments on the slides go through the agent too.</span>
+                <strong>{t("Edit with the agent")}</strong>
+                <span>{t("Ask for a change in your words. Comments on the slides go through the agent too.")}</span>
               </div>
             }
             onDone={() => void reload()}
           />
         }
-        onComment={async (c) => {
-          await tool("add_comment", { deck_id: id, ...c });
-          await reload();
-        }}
-        onApply={() => run("Applying comments", () => agent("/api/agent/apply-comments", { deck_id: id }, () => {}))}
+        tabs={[
+          {
+            id: "library",
+            label: t("Library"),
+            icon: <BookMarked />,
+            content: (
+              <LibraryPanel key={library} pack_id={deck.pack_id} deck_id={id} canEdit={edits} manages={manages} me={me?.id ?? null} onInserted={() => void reload()} onAsk={setAsk} />
+            ),
+          },
+        ]}
+        {...(edits
+          ? {
+              slideActions: (s: { id: string; number: number }) => (
+                <Button variant="ghost" size="sm" onClick={() => setAdding({ id: s.id, number: s.number })}>
+                  <BookMarked /> {t("Add to library")}
+                </Button>
+              ),
+            }
+          : {})}
+        {...(role !== "viewer"
+          ? {
+              onComment: async (c: NewComment) => {
+                await tool("add_comment", { deck_id: id, ...c });
+                await reload();
+              },
+              onReply: async (r: NewReply) => {
+                await tool("add_comment", { deck_id: id, ...r });
+                await reload();
+              },
+            }
+          : {})}
+        {...(edits
+          ? {
+              onApply: (ids?: number[]) =>
+                run(t("Applying comments"), () => agent("/api/agent/apply-comments", { deck_id: id, ...(ids ? { comment_ids: ids } : {}) }, () => {})),
+              onResolve: (ids: number[], status: "open" | "resolved") => run("", () => tool("resolve_comments", { deck_id: id, comment_ids: ids, status })),
+            }
+          : {})}
       />
       {error && (
         <div className="cq-toast" role="alert">
           <TriangleAlert /> <span>{error}</span>
-          <Button variant="ghost" size="icon-sm" aria-label="Dismiss" onClick={() => setError(null)}>
+          <Button variant="ghost" size="icon-sm" aria-label={t("Dismiss")} onClick={() => setError(null)}>
             <X />
           </Button>
         </div>
       )}
+      {dialog === "share" && <ShareDeck deck_id={id} onClose={() => setDialog(null)} />}
+      {dialog === "export" && <ExportWithErrors errors={errors} onClose={() => setDialog(null)} onExport={exportPptx} />}
+      {dialog === "m365" && m365 && (
+        <SaveToM365
+          status={m365}
+          deck_id={id}
+          errors={errors.length}
+          onClose={() => setDialog(null)}
+          onShareTeams={(url) => {
+            setTeamsFile(url);
+            setDialog("teams");
+          }}
+        />
+      )}
+      {dialog === "teams" && m365 && <ShareToTeams status={m365} deck_id={id} file_url={teamsFile} onClose={() => setDialog(null)} />}
+      {adding && (
+        <AddToLibrary deck_id={id} slide_id={adding.id} number={adding.number} manages={manages} onClose={() => setAdding(null)} onAdded={() => setLibrary((n) => n + 1)} />
+      )}
+      {dialog === "add" && <AddSlides onClose={() => setDialog(null)} onAsk={setAsk} />}
+      {dialog === "review" && (
+        <ReviewDeck
+          deck_id={id}
+          onClose={() => setDialog(null)}
+          onAsk={setAsk}
+          onApplySafe={() => {
+            setDialog(null);
+            void run(t("Applying safe fixes"), () => tool("review_deck", { deck_id: id, apply_safe_fixes: true }));
+          }}
+        />
+      )}
       {history && (
-        <Dialog title="Version history" wide onClose={() => setHistory(false)}>
+        <Dialog title={t("Version history")} wide onClose={() => setHistory(false)}>
           <div className="cq-dialog-body">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Version</TableHead>
-                  <TableHead>Change</TableHead>
-                  <TableHead>By</TableHead>
+                  <TableHead>{t("Version")}</TableHead>
+                  <TableHead>{t("Change")}</TableHead>
+                  <TableHead>{t("By")}</TableHead>
                   <TableHead />
                 </TableRow>
               </TableHeader>
@@ -140,25 +359,62 @@ export function Editor({ id }: { id: string }) {
                     </TableCell>
                     <TableCell>
                       {v.note}
-                      <div className="cq-hint">{ago(v.created_at)}</div>
+                      <div className="cq-hint">
+                        {ago(v.created_at)}
+                        {v.pack_version != null && ` · ${t("pack release {n}", { n: v.pack_version })}`}
+                      </div>
                     </TableCell>
-                    <TableCell>{v.author}</TableCell>
+                    <TableCell>{v.author_name || v.author}</TableCell>
                     <TableCell>
                       {v.version === deck.head ? (
-                        <Tag>Current</Tag>
+                        <Tag>{t("Current")}</Tag>
                       ) : (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          aria-label={`Restore v${v.version}`}
-                          onClick={() => {
-                            setHistory(false);
-                            void run("Restoring", () => tool("restore_version", { deck_id: id, version: v.version }));
-                          }}
-                        >
-                          Restore
-                        </Button>
+                        edits && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            aria-label={t("Restore v{version}", { version: v.version })}
+                            onClick={() => {
+                              setHistory(false);
+                              void run(t("Restoring"), () => tool("restore_version", { deck_id: id, version: v.version }));
+                            }}
+                          >
+                            {t("Restore")}
+                          </Button>
+                        )
                       )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </Dialog>
+      )}
+      {report && findings && (
+        <Dialog title={t("Lint: {summary}", { summary: summary?.label ?? "" })} wide onClose={() => setReport(false)}>
+          <div className="cq-dialog-body">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t("Severity")}</TableHead>
+                  <TableHead>{t("Slide")}</TableHead>
+                  <TableHead>{t("Finding")}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {bySeverity(findings).map((f, i) => (
+                  <TableRow key={i}>
+                    <TableCell>
+                      <Tag tone={f.severity === "ERROR" ? "danger" : f.severity === "WARN" ? "warning" : "neutral"}>{f.severity}</Tag>
+                    </TableCell>
+                    <TableCell>{f.slide ? t("Slide {n}", { n: f.slide }) : t("Deck")}</TableCell>
+                    <TableCell>
+                      {f.message}
+                      <div className="cq-hint">
+                        <span className="cq-mono">{f.check}</span>
+                        {f.shape_id !== null && ` · ${t("shape {id}", { id: f.shape_id })}`}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}

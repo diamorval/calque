@@ -32,15 +32,15 @@ describe("deck versions", { timeout: ENGINE_TIMEOUT }, () => {
   });
 
   it("a patch from a stale version is refused", async () => {
-    const deck = await app.decks.deck(LOCAL, id);
+    const deck = await app.decks.deck(LOCAL, id, "viewer");
     const spec = await app.decks.spec(id, deck.head);
     await expect(app.decks.commit(LOCAL, id, deck.head - 1, spec, "stale")).rejects.toBeInstanceOf(Conflict);
   });
 
   it("an invalid patch stores nothing", async () => {
-    const before = (await app.decks.deck(LOCAL, id)).head;
+    const before = (await app.decks.deck(LOCAL, id, "viewer")).head;
     await expect(app.decks.patch(LOCAL, id, [{ op: "delete_slide", slide: "nope" }], "bad")).rejects.toThrow(/nope/);
-    expect((await app.decks.deck(LOCAL, id)).head).toBe(before);
+    expect((await app.decks.deck(LOCAL, id, "viewer")).head).toBe(before);
   });
 });
 

@@ -24,10 +24,23 @@ test("imports an unknown template, assigns roles, builds a clean deck; another t
   await choose(page, "Role of slide 3", "content");
   await choose(page, "Role of slide 2", "divider");
   await page.getByLabel("Voice").fill("# Voice\n\nShort sentences. No jargon.");
-  await expect(page.getByRole("radio", { name: /My teams/ })).toBeChecked(); // restricted by default
+  await expect(page.getByRole("radio", { name: /These teams/ })).toBeChecked(); // restricted by default
   await page.getByRole("button", { name: "Validate and publish" }).click();
 
   await expect(page.getByRole("row", { name: /NewCo/ })).toContainText("sales, calque-admins", { timeout: 60_000 });
+
+  // its charter, read-only: voice and template slides
+  await page.getByRole("link", { name: "NewCo" }).click();
+  await expect(page.getByRole("heading", { name: "Voice" })).toBeVisible();
+  await expect(page.getByText("Short sentences. No jargon.")).toBeVisible();
+  await expect(page.getByRole("img", { name: "Template slide 1" })).toBeVisible({ timeout: 60_000 });
+  await page.getByRole("button", { name: "Brand packs" }).click();
+  // restricted to one of her teams only
+  await page.getByRole("row", { name: /NewCo/ }).getByRole("button", { name: "Teams" }).click();
+  await page.getByRole("checkbox", { name: "calque-admins" }).uncheck();
+  await page.getByRole("button", { name: "Restrict to sales" }).click();
+  await expect(page.getByRole("row", { name: /NewCo/ })).toContainText("sales");
+  await expect(page.getByRole("row", { name: /NewCo/ })).not.toContainText("calque-admins");
 
   // a deck on the new pack, lint clean
   await page.goto("/new");

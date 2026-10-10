@@ -182,3 +182,98 @@ def test_closing_slide_keeps_its_signature_line(tmp_path):
         for f in lint(tmp_path / "c.pptx", pack, "en", exempt_closing_slides={1})
         if f.check == "slop"
     ]
+
+
+def test_closing_line_in_the_deck_language(tmp_path):
+    """A French deck closes in French (pack.yaml `localized_text`), still exempt as a signature."""
+    pack = load_pack(PACK)
+    end = {"kind": "clone", "role": "closing", "values": {}}
+    slide = {"id": "end", "message": "Close", "message_type": "closing", "form": "closing"}
+    for language, line in (("fr", "Merci de votre attention."), ("en", "Thanks for watching!")):
+        spec = {"pack_id": "diametral", "language": language, "title": "Fin", "slides": []}
+        spec["slides"].append({**slide, "source": end})
+        out = tmp_path / f"{language}.pptx"
+        tmap = dict(build(spec, pack, out).slides.values())
+        (shape,) = [s for s in Presentation(str(out)).slides[0].shapes if s.shape_id == 1710]
+        assert " ".join(shape.text_frame.text.split()) == line
+        for m in (tmap, None):
+            assert [f for f in lint(out, pack, language, m) if f.check == "slop"] == []
+
+
+def test_webinar_cover_and_closing(tmp_path):
+    """The persona-review webinar deck: a keyword too long for its tag, a closing rewritten in
+    off-charter copy. Built (server, with the map) and linted bare (CLI), the findings agree."""
+    pack = load_pack(PACK)
+
+    def deck(title):
+        cover = {"26": title, "27": "TRANSFORMATION ACHATS", "30": "WEBINAR", "31": "10/2026"}
+        closing = {"1710": "Réservez un rendez-vous — c'est révolutionnaire !"}
+        spec = {"pack_id": "diametral", "language": "fr", "title": "Webinar", "slides": []}
+        for sid, role, values in (("c", "cover", cover), ("e", "closing", closing)):
+            src = {"kind": "clone", "role": role, "values": values}
+            spec["slides"].append(
+                {"id": sid, "message": sid, "message_type": role, "form": role, "source": src}
+            )
+        report = build(spec, pack, tmp_path / "w.pptx")
+        mapped = lint(tmp_path / "w.pptx", pack, "fr", dict(report.slides.values()))
+        assert mapped == lint(tmp_path / "w.pptx", pack, "fr")
+        return {(f.slide, f.shape_id, f.check, f.severity) for f in mapped}
+
+    found = deck("L'IA dans les achats\u202f: ce que mesurent les CPO")
+    assert (1, 27, "capacity", "WARN") in found  # the grown keyword tag runs into the date
+    assert {(2, 1710, "slop", "ERROR"), (2, 1710, "slop", "WARN")} <= found
+    # The title holds two lines of Ufficio at 52 pt: its three-line preview came from a fallback
+    # face, which lint reports when the pack fonts are missing.
+    assert not {f for f in found if f[1] == 26}
+    if not (PACK / "fonts" / "Ufficio-300.otf").is_file():
+        assert (None, None, "fonts", "WARN") in found
+    long = deck(
+        "L'IA dans les achats\u202f: ce que mesurent vraiment les directions achats en 2026"
+    )
+    assert (1, 26, "capacity", "WARN") in long
+
+
+def test_voice_hard_rules(tmp_path):
+    """voice.md naming and mechanics, enforced from pack.yaml: brand spelling, AI-native, etc.,
+    filler buzzwords; every banned word of a shape is reported, not only the first."""
+    pack = load_pack(PACK)
+    spec = {
+        "pack_id": "diametral",
+        "language": "en",
+        "title": "Voice",
+        "slides": [
+            {
+                "id": "s1",
+                "message": "Voice",
+                "message_type": "narrative",
+                "form": "content",
+                "source": {"kind": "clone", "role": "content", "values": {}},
+            }
+        ],
+    }
+    report = build(spec, pack, tmp_path / "v.pptx")
+    prs = Presentation(str(tmp_path / "v.pptx"))
+    slide = prs.slides[0]
+    copy = (
+        "Diam\u00e9tral and DIAMETRAL are AI-First, AI-Native, an Agile 360 solution, data, "
+        "models, etc. AI-powered, scalable and disruptif."
+    )
+    bad = _box(slide, 0.4, 1.6, 7, 1.2, copy)
+    good = _box(slide, 0.4, 3, 7, 0.6, "Diametral is AI-native: write to contact@diametral.com.")
+    prs.save(str(tmp_path / "voice.pptx"))
+    found = lint(tmp_path / "voice.pptx", pack, "en", dict(report.slides.values()))
+    slop = [(f.severity, f.message.split(":")[0]) for f in found if f.shape_id == bad.shape_id]
+    for sev, hit in [
+        ("ERROR", "'Diam\u00e9tral'"),
+        ("ERROR", "'DIAMETRAL'"),
+        ("ERROR", "'AI-First'"),
+        ("ERROR", "'AI-Native'"),
+        ("ERROR", "'etc.'"),
+        ("WARN", "'Agile'"),
+        ("WARN", "'360 solution'"),
+        ("WARN", "'AI-powered'"),
+        ("WARN", "'scalable'"),
+        ("WARN", "'disruptif'"),
+    ]:
+        assert (sev, hit) in slop, slop
+    assert not [str(f) for f in found if f.shape_id == good.shape_id and f.check == "slop"]

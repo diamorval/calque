@@ -90,13 +90,31 @@ for (const name of DECKS) {
   const { download_url } = await call("POST", "/api/tools/export_pptx", {
     deck_id,
   });
+  const pdf = await call("POST", "/api/tools/export_pdf", { deck_id });
   for (const s of opened.slides) await save(s.image_url);
   await save(download_url);
+  await save(pdf.download_url);
   console.log(`${name}: ${opened.slides.length} slides`);
 }
 await call("GET", "/api/decks");
 await call("POST", "/api/tools/list_packs", {});
 await call("GET", "/api/models");
+await call("GET", "/api/m365");
+await call("GET", "/api/compliance");
+// Brand packs > the pack's portal: its template slides, exemplar pages and icons saved too
+const portal = (await call("GET", "/api/packs/diametral")) as {
+  slides: { image_url: string }[];
+  exemplar_images: { url: string }[];
+  icons: { url: string }[];
+};
+for (const s of portal.slides) {
+  await save(s.image_url);
+  s.image_url = ORIGIN + s.image_url;
+}
+for (const i of [...portal.exemplar_images, ...portal.icons]) {
+  await save(i.url);
+  i.url = ORIGIN + i.url;
+}
 // Brand packs > Edit: the review screen on the pack's template, its slide images saved too
 const draft = (await call("POST", "/api/packs/diametral/edit", {})) as {
   slides: { image_url: string }[];

@@ -1,0 +1,57 @@
+# Calque + Postgres. Put an HTTPS reverse proxy in front of :8787 (CALQUE_PUBLIC_URL).
+# Required, in .env or the environment: CALQUE_SECRET, CALQUE_OIDC_ISSUER, CALQUE_PUBLIC_URL,
+# POSTGRES_PASSWORD. Without an issuer the server only listens on loopback, unreachable here.
+# The other variables (apps/server/README.md) pass through when set.
+services:
+  calque:
+    build: .
+    image: calque
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+    ports: ["8787:8787"]
+    environment:
+      DATABASE_URL: postgres://calque:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/calque
+      CALQUE_SECRET: ${CALQUE_SECRET:?set CALQUE_SECRET, it seals model API keys at rest (openssl rand -base64 32)}
+      CALQUE_OIDC_ISSUER: ${CALQUE_OIDC_ISSUER:?set CALQUE_OIDC_ISSUER, without it the server refuses outside connections}
+      CALQUE_PUBLIC_URL: ${CALQUE_PUBLIC_URL:?set CALQUE_PUBLIC_URL, the HTTPS URL users and Claude reach}
+      # unset stays unset: the server's defaults apply
+      CALQUE_OIDC_AUDIENCE:
+      CALQUE_OIDC_CLIENT_ID:
+      CALQUE_OIDC_CLIENT_SECRET:
+      CALQUE_TEAMS_CLAIM:
+      CALQUE_ADMIN_TEAM:
+      CALQUE_LLM_MODEL:
+      CALQUE_LLM_PROVIDER:
+      CALQUE_LLM_BASE_URL:
+      CALQUE_LLM_API_KEY:
+      # the packs offered to the whole workspace: every folder with a pack.yaml (default /app/packs,
+      # which holds the diametral pack). A client deployment points it at its own packs only:
+      # CALQUE_PACKS: /app/client-packs
+      CALQUE_PACKS:
+      CALQUE_DEFAULT_PACK:
+      CALQUE_APP_NAME:
+      CALQUE_APP_LOGO:
+    volumes:
+      - calque-data:/data # decks, renders, uploads, imported packs
+      # the packs are baked in /app/packs; to serve a client's packs without a rebuild:
+      # - ./client-packs:/app/client-packs:ro   # with CALQUE_PACKS: /app/client-packs
+
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: calque
+      POSTGRES_DB: calque
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "calque", "-d", "calque"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  calque-data:
+  pg-data:

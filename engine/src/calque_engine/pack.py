@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import json
+import re
+from collections.abc import Mapping
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from functools import cache
 from importlib import resources
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 import yaml
@@ -15,6 +19,14 @@ from jsonschema import Draft202012Validator
 from . import tokens as tk
 
 REQUIRED_FILES = ("pack.yaml", "template.pptx", "template-map.yaml", "tokens.json")
+
+# What a pack inherits from the pack it `extends` unless it has its own: these docs (exemplar with
+# its `exemplar/` images) and `lint.slop_rules`. Template, tokens and the rest stay its own.
+INHERITED_DOCS = ("voice", "exemplar", "storyline")
+
+# Pack id -> directory, for resolving `extends`: the server passes the current release of every pack
+# (`packs` in an engine request). Without an entry, the parent is a sibling directory (packs/<id>).
+PACK_DIRS: ContextVar[Mapping[str, str]] = ContextVar("pack_dirs", default=MappingProxyType({}))
 
 
 class PackError(ValueError):
@@ -30,6 +42,11 @@ class Pack:
     tokens: dict[str, Any]  # resolved dotted path -> value
     template_map: dict[str, Any]
     raw_tokens: dict[str, Any] = field(repr=False)
+    # voice / exemplar / storyline -> file, its own or inherited; the `exemplar/` images likewise
+    docs: dict[str, Path] = field(default_factory=dict)
+    exemplar_dir: Path | None = None
+    # the pack it extends, merged in already (its own parent included)
+    parent: Pack | None = None
 
     @property
     def id(self) -> str:
@@ -95,8 +112,9 @@ def _read(path: Path, problems: list[str], parse) -> Any:
         return None
 
 
-def load_pack(pack_dir: str | Path) -> Pack:
-    """Load and validate a pack. Raises PackError listing every problem found."""
+def load_pack(pack_dir: str | Path, _children: tuple[str, ...] = ()) -> Pack:
+    """Load and validate a pack, merged with the pack it `extends`. Raises PackError listing every
+    problem found."""
     d = Path(pack_dir)
     problems = [f"missing file: {f}" for f in REQUIRED_FILES if not (d / f).is_file()]
 
@@ -105,6 +123,7 @@ def load_pack(pack_dir: str | Path) -> Pack:
         for e in sorted(_validator().iter_errors(manifest), key=lambda e: list(e.path)):
             where = "/".join(str(p) for p in e.path) or "(root)"
             problems.append(f"pack.yaml {where}: {e.message}")
+        problems += _check_rules(manifest)
 
     raw_tokens = _read(d / "tokens.json", problems, json.loads)
     values: dict[str, Any] = {}
@@ -125,9 +144,85 @@ def load_pack(pack_dir: str | Path) -> Pack:
             if not (d / rel).is_file():
                 problems.append(f"docs.{key}: missing file {rel}")
 
+    parent = None
+    if isinstance(manifest, dict) and manifest.get("extends"):
+        parent = _parent(d, manifest, _children, problems)
+
     if problems:
         raise PackError(d, problems)
-    return Pack(dir=d, manifest=manifest, tokens=values, template_map=tmap, raw_tokens=raw_tokens)
+    pack = Pack(dir=d, manifest=manifest, tokens=values, template_map=tmap, raw_tokens=raw_tokens)
+    _inherit(pack, parent)
+    return pack
+
+
+def _parent(d: Path, manifest: dict[str, Any], children: tuple[str, ...], problems: list[str]):
+    pid = manifest["extends"]
+    if pid == manifest.get("id") or pid in children:
+        chain = " -> ".join((*children, manifest.get("id", "?"), pid))
+        problems.append(f"extends: {pid!r} is a cycle ({chain})")
+        return None
+    pdir = PACK_DIRS.get().get(pid) or d.parent / pid
+    if not (Path(pdir) / "pack.yaml").is_file():
+        problems.append(f"extends: no pack {pid!r}")
+        return None
+    try:
+        return load_pack(pdir, (*children, manifest.get("id", "?")))
+    except PackError as e:
+        problems += [f"extends {pid}: {p}" for p in e.problems]
+        return None
+
+
+def _inherit(pack: Pack, parent: Pack | None) -> None:
+    """The one place a pack takes from its parent: the docs it lacks, and slop_rules unless it has
+    its own."""
+    own = pack.manifest.get("docs") or {}
+    for key in INHERITED_DOCS:
+        path = pack.dir / own.get(key, f"{key}.md")
+        if path.is_file():
+            pack.docs[key] = path
+    if (pack.dir / "exemplar").is_dir():
+        pack.exemplar_dir = pack.dir / "exemplar"
+    if parent is None:
+        return
+    pack.parent = parent
+    if "exemplar" not in pack.docs and pack.exemplar_dir is None:
+        pack.exemplar_dir = parent.exemplar_dir
+    for key, path in parent.docs.items():
+        pack.docs.setdefault(key, path)
+    lint = pack.manifest["lint"]
+    if "slop_rules" not in lint and "slop_rules" in parent.manifest["lint"]:
+        lint["slop_rules"] = parent.manifest["lint"]["slop_rules"]
+
+
+def describe(pack: Pack) -> dict[str, Any]:
+    """What a pack resolves to, inheritance included (the server's pack:// resources, portal)."""
+    chain, p = [], pack.parent
+    while p is not None:
+        chain.append({"id": p.id, "dir": str(p.dir)})
+        p = p.parent
+    return {
+        "id": pack.id,
+        "extends": chain,
+        "manifest": pack.manifest,
+        "docs": {k: str(v) for k, v in pack.docs.items()},
+        "exemplar_dir": str(pack.exemplar_dir) if pack.exemplar_dir else None,
+    }
+
+
+def _check_rules(manifest: Any) -> list[str]:
+    """Every `lint.slop_rules` pattern compiles as lint compiles it (else every lint fails)."""
+    if not isinstance(manifest, dict):
+        return []
+    rules = (manifest.get("lint") or {}).get("slop_rules") or []
+    out = []
+    for i, r in enumerate(rules):
+        if not isinstance(r, dict) or not isinstance(r.get("pattern"), str):
+            continue  # the schema reports it
+        try:
+            re.compile(r["pattern"], re.I | re.M)
+        except re.error as e:
+            out.append(f"lint.slop_rules[{i}] pattern {r['pattern']!r}: {e}")
+    return out
 
 
 def _check_roles(manifest: dict[str, Any], tmap: dict[str, Any]) -> list[str]:

@@ -22,8 +22,18 @@ do not fill it: signatures are cloned for identity, content slides are derived f
 ## Steps
 
 0. **Pack.** If no pack is active, `list_packs` and ask which one (one pack → use it).
-1. **Ingest.** Read every supplied document and image; mine the facts before speaking. If an
-   agreed storyline exists, it is the outline: do not re-argue it.
+1. **Ingest.** Read every supplied document and image; mine the facts before speaking. Files the
+   user attached are listed under "Attached files" (documents with their text). An uploaded image
+   goes into a picture slot as `"image": "file:<file_id>"`; a file you hold yourself is uploaded
+   through `upload_url` first, never pasted as base64. If an agreed storyline exists, it is the
+   outline: do not re-argue it.
+   **Proof comes from the slide library.** Before naming a gap for a proof point (a case study, a
+   reference, a client logo, a team bio, standard boilerplate), search the pack's approved slides
+   with `library_list` (words of the audience's sector, function or offer; then tags). A match is
+   placed with `library_insert` after `create_deck` and adapted with `patch_deck`; only when
+   nothing fits does the beat become a named gap. Likewise a picture slot takes an approved image
+   from the pack's image library (`image_library_list`, then its `ref` as `"image"`) before you
+   ask the user for a photo.
 2. **See what good looks like.** Read the exemplar: the moves (title length, eyebrow, where a
    number may be huge, imagery density), never the copy.
 3. **Deck type and narrative.** Name the type (pitch, proposal, debrief, internal, plenary…), the
@@ -42,6 +52,8 @@ do not fill it: signatures are cloned for identity, content slides are derived f
    - Content: `composition`, `chart`, `diagram`, or `clone` of an archetype whose message is this
      slide's message.
    - Copy fitted to capacities; unknowns as `missing_value[<lang>]`; anti-slop checklist applied.
+   - Every chart or composition carrying figures from a source names it in `params.source`
+     (doctrine → Build rules).
 7. **Create.** `create_deck` with the DeckSpec (or `add_slides` to extend a deck being built).
 8. **Lint → render → fix** (doctrine). `lint_deck`; fix every ERROR via `patch_deck`; look at
    each rendered slide; fix and re-check only changed slides.

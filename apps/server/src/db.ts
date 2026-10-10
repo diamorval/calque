@@ -1,3 +1,4 @@
+import { closeSync, openSync, readFileSync, rmSync, writeSync } from "node:fs";
 import { PGlite } from "@electric-sql/pglite";
 import pg from "pg";
 
@@ -14,6 +15,17 @@ create table if not exists packs (
   teams jsonb not null default '[]',
   owner text
 );
+alter table packs add column if not exists version int not null default 1;
+alter table packs add column if not exists archived boolean not null default false;
+create table if not exists pack_versions (
+  pack_id text not null references packs(id),
+  version int not null,
+  dir text not null,
+  note text not null,
+  author text,
+  created_at timestamptz not null default now(),
+  primary key (pack_id, version)
+);
 create table if not exists decks (
   id uuid primary key,
   pack_id text not null references packs(id),
@@ -22,6 +34,13 @@ create table if not exists decks (
   head int not null,
   created_at timestamptz not null default now()
 );
+alter table decks add column if not exists pack_version int;
+-- sharing: one share link per deck (/decks/:id?k=<link_key>) and who it opens for (shares.ts)
+alter table decks add column if not exists general_access text not null default 'private' check (general_access in ('private', 'workspace', 'anyone'));
+alter table decks add column if not exists general_role text not null default 'viewer' check (general_role in ('viewer', 'commenter'));
+alter table decks add column if not exists link_key text not null default replace(gen_random_uuid()::text, '-', '');
+-- when the share link stops opening for general access (null: never)
+alter table decks add column if not exists link_expires_at timestamptz;
 create table if not exists deck_versions (
   deck_id uuid not null references decks(id),
   version int not null,
@@ -43,6 +62,11 @@ create table if not exists comments (
   status text not null default 'open' check (status in ('open', 'resolved')),
   created_at timestamptz not null default now()
 );
+-- review (review.ts): comment threads, authors' display names, opt-in approval status
+alter table comments add column if not exists parent_id int references comments(id);
+alter table comments add column if not exists author_name text;
+alter table deck_versions add column if not exists author_name text;
+alter table decks add column if not exists approval text not null default 'draft' check (approval in ('draft', 'in_review', 'approved'));
 create table if not exists models (
   id text primary key,
   provider text not null,
@@ -53,7 +77,152 @@ create table if not exists models (
   updated_by text not null,
   updated_at timestamptz not null default now()
 );
-create unique index if not exists one_default_model on models (is_default) where is_default;`;
+create table if not exists users (
+  id text primary key,
+  user_name text,
+  external_id text,
+  display_name text,
+  active boolean not null default true,
+  deleted boolean not null default false,
+  sessions_after timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create unique index if not exists users_user_name on users (lower(user_name));
+create table if not exists revoked_sessions (
+  sid text primary key,
+  expires_at timestamptz not null
+);
+-- label: tells two configs of one model apart; options: provider settings (JSON); headers: sealed JSON
+alter table models add column if not exists label text;
+alter table models add column if not exists options text;
+alter table models add column if not exists headers text;
+create table if not exists files (
+  id uuid primary key,
+  owner text not null,
+  name text not null,
+  size bigint not null,
+  type text not null,
+  created_at timestamptz not null default now()
+);
+create table if not exists deck_shares (
+  deck_id uuid not null references decks(id),
+  principal_type text not null check (principal_type in ('user', 'team')),
+  principal text not null,
+  role text not null check (role in ('viewer', 'commenter', 'editor')),
+  granted_by text not null,
+  created_at timestamptz not null default now(),
+  primary key (deck_id, principal_type, principal)
+);
+-- audit.ts: who did what, when; no foreign key, a deleted deck's history stays
+create table if not exists audit (
+  id bigserial primary key,
+  at timestamptz not null default now(),
+  actor text not null,
+  action text not null,
+  target_type text not null,
+  target_id text,
+  detail jsonb not null default '{}'
+);
+create index if not exists audit_target on audit (target_type, target_id);
+-- the sharing-only deck_audit, folded into audit
+do $$ begin
+  if to_regclass('deck_audit') is not null then
+    insert into audit (at, actor, action, target_type, target_id, detail)
+      select created_at, actor, action, 'deck', deck_id::text, detail from deck_audit order by id;
+    drop table deck_audit;
+  end if;
+end $$;
+-- library.ts: a pack's approved slides, each a hidden one-slide deck owned by 'library:<pack_id>'
+create table if not exists library (
+  id uuid primary key,
+  pack_id text not null references packs(id),
+  deck_id uuid not null references decks(id),
+  title text not null,
+  tags jsonb not null default '[]',
+  status text not null default 'pending' check (status in ('pending', 'approved')),
+  added_by text not null,
+  approved_by text,
+  source_deck text,
+  source_slide text,
+  created_at timestamptz not null default now()
+);
+-- images.ts: a pack's approved images, each a file owned by 'library:<pack_id>'
+create table if not exists library_images (
+  id uuid primary key,
+  pack_id text not null references packs(id),
+  file_id uuid not null,
+  title text not null,
+  tags jsonb not null default '[]',
+  status text not null default 'pending' check (status in ('pending', 'approved')),
+  added_by text not null,
+  approved_by text,
+  created_at timestamptz not null default now()
+);
+-- m365.ts: each user's Microsoft 365 connection, the refresh token sealed
+create table if not exists m365_tokens (
+  user_id text primary key,
+  refresh_token text not null,
+  account text,
+  updated_at timestamptz not null default now()
+);
+-- replaced by the deck's share link and general access
+drop table if exists deck_links;
+delete from deck_shares where principal_type not in ('user', 'team');
+create unique index if not exists one_default_model on models (is_default) where is_default;
+-- a deck's name set by rename_deck; null: the title of its current DeckSpec
+alter table decks add column if not exists name text;
+-- the pack /new preselects (CALQUE_DEFAULT_PACK, or an admin's choice)
+alter table packs add column if not exists is_default boolean not null default false;
+create unique index if not exists one_default_pack on packs (is_default) where is_default;
+-- compliance.ts: lint counts per deck version, and the teams of a deck's owner when they created it
+create table if not exists deck_lint (
+  deck_id uuid not null references decks(id),
+  version int not null,
+  errors int not null,
+  warns int not null,
+  at timestamptz not null default now(),
+  primary key (deck_id, version)
+);
+alter table decks add column if not exists owner_teams jsonb not null default '[]';
+-- packs.ts: co-managers of a pack besides its owner (user ids); the pack release a deck version is on
+alter table packs add column if not exists managers jsonb not null default '[]';
+alter table deck_versions add column if not exists pack_version int;
+-- review.ts: a deck's type (pack.yaml approval: [external, …] turns approval on per type), and a comment's:
+-- a required one blocks approval until resolved
+alter table decks add column if not exists kind text;
+alter table comments add column if not exists type text not null default 'suggestion' check (type in ('suggestion', 'required'));
+-- chats.ts: the web agent's conversation, one per deck (deck_id) or a user's new-deck draft (owner)
+create table if not exists chats (
+  id text primary key,
+  deck_id uuid references decks(id),
+  owner text not null,
+  messages jsonb not null default '[]',
+  files jsonb not null default '[]',
+  updated_at timestamptz not null default now()
+);
+-- models.ts: a model restricted to teams ([]: everyone), and a team's default model
+alter table models add column if not exists teams jsonb not null default '[]';
+create table if not exists model_team_defaults (
+  team text primary key,
+  model_id text not null references models(id) on delete cascade,
+  updated_by text not null,
+  updated_at timestamptz not null default now()
+);
+-- usage.ts: one row per agent run, kept like uploads (CALQUE_RETENTION_DAYS)
+create table if not exists usage (
+  id bigserial primary key,
+  at timestamptz not null default now(),
+  user_id text not null,
+  teams jsonb not null default '[]',
+  model_id text not null,
+  run text not null,
+  deck_id text,
+  input_tokens int not null default 0,
+  output_tokens int not null default 0,
+  duration_ms int not null default 0
+);
+create index if not exists usage_at on usage (at);`;
 
 /** Postgres when `url` is a postgres:// URL, else embedded PGlite (a data dir, or in memory). */
 export async function openDb(url = process.env.DATABASE_URL): Promise<Db> {
@@ -62,7 +231,47 @@ export async function openDb(url = process.env.DATABASE_URL): Promise<Db> {
     await pool.query(SCHEMA);
     return { query: (sql, params) => pool.query(sql, params) as never, close: () => pool.end() };
   }
+  const unlock = url && !url.startsWith("memory://") ? lock(`${url}.lock`) : () => {};
   const lite = await PGlite.create(url);
   await lite.exec(SCHEMA);
-  return { query: (sql, params) => lite.query(sql, params), close: () => lite.close() };
+  return {
+    query: (sql, params) => lite.query(sql, params),
+    close: () => lite.close().finally(unlock),
+  };
+}
+
+export class DbLocked extends Error {}
+
+/** PGlite has no lock of its own: two processes on one data dir corrupt it. One owner per dir. */
+function lock(path: string): () => void {
+  for (;;) {
+    try {
+      const fd = openSync(path, "wx");
+      writeSync(fd, String(process.pid));
+      closeSync(fd);
+      const unlock = () => rmSync(path, { force: true });
+      process.once("exit", unlock);
+      return unlock;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+    }
+    const pid = Number(readFileSync(path, "utf8"));
+    if (alive(pid)) {
+      throw new DbLocked(
+        `${path.slice(0, -5)} is in use by process ${pid}: one Calque server owns it. ` +
+          "Connect to that server (stdio.ts does), stop it, or set CALQUE_DATA / DATABASE_URL elsewhere.",
+      );
+    }
+    rmSync(path, { force: true }); // stale: its process is gone
+  }
+}
+
+function alive(pid: number): boolean {
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === "EPERM";
+  }
 }

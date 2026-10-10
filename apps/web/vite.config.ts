@@ -8,5 +8,6 @@ export default defineConfig({
   plugins: [react()],
   // the GitHub Pages demo (VITE_DEMO=1) serves the responses saved by demo/snapshot.ts
   publicDir: process.env.VITE_DEMO ? "demo/out" : "public",
-  server: { proxy: Object.fromEntries(["/api", "/auth", "/decks"].map((p) => [p, server])) },
+  // the server refuses cookie writes from another origin (CSRF): the proxy presents the server's own
+  server: { proxy: Object.fromEntries(["/api", "/auth", "/decks"].map((p) => [p, { target: server, headers: { origin: server } }])) },
 });

@@ -6,6 +6,7 @@ import { fakeModel, lastResult, toolsCalled, type Reply } from "./fakes.ts";
 import { acmeDeck, ENGINE_TIMEOUT, LOCAL, testApp } from "./helpers.ts";
 
 type Json = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+const NO_EXTRAS = { label: null, headers: [], resource: null, api_version: null, managed_identity: false, teams: [] };
 describe("web agent", { timeout: ENGINE_TIMEOUT }, () => {
   let app: App;
   let http: ReturnType<typeof createHttp>;
@@ -20,6 +21,7 @@ describe("web agent", { timeout: ENGINE_TIMEOUT }, () => {
   beforeAll(async () => {
     fake = await fakeModel((b) => script(b));
     vi.stubEnv("CALQUE_LLM_BASE_URL", fake.url);
+    vi.stubEnv("CALQUE_RATE_LIMIT", "off"); // more than 10 model saves a minute here; compliance.test.ts covers the limit
     vi.stubEnv("CALQUE_LLM_API_KEY", "good-key");
     vi.stubEnv("CALQUE_LLM_MODEL", "gateway-model");
     app = await testApp();
@@ -33,8 +35,8 @@ describe("web agent", { timeout: ENGINE_TIMEOUT }, () => {
 
   it("configures models: the env gateway is the default, a bad key is refused, a new default applies at once", async () => {
     const listed = (await api("/api/models")).json;
-    expect(listed.providers.map((p: Json) => p.id)).toEqual(["anthropic", "openai", "mistral", "gemini", "ollama", "openai-compatible"]);
-    expect(listed.models).toEqual([{ id: "env", provider: "openai-compatible", model: "gateway-model", base_url: fake.url, has_key: true, is_default: true }]);
+    expect(listed.providers.map((p: Json) => p.id)).toEqual(["anthropic", "openai", "azure", "mistral", "gemini", "ollama", "openai-compatible"]);
+    expect(listed.models).toEqual([{ id: "env", ...NO_EXTRAS, provider: "openai-compatible", model: "gateway-model", base_url: fake.url, has_key: true, is_default: true, your_default: true }]);
 
     const bad = await api("/api/models", { provider: "openai-compatible", model: "other", base_url: fake.url, api_key: "bad-key" });
     expect(bad.status).toBe(422);
@@ -43,7 +45,7 @@ describe("web agent", { timeout: ENGINE_TIMEOUT }, () => {
     expect((await api("/api/models", { provider: "anthropic", model: "x" })).status).toBe(422); // no key
 
     const good = await api("/api/models", { provider: "openai-compatible", model: "other", base_url: fake.url, api_key: "good-key" });
-    expect(good.json).toEqual({ id: "openai-compatible:other", provider: "openai-compatible", model: "other", base_url: fake.url, has_key: true, is_default: false });
+    expect(good.json).toEqual({ id: "openai-compatible:other", ...NO_EXTRAS, provider: "openai-compatible", model: "other", base_url: fake.url, has_key: true, is_default: false });
     const stored = (await app.db.query<Json>("select api_key from models where id = $1", ["openai-compatible:other"])).rows[0];
     expect(stored?.api_key).not.toContain("good-key"); // sealed at rest
 
@@ -56,6 +58,56 @@ describe("web agent", { timeout: ENGINE_TIMEOUT }, () => {
     expect(fake.requests.at(-1)?.model).toBe("other");
 
     await expect(app.models.setDefault({ id: "bob", teams: ["sales"] }, "env")).rejects.toThrow(Forbidden);
+  });
+
+  it("keeps two configurations of one model apart, edits one in place, and the chat picks one", async () => {
+    const other = await fakeModel(() => ({ content: "from the second host" }));
+    try {
+      const again = await api("/api/models", { provider: "openai-compatible", model: "other", base_url: fake.url, api_key: "good-key" });
+      expect(again.json.id).toBe("openai-compatible:other"); // same endpoint: an edit
+      const second = await api("/api/models", { provider: "openai-compatible", model: "other", base_url: other.url, api_key: "good-key" });
+      expect(second.json.id).toBe("openai-compatible:other@2"); // another endpoint: no overwrite
+      const eu = await api("/api/models", {
+        provider: "openai-compatible",
+        model: "other",
+        label: "EU région",
+        base_url: other.url,
+        api_key: "good-key",
+        headers: { "Ocp-Apim-Subscription-Key": "apim-secret" },
+      });
+      expect(eu.json).toMatchObject({ id: "openai-compatible:other@eu-region", label: "EU région", headers: ["Ocp-Apim-Subscription-Key"] });
+      const stored = (await app.db.query<Json>("select headers from models where id = $1", [eu.json.id])).rows[0];
+      expect(stored?.headers).not.toContain("apim-secret"); // sealed at rest
+      expect(JSON.stringify((await api("/api/models")).json)).not.toContain("apim-secret");
+
+      // edit: a new endpoint and label, the stored key and headers kept
+      const edited = await api("/api/models", { id: eu.json.id, provider: "openai-compatible", model: "other", label: "EU", base_url: fake.url });
+      expect(edited.json).toMatchObject({ id: "openai-compatible:other@eu-region", label: "EU", base_url: fake.url, has_key: true, headers: ["Ocp-Apim-Subscription-Key"] });
+      expect((await api("/api/models", { id: "nope", provider: "openai-compatible", model: "x", base_url: fake.url })).status).toBe(404);
+      expect((await api("/api/models", { id: eu.json.id, provider: "anthropic", model: "x", api_key: "k" })).status).toBe(422);
+
+      script = () => ({ content: "from the first host" });
+      const picked = await api("/api/agent/chat", { model: "openai-compatible:other@2", messages: [{ role: "user", content: "hi" }] });
+      expect(picked.json).toMatchObject({ model: "openai-compatible:other@2", text: "from the second host" });
+      expect((await api("/api/models")).json.models.find((m: Json) => m.is_default).id).toBe("openai-compatible:other"); // the default is unchanged
+    } finally {
+      other.server.close();
+      for (const id of ["openai-compatible:other@2", "openai-compatible:other@eu-region"]) await api(`/api/models/${encodeURIComponent(id)}`, undefined, "DELETE");
+    }
+  });
+
+  it("removing the default model promotes the most recently configured one", async () => {
+    const add = (model: string) => api("/api/models", { provider: "openai-compatible", model, base_url: fake.url, api_key: "good-key" });
+    await add("older");
+    await add("newer");
+    expect((await api("/api/models/openai-compatible:older/default", {})).status).toBe(200);
+    expect((await api("/api/models/openai-compatible:older", undefined, "DELETE")).status).toBe(200);
+    const models = (await api("/api/models")).json.models as Json[];
+    expect(models.filter((m) => m.is_default).map((m) => m.id)).toEqual(["openai-compatible:newer"]);
+    expect((await api("/api/agent/chat", { messages: [{ role: "user", content: "hi" }] })).json.model).toBe("openai-compatible:newer");
+
+    await api("/api/models/openai-compatible:other", undefined, "DELETE"); // not the default: the default stays
+    expect((await app.models.resolve()).id).toBe("openai-compatible:newer");
   });
 
   it("builds a deck from a brief through the MCP tools, to 0 lint error", async () => {
@@ -82,6 +134,25 @@ describe("web agent", { timeout: ENGINE_TIMEOUT }, () => {
     expect(tools).not.toContain("add_comment"); // UI-only
     expect(JSON.stringify(fake.requests.at(-3))).toContain("slots"); // the template map came back
     expect(r.json.messages.filter((m: Json) => m.role === "tool")).toHaveLength(3);
+  });
+
+  it("streams a failed tool call with its error, and the model gets the error back", async () => {
+    script = (b) => (toolsCalled(b) === 0 ? { tool: { name: "create_deck", args: { deck: { title: "x" } } } } : { content: "The deck was invalid." });
+    const res = await http.request("/api/agent/chat", {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/x-ndjson" },
+      body: JSON.stringify({ pack_id: "acme-test", messages: [{ role: "user", content: "build" }] }),
+    });
+    const lines = (await res.text()).trim().split("\n").map((l) => JSON.parse(l));
+    const step = lines[0].step.tools[0];
+    expect(step.name).toBe("create_deck");
+    expect(step.error).toMatch(/\S/);
+    const toolMessage = (fake.requests.at(-1) as Json).messages.findLast((m: Json) => m.role === "tool").content;
+    expect(toolMessage).toContain(JSON.parse(step.error).message); // the model sees the full error to correct itself
+    const done = lines.at(-1).done;
+    expect(done.text).toBe("The deck was invalid.");
+    const result = done.messages.find((m: Json) => m.role === "tool").content[0];
+    expect(result.output.type).toBe("error-text"); // the conversation keeps the failure for the chat's history
   });
 
   it("applies 5 typical comments (colour, rewording, move, chart, deletion) to 0 lint error", async () => {
@@ -120,5 +191,24 @@ describe("web agent", { timeout: ENGINE_TIMEOUT }, () => {
     expect(spec.slides.map((s: Json) => s.id)).toEqual(["cover", "d1", "regions", "plan", "process", "end"]);
     expect(spec.slides[2].source.params.series[0].values[0]).toBe(20);
     expect((await TOOLS.lint_deck.run(app, LOCAL, { deck_id })).errors).toBe(0);
+  });
+
+  it("gives the model the attached files: a document's text, an image's file reference", async () => {
+    const send = async (name: string, content: string, type: string) => {
+      const form = new FormData();
+      form.append("file", new File([content], name, { type }));
+      return (await (await http.request("/api/files", { method: "POST", body: form })).json()) as Json;
+    };
+    const brief = await send("brief.md", "# Brief\nNorth led growth: +18% in Q3.", "text/markdown");
+    const logo = await send("logo.png", "not really a png", "image/png");
+    script = () => ({ content: "Read it." });
+    const r = await api("/api/agent/chat", { pack_id: "acme-test", files: [brief.file_id, logo.file_id], messages: [{ role: "user", content: "Build from the brief" }] });
+    expect(r.json.text).toBe("Read it.");
+    const system = fake.requests.at(-1)?.messages[0].content as string;
+    expect(system).toContain("# Attached files");
+    expect(system).toContain("North led growth: +18% in Q3.");
+    expect(system).toContain(`"image": "file:${logo.file_id}"`);
+
+    expect((await api("/api/agent/chat", { files: ["0b9b3c4e-0000-4000-8000-000000000000"], messages: [{ role: "user", content: "hi" }] })).status).toBe(404);
   });
 });

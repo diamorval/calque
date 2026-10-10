@@ -1,30 +1,41 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { Context } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { jwtVerify, SignJWT } from "jose";
 import * as oidc from "openid-client";
+import type { Access } from "./access.ts";
+import { namesOf } from "./auth.ts";
 import type { User } from "./packs.ts";
+import { resolveTeams, type TeamsConfig } from "./teams.ts";
 
 /** Web app sign-in: OIDC authorization code + PKCE against the issuer (Keycloak), then a signed,
-HttpOnly session cookie. The server keeps no session state and no IdP token: the web agent runs
-in process, so the cookie's user is all it needs. */
+HttpOnly session cookie. The server keeps no IdP token: the web agent runs in process, so the
+cookie's user is all it needs. Revocation is server-side (access.ts): each request checks the
+session id and the user against it. */
 export interface SessionConfig {
   issuer: string; // CALQUE_OIDC_ISSUER
   clientId: string; // CALQUE_OIDC_CLIENT_ID, default the audience
   clientSecret?: string | undefined; // CALQUE_OIDC_CLIENT_SECRET; unset = public client
   publicUrl: string;
   teamsClaim: string;
+  teams?: Omit<TeamsConfig, "claim"> | undefined; // group id -> team name (Entra ID), prefix filter, overage lookups
+  /** CALQUE_OIDC_SCOPE, default "openid profile email"; with Entra, add GroupMember.Read.All to read
+  the groups over the overage with the sign-in's own token (entra.ts) */
+  scope?: string | undefined;
   secret: string; // CALQUE_SECRET
+  access: Access;
+  /** Told of each sign-in (the audit log). */
+  onSignIn?: ((user: User) => Promise<void>) | undefined;
 }
 
-const SESSION = "calque_session";
+export const SESSION = "calque_session";
 const LOGIN = "calque_login";
 const HOURS = 8;
 
 export interface Sessions {
   login(c: Context): Promise<Response>;
   callback(c: Context): Promise<Response>;
-  logout(c: Context): Response;
+  logout(c: Context): Promise<Response>;
   user(c: Context): Promise<User | undefined>;
 }
 
@@ -65,10 +76,12 @@ export function sessions(cfg: SessionConfig): Sessions {
       const verifier = oidc.randomPKCECodeVerifier();
       const state = oidc.randomState();
       const back = c.req.query("return") ?? "/";
-      setCookie(c, LOGIN, await seal({ verifier, state, back: back.startsWith("/") ? back : "/" }, "10m"), { ...cookie, maxAge: 600 });
+      // a path on this site only: "//host" and "/\host" are other sites to a browser, which also drops tabs and newlines
+      const local = /^\/(?![/\\])\P{Cc}*$/u.test(back);
+      setCookie(c, LOGIN, await seal({ verifier, state, back: local ? back : "/" }, "10m"), { ...cookie, maxAge: 600 });
       const url = oidc.buildAuthorizationUrl(await discover(), {
         redirect_uri: redirect,
-        scope: "openid profile email",
+        scope: cfg.scope ?? "openid profile email",
         code_challenge: await oidc.calculatePKCECodeChallenge(verifier),
         code_challenge_method: "S256",
         state,
@@ -87,25 +100,32 @@ export function sessions(cfg: SessionConfig): Sessions {
       });
       const claims = tokens.claims();
       if (!claims) throw new Error("the issuer returned no ID token");
-      const groups = claims[cfg.teamsClaim];
+      const names = namesOf(claims);
+      if (await cfg.access.blocked({ sub: claims.sub, names })) return c.text("sign-in refused: this account is deactivated", 403);
       const user = {
         sub: claims.sub,
         name: String(claims.name ?? claims.preferred_username ?? claims.sub),
-        // Keycloak group paths look like "/team-a"
-        teams: Array.isArray(groups) ? groups.map((t) => String(t).replace(/^\//, "")) : [],
+        teams: await resolveTeams(claims, { ...cfg.teams, claim: cfg.teamsClaim }, tokens.access_token),
+        names,
+        sid: randomUUID(),
+        at: Date.now(),
       };
       setCookie(c, SESSION, await seal(user, `${HOURS}h`), { ...cookie, maxAge: HOURS * 3600 });
+      await cfg.onSignIn?.({ id: user.sub, name: user.name, teams: user.teams });
       return c.redirect(String(login.back));
     },
 
-    logout(c) {
+    async logout(c) {
+      const s = await unseal(getCookie(c, SESSION));
+      if (s?.sid && s.exp) await cfg.access.revokeSession(String(s.sid), new Date(s.exp * 1000));
       deleteCookie(c, SESSION, cookie);
       return c.redirect("/");
     },
 
     async user(c) {
       const s = await unseal(getCookie(c, SESSION));
-      if (!s?.sub) return undefined;
+      if (!s?.sub || !s.sid) return undefined;
+      if (!(await cfg.access.valid({ sub: s.sub, names: (s.names as string[]) ?? [] }, String(s.sid), Number(s.at)))) return undefined;
       return { id: s.sub, name: String(s.name), teams: (s.teams as string[]) ?? [] };
     },
   };

@@ -1,9 +1,11 @@
 """Generic lint checks, run on every pack in packs/: the template lints clean, and each fault
 injected into a cleanly built deck is caught by the right check."""
 
+import io
 from pathlib import Path
 
 import pytest
+import yaml
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.util import Inches, Pt
@@ -146,3 +148,229 @@ def test_fault_detected(clean, fault, tmp_path):
     new = {(f.check, f.severity) for f in found if f.slide == POS} - before
     expected = ("slop", "NOTE") if fault == "notes" else (fault, None)
     assert any(c == expected[0] and expected[1] in (None, s) for c, s in new), found
+
+
+def _deck(pack, slides, out):
+    spec = {"pack_id": pack.id, "language": "en", "title": "T", "slides": slides}
+    return dict(build(spec, pack, out).slides.values())
+
+
+# signature role -> the message type its form carries
+MTYPES = {"cover": "cover", "summary": "summary", "divider": "divider", "closing": "closing"}
+
+
+def _clone(sid, role, values):
+    src = {"kind": "clone", "role": role, "values": values}
+    return {"id": sid, "message": sid, "message_type": MTYPES[role], "form": role, "source": src}
+
+
+def test_rewritten_closing_text_is_linted(clean, tmp_path):
+    """Only the closing line the template writes is exempt: the author's copy there is linted,
+    and the same with or without a build map."""
+    pack = clean[0]
+    n = pack.slides_for("closing")[0]
+    slots = next(s for s in pack.template_map["slides"] if s["number"] == n).get("slots", {})
+    if not slots:
+        pytest.skip("closing slide declares no slot")
+    values = {str(next(iter(slots.values()))): "In today's fast-paced world, margins rose"}
+    tmap = _deck(pack, [_clone("end", "closing", values)], tmp_path / "c.pptx")
+    mapped = [str(f) for f in lint(tmp_path / "c.pptx", pack, "en", tmap) if f.check == "slop"]
+    unmapped = [str(f) for f in lint(tmp_path / "c.pptx", pack, "en") if f.check == "slop"]
+    assert mapped and mapped == unmapped
+
+
+def test_closing_line_follows_the_deck_language(neutral_pack, tmp_path):
+    """The pack's `localized_text` writes the template's closing line in the deck language; the
+    deck's own value still wins, and the translated line keeps the signature's exemption."""
+    manifest = neutral_pack / "pack.yaml"
+    data = yaml.safe_load(manifest.read_text())
+    data["missing_value"]["fr"] = "[À COMPLÉTER]"
+    data["localized_text"] = {"Closing": {"fr": "Merci !"}}
+    manifest.write_text(yaml.safe_dump(data, allow_unicode=True))
+    pack = load_pack(neutral_pack)
+
+    def closing(language, values):
+        spec = {"pack_id": pack.id, "language": language, "title": "T", "slides": []}
+        spec["slides"].append(_clone("end", "closing", values))
+        out = tmp_path / f"{language}-{len(values)}.pptx"
+        tmap = dict(build(spec, pack, out).slides.values())
+        return out, tmap, Presentation(str(out)).slides[0].shapes.title.text
+
+    out, tmap, text = closing("fr", {})
+    assert text == "Merci !"
+    assert [f for f in lint(out, pack, "fr", tmap) if f.check == "slop"] == []
+    assert [f for f in lint(out, pack, "fr") if f.check == "slop"] == []
+    assert closing("en", {})[2] == "Closing"
+    # the author's line wins, and is linted: a bare "merci" closer is not the pack's signature
+    title = Presentation(str(pack.template)).slides[2].shapes.title.shape_id
+    out, tmap, text = closing("fr", {str(title): "Merci"})
+    assert text == "Merci"
+    assert [f for f in lint(out, pack, "fr", tmap) if f.check == "slop"]
+
+
+def _capacity_slot(pack):
+    """(role, shape id, capacity) of a slot on a role's first slide that declares a capacity
+    and is not a `fit` label."""
+    for role, nums in pack.manifest["roles"].items():
+        if role not in MTYPES or not nums:
+            continue
+        s = next(s for s in pack.template_map["slides"] if s["number"] == nums[0])
+        shapes = {x["id"]: x for x in s["shapes"]}
+        for sid in s.get("slots", {}).values():
+            cap = shapes.get(sid, {}).get("capacity")
+            if cap and sid not in s.get("fit", []):
+                return role, sid, cap
+    pytest.skip("pack declares no slot capacity")
+
+
+def test_slot_capacity_enforced(clean, tmp_path):
+    pack = clean[0]
+    role, sid, cap = _capacity_slot(pack)
+    long = " ".join(["word"] * (cap["chars_per_line"] * (cap["lines"] + 1) // 4 + 2))
+    tmap = _deck(pack, [_clone("s", role, {str(sid): long})], tmp_path / "c.pptx")
+    for found in (
+        lint(tmp_path / "c.pptx", pack, "en", tmap),
+        lint(tmp_path / "c.pptx", pack, "en"),
+    ):
+        assert any(f.check == "capacity" and f.shape_id == sid for f in found), found
+    tmap = _deck(pack, [_clone("s", role, {str(sid): "w"})], tmp_path / "d.pptx")
+    assert not [f for f in lint(tmp_path / "d.pptx", pack, "en", tmap) if f.check == "capacity"]
+
+
+def test_char_lines():
+    from calque_engine.lint import _char_lines
+
+    assert _char_lines("SUPERCALIFRAGILISTIC WORD", 10) == 3  # a 20-char word overhangs
+    assert _char_lines("Document title in two lines maximum", 25) == 2
+    assert _char_lines("short", 10) == 1
+
+
+def test_missing_pack_fonts_are_reported(neutral_pack, tmp_path, capsys):
+    """A face with no file in fonts/ renders in its fallback: lint says so, validate-pack too."""
+    from calque_engine.__main__ import main
+
+    pack = load_pack(neutral_pack)
+    tmap = _deck(pack, [_clone("s", "cover", {})], tmp_path / "c.pptx")
+    (fonts,) = [f for f in lint(tmp_path / "c.pptx", pack, "en", tmap) if f.check == "fonts"]
+    assert fonts.severity == "WARN" and fonts.slide is None
+    assert "rendered with fallback fonts" in fonts.message and pack.font("body") in fonts.message
+
+    manifest = neutral_pack / "pack.yaml"
+    data = yaml.safe_load(manifest.read_text())
+    same = {r: pack.font(r) for r in ("display", "body")}  # the fallback is the face itself
+    data["fonts"] = {"files": ["Face-Regular.ttf"], "fallback": same}
+    manifest.write_text(yaml.safe_dump(data))
+    found = lint(tmp_path / "c.pptx", load_pack(neutral_pack), "en", tmap)
+    assert [f for f in found if f.check == "fonts"] == []
+    assert main(["validate-pack", str(neutral_pack)]) == 0
+    assert "fonts/ lacks Face-Regular.ttf" in capsys.readouterr().err
+
+
+RT = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+
+
+def test_external_content_and_ole_flagged(clean, tmp_path):
+    """DLP: a hyperlink out warns; an OLE object, a remote template and a linked picture fail."""
+    from pptx.enum.shapes import PROG_ID
+
+    pack, path, tmap = clean
+    prs = Presentation(str(path))
+    slide = prs.slides[POS - 1]
+    _box(slide, pack, 1, 2, 3, 0.4, "see the source").hyperlink.address = "https://example.org/x"
+    link = slide.shapes[-1]
+    ole = slide.shapes.add_ole_object(io.BytesIO(b"PK\x05\x06" + b"\0" * 18), PROG_ID.XLSX, 0, 0)
+    slide.part.relate_to("https://example.org/beacon.png", f"{RT}/image", is_external=True)
+    prs.part.relate_to("https://example.org/remote.potx", f"{RT}/attachedTemplate", True)
+    bad = tmp_path / "external.pptx"
+    prs.save(str(bad))
+
+    found = [f for f in lint(bad, pack, "en", tmap) if f.check in ("external", "ole")]
+    by = {(f.check, f.severity, f.slide): f for f in found}
+    assert by[("external", "WARN", POS)].shape_id == link.shape_id
+    assert "example.org/x" in by[("external", "WARN", POS)].message
+    assert by[("ole", "ERROR", POS)].shape_id == ole.shape_id
+    assert any("beacon.png" in f.message and f.severity == "ERROR" for f in found), found
+    assert any("remote template" in f.message and f.slide is None for f in found), found
+    assert not [f for f in lint(path, pack, "en", tmap) if f.check in ("external", "ole")]
+
+
+def _with_text(clean, tmp_path, text):
+    pack, path, tmap = clean
+    prs = Presentation(str(path))
+    run = _box(prs.slides[POS - 1], pack, 1, 2, 7, 1.2, text)
+    sid = prs.slides[POS - 1].shapes[-1].shape_id
+    out = tmp_path / "text.pptx"
+    prs.save(str(out))
+    return pack, out, tmap, sid, run
+
+
+def test_every_slop_hit_is_reported(clean, tmp_path):
+    """One finding per distinct match of a rule in a shape, not only the first; repeats counted."""
+    pack, out, tmap, sid, _ = _with_text(
+        clean, tmp_path, "Seamless data, holistic view, seamless again, leveraging it."
+    )
+    hits = [f.message for f in lint(out, pack, "en", tmap) if f.shape_id == sid]
+    buzz = [m for m in hits if "buzzword" in m]
+    assert any(m.startswith("'Seamless' x2") for m in buzz), hits
+    assert any(m.startswith("'holistic'") for m in buzz) and any("'leveraging'" in m for m in buzz)
+
+
+def test_french_typography(clean, tmp_path):
+    """C20: French spacing, quotes and decimal comma, only on a French deck."""
+    text = 'Délai: 6 semaines, marge +12%, "pilote" à 3.5 M€, version 2.1.0, 14:30.'
+    pack, out, tmap, sid, _ = _with_text(clean, tmp_path, text)
+    typo = [f for f in lint(out, pack, "fr", tmap) if f.check == "typography"]
+    assert {f.severity for f in typo} == {"WARN"} and {f.shape_id for f in typo} == {sid}
+    said = " ".join(f.message for f in typo)
+    for hit in ("'Délai:'", "'12%'", "'\"pilote\"'", "'3.5'"):
+        assert hit in said, said
+    assert "2.1" not in said and "14:30" not in said
+    assert not [f for f in lint(out, pack, "en", tmap) if f.check == "typography"]
+
+    good = "Délai : 6 semaines, marge +12 %, « pilote » à 3,5 M€."
+    pack, out, tmap, sid, _ = _with_text(clean, tmp_path, good)
+    assert not [f for f in lint(out, pack, "fr", tmap) if f.check == "typography"]
+
+
+def test_chart_source_is_a_pack_opt_in(clean, tmp_path):
+    """C11: with `lint.chart_source`, a chart with no source line warns; the build's line or a
+    text opening with "Source" satisfies it."""
+    pack = load_pack(clean[0].dir)  # a fresh copy: the manifest is toggled below
+    spec = {
+        "pack_id": pack.id,
+        "language": "en",
+        "title": "Charts",
+        "slides": [
+            {
+                "id": f"c{i}",
+                "message": "North leads",
+                "message_type": "quantity",
+                "form": "bar",
+                "title": "North leads",
+                "source": {"kind": "chart", "type": "bar", "params": params},
+            }
+            for i, params in enumerate(
+                [
+                    {"categories": ["N", "S"], "series": [{"name": "A", "values": [3, 1]}]},
+                    {
+                        "categories": ["N", "S"],
+                        "series": [{"name": "A", "values": [3, 1]}],
+                        "source": "Source: CRM, 2026",
+                    },
+                ]
+            )
+        ],
+    }
+    out = tmp_path / "charts.pptx"
+    report = build(spec, pack, out)
+    tmap = dict(report.slides.values())
+    pack.manifest["lint"]["chart_source"] = False
+    assert not [f for f in lint(out, pack, "en", tmap) if f.check == "source"]
+    pack.manifest["lint"]["chart_source"] = True
+    found = [f for f in lint(out, pack, "en", tmap) if f.check == "source"]
+    assert [(f.slide, f.severity) for f in found] == [(1, "WARN")]
+
+    prs = Presentation(str(out))  # a hand-written source line in an imported deck counts too
+    _box(prs.slides[0], pack, 1, 4, 4, 0.3, "Sources : enquête interne")
+    prs.save(str(tmp_path / "hand.pptx"))
+    assert not [f for f in lint(tmp_path / "hand.pptx", pack, "en", tmap) if f.check == "source"]

@@ -121,5 +121,188 @@ export async function fakeOidc(audience = "calque") {
     res.end();
   });
   issuer = `${await listen(server)}/realms/test`;
-  return { server, issuer, token: (user: string) => sign({ sub: user, groups: USERS[user]?.groups ?? [] }, audience) };
+  const token = (user: string, groups = USERS[user]?.groups ?? []) => sign({ sub: user, ...(USERS[user] ? { name: USERS[user].name } : {}), groups }, audience);
+  return { server, issuer, token };
+}
+
+interface DriveItem {
+  id: string;
+  name: string;
+  drive: string;
+  parent: string | null;
+  bytes?: Buffer;
+  type?: string;
+}
+
+/** Microsoft 365: the Entra endpoints (authorize answers at once, token checks PKCE and rotates
+refresh tokens) and the Graph calls Calque makes, over an in-memory OneDrive ("me") and one
+SharePoint site ("Sales", its library "sales-docs"), and Teams: one team ("Sales", channels
+General and Deals), one chat; `messages` records what is posted. Directory: `members` (user object
+id -> group ids) read by `/me` and `/users/{id}/transitiveMemberOf` (two per page), app tokens by
+client credentials, `delegated(oid, scp)` mints a sign-in's Graph token. `requests` records each
+Graph call. */
+export async function fakeGraph(account = "alice@contoso.test") {
+  let base = "";
+  const items = new Map<string, DriveItem>();
+  const add = (i: DriveItem) => (items.set(i.id, i), i);
+  for (const d of ["me", "sales-docs"]) add({ id: `${d}-root`, name: "root", drive: d, parent: null });
+  add({ id: "decks", name: "Decks", drive: "me", parent: "me-root" });
+  add({ id: "brief", name: "Brief T2.docx", drive: "me", parent: "me-root", bytes: Buffer.from("PK fake docx"), type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+  add({ id: "tool", name: "setup.exe", drive: "me", parent: "me-root", bytes: Buffer.from("MZ") });
+  add({ id: "q3", name: "Q3 figures.xlsx", drive: "sales-docs", parent: "sales-docs-root", bytes: Buffer.from("PK fake xlsx"), type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const codes = new Map<string, { challenge: string; redirect: string }>();
+  const access = new Set<string>();
+  const refresh = new Set<string>();
+  const uploads = new Map<string, { drive: string; parent: string; name: string; chunks: Buffer[]; got: number }>();
+  const requests: { method: string; path: string; auth: string | undefined }[] = [];
+  const messages: { to: string; body: { contentType: string; content: string } }[] = [];
+  const members = new Map<string, string[]>();
+  /** access token -> the user object id it acts for ("app": client credentials) */
+  const actor = new Map<string, string>();
+  const channels: Record<string, { id: string; displayName: string }[]> = {
+    "team-sales": [
+      { id: "19:general@thread.tacv2", displayName: "General" },
+      { id: "19:deals@thread.tacv2", displayName: "Deals" },
+    ],
+  };
+  let n = 0;
+
+  const view = (i: DriveItem) => ({
+    id: i.id,
+    name: i.name,
+    webUrl: `https://contoso.sharepoint.test/${i.drive}/${encodeURIComponent(i.name)}`,
+    parentReference: { driveId: i.drive, id: i.parent },
+    lastModifiedDateTime: "2026-10-01T09:00:00Z",
+    ...(i.bytes
+      ? { size: i.bytes.length, file: { mimeType: i.type ?? "application/octet-stream" }, "@microsoft.graph.downloadUrl": `${base}/download/${i.id}` }
+      : { folder: { childCount: 0 } }),
+  });
+
+  const server = createServer(async (req, res) => {
+    const url = new URL(req.url ?? "/", base);
+    const path = decodeURIComponent(url.pathname);
+    let raw = Buffer.alloc(0);
+    for await (const d of req) raw = Buffer.concat([raw, d as Buffer]);
+    const json = (o: unknown, status = 200) => {
+      res.statusCode = status;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify(o));
+    };
+    const err = (status: number, message: string) => json({ error: { code: String(status), message } }, status);
+
+    if (path.endsWith("/oauth2/v2.0/authorize")) {
+      const q = url.searchParams;
+      const code = randomUUID();
+      codes.set(code, { challenge: q.get("code_challenge") ?? "", redirect: q.get("redirect_uri") ?? "" });
+      const back = new URL(q.get("redirect_uri") ?? "");
+      back.searchParams.set("code", code);
+      back.searchParams.set("state", q.get("state") ?? "");
+      res.statusCode = 302;
+      res.setHeader("location", back.href);
+      return res.end();
+    }
+    if (path.endsWith("/oauth2/v2.0/token")) {
+      const f = new URLSearchParams(raw.toString());
+      if (f.get("grant_type") === "authorization_code") {
+        const c = codes.get(f.get("code") ?? "");
+        const pkce = createHash("sha256").update(f.get("code_verifier") ?? "").digest("base64url");
+        if (!c || pkce !== c.challenge || f.get("redirect_uri") !== c.redirect) return json({ error: "invalid_grant", error_description: "bad code" }, 400);
+        codes.delete(f.get("code") ?? "");
+      } else if (f.get("grant_type") === "client_credentials") {
+        if (f.get("client_secret") !== "app-secret") return json({ error: "invalid_client", error_description: "AADSTS7000215: Invalid client secret" }, 401);
+        const at = `app-${++n}`;
+        access.add(at);
+        actor.set(at, "app");
+        return json({ token_type: "Bearer", expires_in: 3600, access_token: at });
+      } else if (!refresh.delete(f.get("refresh_token") ?? "")) return json({ error: "invalid_grant", error_description: "AADSTS70008: the refresh token has expired" }, 400);
+      const [at, rt] = [`at-${++n}`, `rt-${n}`];
+      access.add(at);
+      refresh.add(rt);
+      return json({ token_type: "Bearer", expires_in: 3600, access_token: at, refresh_token: rt, scope: f.get("scope") });
+    }
+    if (path.startsWith("/download/")) {
+      const i = items.get(path.slice("/download/".length));
+      return i?.bytes ? res.end(i.bytes) : err(404, "gone");
+    }
+    if (path.startsWith("/upload/")) {
+      const u = uploads.get(path.slice("/upload/".length));
+      if (!u) return err(404, "no upload session");
+      const r = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(String(req.headers["content-range"]));
+      if (!r || Number(r[1]) !== u.got || raw.length !== Number(r[2]) - Number(r[1]) + 1) return err(416, "bad range");
+      u.chunks.push(raw);
+      u.got += raw.length;
+      if (u.got < Number(r[3])) return json({ nextExpectedRanges: [`${u.got}-`] }, 202);
+      const taken = (name: string) => [...items.values()].some((i) => i.parent === u.parent && i.name === name);
+      let name = u.name;
+      for (let k = 1; taken(name); k++) name = u.name.replace(/(\.\w+)?$/, ` ${k}$1`);
+      return json(view(add({ id: `up-${++n}`, name, drive: u.drive, parent: u.parent, bytes: Buffer.concat(u.chunks) })), 201);
+    }
+
+    const auth = req.headers.authorization;
+    requests.push({ method: req.method ?? "GET", path: `${path}${url.search}`, auth });
+    if (!path.startsWith("/v1.0/")) return err(404, "not found");
+    if (!auth || !access.has(auth.replace(/^Bearer /, ""))) return err(401, "InvalidAuthenticationToken");
+    const g = path.slice("/v1.0".length).replace(/^\/me\/drive(?=\/|$)/, "/drives/me");
+    if (g === "/me") return json({ userPrincipalName: account, mail: account });
+    const mm = /^\/(?:me|users\/([^/]+))\/transitiveMemberOf\/microsoft\.graph\.group$/.exec(g);
+    if (mm) {
+      const who = mm[1] ?? actor.get(auth.replace(/^Bearer /, ""));
+      if (!who || (who === "app" && !mm[1])) return err(400, "/me request is only valid with delegated authentication flow.");
+      if (mm[1] && actor.get(auth.replace(/^Bearer /, "")) !== "app") return err(403, "Insufficient privileges to complete the operation.");
+      const all = members.get(who);
+      if (!all) return err(404, `Resource '${who}' does not exist`);
+      const at = Number(url.searchParams.get("$skiptoken") ?? 0);
+      const next = new URL(url.href);
+      next.searchParams.set("$skiptoken", String(at + 2));
+      return json({ value: all.slice(at, at + 2).map((id) => ({ "@odata.type": "#microsoft.graph.group", id })), ...(at + 2 < all.length ? { "@odata.nextLink": next.href } : {}) });
+    }
+    if (g === "/sites") return json({ value: /sal/i.test(url.searchParams.get("search") ?? "") ? [{ id: "site-sales", displayName: "Sales", webUrl: "https://contoso.sharepoint.test/sites/sales" }] : [] });
+    if (g === "/sites/site-sales/drives") return json({ value: [{ id: "sales-docs", name: "Documents", webUrl: "https://contoso.sharepoint.test/sites/sales/Shared Documents" }] });
+    if (g === "/me/joinedTeams") return json({ value: [{ id: "team-sales", displayName: "Sales", description: "The sales team" }] });
+    if (g === "/me/chats") return json({ value: [{ id: "19:chat-bob@unq.gbl.spaces", topic: null, chatType: "oneOnOne", members: [{ displayName: "Alice Martin" }, { displayName: "Bob Durand" }] }] });
+    let m = /^\/teams\/([^/]+)\/channels(?:\/([^/]+)\/messages)?$/.exec(g) ?? /^\/chats\/([^/]+)\/messages$/.exec(g);
+    if (m) {
+      const chat = g.startsWith("/chats/");
+      if (!chat && !channels[m[1] as string]) return err(404, "No team found with Group Id");
+      if (!chat && !m[2]) return json({ value: (channels[m[1] as string] ?? []).map((c) => ({ ...c, webUrl: `https://teams.test/channel/${c.id}` })) });
+      if (req.method !== "POST") return err(405, "method");
+      if (!chat && !channels[m[1] as string]?.some((c) => c.id === m?.[2])) return err(404, "Channel not found");
+      const id = `msg-${++n}`;
+      messages.push({ to: g, body: JSON.parse(raw.toString()).body });
+      return json({ id, webUrl: `https://teams.test/message/${id}` }, 201);
+    }
+    m = /^\/drives\/([^/]+)\/(?:root|items\/([^/:]+))\/children$/.exec(g);
+    if (m) {
+      const parent = m[2] ?? `${m[1]}-root`;
+      return json({ value: [...items.values()].filter((i) => i.parent === parent).map(view) });
+    }
+    m = /^\/drives\/([^/]+)\/root\/search\(q='(.*)'\)$/.exec(g);
+    if (m) {
+      const [drive, q] = [m[1], (m[2] as string).replace(/''/g, "'").toLowerCase()];
+      return json({ value: [...items.values()].filter((i) => i.drive === drive && i.parent && i.name.toLowerCase().includes(q)).map(view) });
+    }
+    m = /^\/drives\/([^/]+)\/(?:root|items\/([^/:]+)):\/(.+):\/createUploadSession$/.exec(g);
+    if (m && req.method === "POST") {
+      const sid = randomUUID();
+      uploads.set(sid, { drive: m[1] as string, parent: m[2] ?? `${m[1]}-root`, name: m[3] as string, chunks: [], got: 0 });
+      return json({ uploadUrl: `${base}/upload/${sid}`, expirationDateTime: "2026-10-11T00:00:00Z" });
+    }
+    m = /^\/drives\/([^/]+)\/items\/([^/:]+)$/.exec(g);
+    if (m) {
+      const i = items.get(m[2] as string);
+      return i && i.drive === m[1] ? json(view(i)) : err(404, "The resource could not be found.");
+    }
+    return err(400, `unexpected call ${req.method} ${g}`);
+  });
+  base = await listen(server);
+  /** Revoke every token, as withdrawing consent does. */
+  const revoke = () => (access.clear(), refresh.clear());
+  /** A Graph access token from a sign-in, for user `oid` with scopes `scp` (a JWT whose payload Calque reads). */
+  const delegated = (oid: string, scp: string) => {
+    const at = [{ alg: "none" }, { oid, scp, aud: "00000003-0000-0000-c000-000000000000" }, "sig"].map((p) => Buffer.from(typeof p === "string" ? p : JSON.stringify(p)).toString("base64url")).join(".");
+    access.add(at);
+    actor.set(at, oid);
+    return at;
+  };
+  return { server, items, requests, messages, members, delegated, revoke, authority: base, graph: `${base}/v1.0` };
 }

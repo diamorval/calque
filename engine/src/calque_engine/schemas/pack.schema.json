@@ -45,6 +45,18 @@
         "minLength": 1
       }
     },
+    "localized_text": {
+      "description": "The template's own lines in other languages: line as the template writes it (whitespace folded) -> language -> text (\\n breaks the line). A slide cloned from the template shows them in the deck language unless the deck sets that shape.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "minProperties": 1,
+        "additionalProperties": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
     "roles": {
       "description": "Role -> 1-based template slide numbers that may be cloned for that role.",
       "type": "object",
@@ -169,6 +181,23 @@
               "type": "number"
             }
           }
+        },
+        "source": {
+          "description": "Box of the source line under a chart or composition when the content slide has no `source` slot. Default: the last caption line above footer_top_in, across the body.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "left_in": {
+              "type": "number"
+            },
+            "top_in": {
+              "type": "number"
+            },
+            "width_in": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          }
         }
       }
     },
@@ -229,6 +258,10 @@
             "type": "string"
           }
         },
+        "chart_source": {
+          "description": "WARN on a slide with a native chart and no source line.",
+          "type": "boolean"
+        },
         "slop_rules": {
           "description": "Pack-specific anti-slop rules, same shape as the core ```anti-slop block.",
           "type": "array",
@@ -276,6 +309,31 @@
           "type": "string"
         }
       }
+    },
+    "extends": {
+      "description": "A parent pack id (group -> subsidiary). The pack inherits the parent's voice, storyline, exemplar and lint.slop_rules unless it declares its own; its template and tokens stay its own.",
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "approval": {
+      "description": "Opt-in review: decks on this pack get an approval status (draft, in review, approved), approved by the pack owner or an admin. true: every deck; a list of deck types (e.g. [external, marketing]): only the decks of those types. Never blocks an export. Default off.",
+      "oneOf": [
+        { "type": "boolean" },
+        { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" }, "uniqueItems": true }
+      ],
+      "default": false
+    },
+    "deck_kinds": {
+      "description": "The deck types offered on this pack (a deck's type decides whether it goes through approval). Default: internal, external, marketing.",
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+      "uniqueItems": true,
+      "minItems": 1
+    },
+    "test": {
+      "description": "A test fixture: the server seeds it only when CALQUE_TEST_PACKS=1, never in a client workspace. Default off.",
+      "type": "boolean",
+      "default": false
     },
     "reconciliation": {
       "description": "Arbitrated gaps between the template theme and tokens.json.",

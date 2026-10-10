@@ -4,6 +4,13 @@ version: 0.1.0
 # No default: the deck language is asked every time (mirror the audience / source).
 default_language: null
 missing_value: { fr: "[À COMPLÉTER]", en: "[TO COMPLETE]", es: "[POR COMPLETAR]", pt: "[A COMPLETAR]" }
+# The closing line in the deck language when the deck does not write its own. reference/brand.md
+# keeps it English "unless the user asks": drop a language here to keep the English line.
+localized_text:
+  "Thanks for watching!":
+    fr: "Merci de votre\nattention."
+    es: "Gracias por su\natención."
+    pt: "Obrigado pela\natenção."
 
 roles:
   cover: [1]
@@ -84,9 +91,30 @@ lint:
     - Phase 1
     - TODO
     - TBD
-  # Charter typography and tone-of-voice. The middle-dot ban is left out: the eyebrow grammar
-  # "0X · SECTION / SUBJECT" uses it.
+  # exemplar.md: an external number without a source is a liability.
+  chart_source: true
+  # Charter typography and tone-of-voice (voice.md). The middle-dot ban is left out: the eyebrow
+  # grammar "0X · SECTION / SUBJECT" uses it.
   slop_rules:
+    # Naming first: a brand-name error is the most visible violation (voice.md, review mode).
+    # Lowercase "diametral" inside a URL or an email address is fine.
+    - severity: ERROR
+      lang: any
+      pattern: '(?-i:\bDIAMETRAL\b|(?<![\w@./-])diametral(?![\w@/-]|\.\w))|diamétral'
+      note: 'brand name: always "Diametral", capital D, no accent'
+    - severity: ERROR
+      lang: any
+      pattern: '(?-i:\bAI[- ]Native\b|\bAI native\b)|\bAI[- ]first\b'
+      note: 'mission keyword: always "AI-native", hyphenated, lowercase after the hyphen'
+    - { severity: ERROR, lang: any, pattern: '\betc\b\.?', note: 'zero "etc.": close the list or make it exhaustive' }
+    - severity: WARN
+      lang: any
+      pattern: '\b(agile|caring|360 solution|solution 360|ecosystem 4\.0|écosystème 4\.0)\b'
+      note: "filler buzzword: if any startup could say it, cut it (voice.md, words to avoid)"
+    - severity: WARN
+      lang: en
+      pattern: '\b(genuinely|truly|deeply|incredibly|remarkably|powerful)\b'
+      note: "hollow intensifier: state the mechanism instead"
     - { severity: ERROR, lang: any, pattern: "—", note: "em-dash: split into two sentences, or use a colon" }
     - severity: ERROR
       lang: any
@@ -99,11 +127,11 @@ lint:
       note: "Title Case: sentence case, proper nouns only"
     - severity: WARN
       lang: any
-      pattern: '\b(ai[- ]powered|full[- ]ai|disruptif|disruptive|scalable|révolutionnaire|revolutionary|tout-en-un|all-in-one|futuriste|futuristic|sans limites?|limitless|magique|magic)\b'
+      pattern: '\b(ai[- ]powered|full[- ]ai|disruptif|disruptive|scalable|révolutionnaire|revolutionary|révolutions?|revolutions?|instant results|tout-en-un|all-in-one|futuriste|futuristic|sans limites?|limitless|magique|magic)\b'
       note: "banned word (tone of voice: words to avoid)"
     - severity: WARN
       lang: any
-      pattern: "\\b(we'?re here to help|don'?t worry|we handle everything|it'?s as easy as that|nous sommes là pour vous aider|ne vous inquiétez pas|on s'occupe de tout|c'est aussi simple que ça)\\b"
+      pattern: "\\b(we'?re here to help|don'?t worry|we handle everything|we'?ll walk you through it|it'?s as easy as that|nous sommes là pour vous aider|ne vous inquiétez pas|on s'occupe de tout|c'est aussi simple que ça)\\b"
       note: "weak verbal tic (tone of voice: words to avoid)"
 
 

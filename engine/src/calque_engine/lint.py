@@ -2,8 +2,11 @@
 
 Severities:
   ERROR  exact, no judgement involved: fails the run.
-  WARN   needs eyes: an overflow estimate, a single-use colour on two shapes (a shape and its own
-         label may legitimately be one element), anti-slop vocabulary.
+  WARN   needs eyes: an overflow estimate, a slot over its declared capacity, a single-use colour
+         on two shapes (a shape and its own label may legitimately be one element), anti-slop
+         vocabulary, language typography, pack fonts missing (renders then use the fallback
+         faces), an external hyperlink (where it points is for the author to vouch for), a chart
+         without a source line (when the pack opts in with `lint.chart_source`).
   NOTE   sanctioned but worth surfacing: missing-value markers, slop in speaker notes.
 """
 
@@ -15,14 +18,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from lxml import etree
 from pptx import Presentation
 from pptx.oxml.ns import qn
 from pptx.util import Emu
 
-from .core import SlopRule, slop_rules
+from .build import SOURCE_NAME
+from .core import SlopRule, slop_rules, typography_rules
 from .extract import is_page_number
 from .pack import Pack, load_pack
 from .placeholders import missing_markers, placeholder_hits
+from .render import font_swaps
 from .slides import iter_shapes
 from .style import Style
 
@@ -33,6 +39,11 @@ P = "{http://schemas.openxmlformats.org/presentationml/2006/main}"
 CANVAS_TOL = 0.02  # ignore hairline bleed from rounded EMU
 LINE_FACTOR = 1.05  # line height as a multiple of font size
 DEEP_NESTING = 2  # paragraph level 0 = bullet, 1 = sub-bullet, 2 = too deep
+SOURCE_LINE = re.compile(r"^\s*sources?\b", re.I)  # a hand-written source line in an imported deck
+R = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+RELS = "{http://schemas.openxmlformats.org/package/2006/relationships}"
+# relationship types (their last segment) that run code or embed another application's object
+ACTIVE = {"oleObject", "control", "activeXControl", "activeXControlBinary"}
 
 
 @dataclass(frozen=True)
@@ -93,23 +104,41 @@ def _rules(pack: Pack, language: str | None) -> list[SlopRule]:
             rules.append(rule)
         elif RANK[rule.severity] > RANK[rules[i].severity]:
             rules[i] = SlopRule(rule.severity, rules[i].lang, rules[i].pattern, rules[i].note)
+    return _for_language(rules, language)
+
+
+def _for_language(rules, language: str | None) -> list[SlopRule]:
     lang = (language or "").split("-")[0].lower()
     return [r for r in rules if r.lang == "any" or r.lang == lang]
 
 
+def _hits(rule: SlopRule, text: str) -> list[str]:
+    """Every distinct match of `rule` in `text` (case aside), in order, with a count when it
+    repeats."""
+    seen: dict[str, list] = {}  # folded -> [first spelling, count]
+    for m in rule.pattern.finditer(text):
+        hit = m.group(0).strip()
+        if hit:
+            seen.setdefault(hit.casefold(), [hit, 0])[1] += 1
+    return [f"{h!r} x{n}" if n > 1 else repr(h) for h, n in seen.values()]
+
+
 class _Linter:
-    def __init__(self, pack: Pack, language, template_map, closing, template):
+    def __init__(self, pack: Pack, language, template_map, closing, signatures, template):
         self.pack, self.st, self.template = pack, Style(pack), template
         self.rules = _rules(pack, language)
+        self.typography = _for_language(typography_rules(), language)
+        self.chart_source = bool(pack.manifest["lint"].get("chart_source"))
         self.palette = pack.palette()
         self.fonts = {f.lower() for f in pack.fonts()}
         self.single = {pack.color_at(p) for p in pack.manifest["lint"].get("single_use_colors", [])}
         self.markers = missing_markers(pack)
         self.footer_top = pack.manifest["grid"]["footer_top_in"]
         self.source = template_map or {}
-        self.closing = set(closing)
-        tpl_pages = {s["number"]: s.get("page_number") for s in pack.template_map["slides"]}
-        self.tpl_pages = tpl_pages
+        self.inferred: dict[int, int] = {}  # clone sources guessed without a map (capacity only)
+        self.closing, self.signatures = set(closing), signatures
+        self.tpl = {s["number"]: s for s in pack.template_map["slides"]}
+        self.tpl_pages = {n: s.get("page_number") for n, s in self.tpl.items()}
         self.out: list[Finding] = []
 
     def add(self, sev, num, sid, check, msg):
@@ -134,6 +163,74 @@ class _Linter:
                             f"{n} {slot} is {face or '(empty)'!r}, not a pack font",
                         )
 
+    def fallback_fonts(self) -> None:
+        """Pack faces with no file in `fonts/`: renders swap in the fallback family and overflow
+        is estimated, so a preview can break lines where PowerPoint does not."""
+        swaps = font_swaps(self.pack)
+        if swaps:
+            faces = ", ".join(f"{a} -> {b}" for a, b in sorted(swaps.items()))
+            self.add(
+                "WARN",
+                None,
+                None,
+                "fonts",
+                f"rendered with fallback fonts: {faces} (pack font files missing from fonts/); "
+                "line breaks and overflow estimates may differ from PowerPoint",
+            )
+
+    def external(self, path, prs) -> None:
+        """Data-loss and active content, in any part: OLE objects and ActiveX controls (ERROR),
+        content fetched from elsewhere when the file opens: a remote template, a linked picture,
+        media or data (ERROR), and hyperlinks out of the deck (WARN)."""
+        slides = {s.part.partname.lstrip("/"): (i, s) for i, s in enumerate(prs.slides, start=1)}
+        seen = set()
+
+        def add(sev, num, sid, check, msg):
+            key = (num, sid, check, None if check == "ole" else msg)
+            if key not in seen:
+                seen.add(key)
+                self.add(sev, num, sid, check, msg)
+
+        # an embedded object whatever its relationship (an Office file embeds as a package)
+        for num, slide in slides.values():
+            for el in slide._element.iter(f"{P}oleObj", f"{P}control"):
+                what = el.get("progId") or el.get("name") or el.tag.rpartition("}")[2]
+                add(
+                    "ERROR",
+                    num,
+                    _owner(el),
+                    "ole",
+                    f"embedded {what} object: active content, remove it",
+                )
+        with zipfile.ZipFile(path) as z:
+            for name in sorted(n for n in z.namelist() if n.endswith(".rels")):
+                folder, _, base = name.rpartition("_rels/")
+                part = folder + base[: -len(".rels")]
+                for rel in etree.fromstring(z.read(name)).iter(f"{RELS}Relationship"):
+                    kind = rel.get("Type", "").rsplit("/", 1)[-1]
+                    target = _snippet(rel.get("Target", ""), 80)
+                    linked = rel.get("TargetMode") == "External"
+                    if kind not in ACTIVE and not linked:
+                        continue
+                    num, slide = slides.get(part, (None, None))
+                    sid = _referrer(slide, rel.get("Id")) if slide is not None else None
+                    where = "" if num else f"{part}: "
+                    if kind in ACTIVE:
+                        what = f"linked to {target!r}" if linked else "embedded"
+                        sev, check, msg = (
+                            "ERROR",
+                            "ole",
+                            f"{kind} {what}: active content, remove it",
+                        )
+                    elif kind == "hyperlink":
+                        sev, check, msg = "WARN", "external", f"hyperlink to {target!r}"
+                    elif kind == "attachedTemplate":
+                        sev, check, msg = "ERROR", "external", f"remote template {target!r}"
+                    else:
+                        sev, check = "ERROR", "external"
+                        msg = f"{kind} fetched from {target!r} when the file opens"
+                    add(sev, num, sid, check, where + msg)
+
     # --- per slide -------------------------------------------------------------------------------
 
     def slide(self, num: int, slide, w: float, h: float) -> None:
@@ -144,6 +241,9 @@ class _Linter:
         if not self.template:
             self.text_check(num, slide)
             self.slop(num, slide, pages)
+            self.capacity(num, slide)
+            if self.chart_source:
+                self.source_check(num, slide)
         self.geometry(num, slide, w, h, pages)
         self.page_number(num, slide, pages)
         self.run_order(num, root)
@@ -217,6 +317,26 @@ class _Linter:
                     f"template placeholder left in {_snippet(text)!r}",
                 )
 
+    def source_check(self, num, slide) -> None:
+        """Pack opt-in (`lint.chart_source`): a native chart says where its numbers come from, in
+        the build's source line or any text opening with "Source"."""
+        shapes = list(iter_shapes(slide.shapes))
+        charts = [sh for sh in shapes if getattr(sh, "has_chart", False)]
+        if not charts or any(
+            sh.has_text_frame
+            and sh.text_frame.text.strip()
+            and (sh.name == SOURCE_NAME or SOURCE_LINE.match(sh.text_frame.text))
+            for sh in shapes
+        ):
+            return
+        self.add(
+            "WARN",
+            num,
+            charts[0].shape_id,
+            "source",
+            "chart without a source line: set the slide's `source` (who measured it, when)",
+        )
+
     def is_footer(self, shape, pages: set[int]) -> bool:
         """The footer band's own furniture: the page number and a one-line running footer at the
         bottom right."""
@@ -244,19 +364,21 @@ class _Linter:
             nt = slide.notes_slide.notes_text_frame
             if nt is not None and nt.text.strip():
                 texts.append((slide.notes_slide.notes_placeholder, nt.text, True))
-        # A `closing` clone keeps its signature line ("thank you", charter punctuation and all).
+        # A `closing` clone keeps its signature line ("thank you", charter punctuation and all),
+        # as long as it reads exactly as in the template: rewritten copy is the author's.
         closing = num in self.closing
         for shape, text, in_notes in texts:
-            for r in () if closing and not in_notes else self.rules:
-                m = r.pattern.search(text)
-                if m:
-                    self.add(
-                        "NOTE" if in_notes else r.severity,  # notes are not projected
-                        num,
-                        None if in_notes else shape.shape_id,
-                        "slop",
-                        f"{'speaker notes ' if in_notes else ''}{m.group(0).strip()!r}: {r.note}",
-                    )
+            kept = closing and not in_notes and _norm(text) in self.signatures
+            for check, rules in (("slop", self.rules), ("typography", self.typography)):
+                for r in () if kept else rules:
+                    for hit in _hits(r, text):
+                        self.add(
+                            "NOTE" if in_notes else r.severity,  # notes are not projected
+                            num,
+                            None if in_notes else shape.shape_id,
+                            check,
+                            f"{'speaker notes ' if in_notes else ''}{hit}: {r.note}",
+                        )
             if in_notes or not shape.has_text_frame:
                 continue
             for para in shape.text_frame.paragraphs:
@@ -270,6 +392,50 @@ class _Linter:
                         "(flatten, or split the slide)",
                     )
                     break
+
+    def capacity(self, num, slide) -> None:
+        """Template slots keep to their declared capacity (`template-map.yaml`, chars per line x
+        lines); a `fit` label grows sideways instead, so it must not run into another text."""
+        tslide = self.tpl.get((self.source or self.inferred).get(num))
+        if not tslide:
+            return
+        tshapes = {s["id"]: s for s in _flat(tslide["shapes"])}
+        fit = set(tslide.get("fit", []))
+        texts = [
+            sh
+            for sh in iter_shapes(slide.shapes)
+            if sh.has_text_frame and sh.text_frame.text.strip() and sh.width is not None
+        ]
+        for shape in texts:
+            text, tshape = shape.text_frame.text, tshapes.get(shape.shape_id, {})
+            if shape.shape_id in fit:
+                if Emu(shape.width).inches <= tshape.get("bbox", [0, 0, 0])[2] + CANVAS_TOL:
+                    continue  # not grown: whatever it touches was laid out by the template
+                hit = next((o for o in texts if o is not shape and _overlap(shape, o)), None)
+                if hit is not None:
+                    self.add(
+                        "WARN",
+                        num,
+                        shape.shape_id,
+                        "capacity",
+                        f"label grown to fit {_snippet(text)!r} runs into shape #{hit.shape_id}: "
+                        "shorten it",
+                    )
+                continue
+            cap = tshape.get("capacity")
+            if not cap:
+                continue
+            per, most = cap["chars_per_line"], cap["lines"]
+            need = sum(_char_lines(line, per) for line in re.split(r"[\n\v]", text.strip()))
+            if need > most:
+                self.add(
+                    "WARN",
+                    num,
+                    shape.shape_id,
+                    "capacity",
+                    f"needs ~{need} line(s) of {per} chars, the slot holds {most}: "
+                    f"{_snippet(text)!r}",
+                )
 
     def geometry(self, num, slide, w, h, pages) -> None:
         """Text stays on canvas and clear of the footer band. Pictures and decoration are exempt."""
@@ -287,7 +453,7 @@ class _Linter:
                 or bottom > h + CANVAS_TOL
             ):
                 self.add(
-                    "ERROR",
+                    "WARN" if self.template else "ERROR",  # the company's own layout
                     num,
                     shape.shape_id,
                     "off-canvas",
@@ -444,7 +610,8 @@ def lint(
         signature line).
     exempt_closing_slides: positions to treat as `closing` clones when no map is at hand.
     template: lint the template itself: placeholders, gaps and slop are its job, skip them;
-        off-palette construction guides (connectors) are tolerated.
+        off-palette construction guides (connectors) are tolerated, text off the canvas warns
+        (its clones are still checked in decks).
     """
     closing = set(exempt_closing_slides or ())
     roles = set(pack.slides_for("closing"))
@@ -453,36 +620,94 @@ def lint(
     if template:
         closing |= roles
     prs = Presentation(str(pptx_path))
+    signatures = _signatures(pack, roles)
+    lt = _Linter(pack, language, template_map, closing, signatures, template)
     if not template_map and not template:
-        closing |= _unchanged_closings(prs, pack, roles)
-    lt = _Linter(pack, language, template_map, closing, template)
+        # a slide still carrying a closing line as the template writes it is that clone
+        lt.closing |= {
+            i for i, slide in enumerate(prs.slides, 1) if signatures & set(_texts(slide.shapes))
+        }
+        lt.inferred = _infer_sources(prs, pack)
     lt.theme(pptx_path)
+    lt.fallback_fonts()
+    lt.external(pptx_path, prs)
     w, h = Emu(prs.slide_width).inches, Emu(prs.slide_height).inches
     for i, slide in enumerate(prs.slides, start=1):
         lt.slide(i, slide, w, h)
     return lt.out
 
 
+def _referrer(slide, rid: str | None) -> int | None:
+    """shape_id of the shape on `slide` using relationship `rid` (a link, a picture, an object)."""
+    for el in slide._element.iter():
+        if rid and any(k.startswith(R) and v == rid for k, v in el.attrib.items()):
+            return _owner(el)
+    return None
+
+
+def _norm(text: str) -> str:
+    return " ".join(text.split())
+
+
 def _texts(shapes) -> list[str]:
-    out = []
-    for sh in shapes:
-        if sh.shape_type == 6:
-            out += _texts(sh.shapes)
-        elif sh.has_text_frame and sh.text_frame.text.strip():
-            out.append(" ".join(sh.text_frame.text.split()))
-    return out
+    return [
+        _norm(sh.text_frame.text)
+        for sh in iter_shapes(shapes)
+        if sh.has_text_frame and sh.text_frame.text.strip()
+    ]
 
 
-def _unchanged_closings(prs, pack: Pack, roles: set[int]) -> set[int]:
-    """Without a build map: a slide whose text is exactly a `closing` template slide's text is
-    that signature clone (its line is the pack's own, exempt from slop)."""
+def _signatures(pack: Pack, roles: set[int]) -> set[str]:
+    """The texts of the `closing` template slides as the template writes them, or as the pack's
+    `localized_text` translates them: the pack's own lines, the only closing text exempt from
+    slop."""
+    if not roles:
+        return set()
     tmpl = Presentation(str(pack.template))
-    signatures = [sorted(_texts(tmpl.slides[n - 1].shapes)) for n in roles]
-    return {
-        i
-        for i, slide in enumerate(prs.slides, start=1)
-        if (t := sorted(_texts(slide.shapes))) and t in signatures
-    }
+    lines = {t for n in roles for t in _texts(tmpl.slides[n - 1].shapes)}
+    # and the same lines as the pack writes them in other languages
+    table = pack.manifest.get("localized_text") or {}
+    return lines | {_norm(t) for line in lines for t in table.get(line, {}).values()}
+
+
+def _flat(shapes: list[dict]) -> list[dict]:
+    return [x for s in shapes for x in (s, *_flat(s.get("children", [])))]
+
+
+def _char_lines(text: str, per: int) -> int:
+    """Greedy word wrap at `per` characters; a longer word overhangs onto lines of its own."""
+    n, used = 1, 0
+    for word in text.split():
+        if used and used + 1 + len(word) > per:
+            n, used = n + 1, 0
+        used += (1 if used else 0) + len(word)
+        while used > per:
+            n, used = n + 1, used - per
+    return n
+
+
+def _overlap(a, b, tol: float = 0.02) -> bool:
+    ax, ay, aw, ah = (Emu(v).inches for v in (a.left, a.top, a.width, a.height))
+    bx, by, bw, bh = (Emu(v).inches for v in (b.left, b.top, b.width, b.height))
+    return ax + aw > bx + tol and bx + bw > ax + tol and ay + ah > by + tol and by + bh > ay + tol
+
+
+def _infer_sources(prs, pack: Pack) -> dict[int, int]:
+    """Without a build map: position -> the template slide it was cloned from, when exactly one
+    template slide on the same layout shares at least half its shape ids (clones keep them)."""
+    by_layout: dict[str, list[tuple[int, set[int]]]] = {}
+    for s in pack.template_map["slides"]:
+        by_layout.setdefault(s.get("layout"), []).append(
+            (s["number"], {x["id"] for x in _flat(s["shapes"])})
+        )
+    out = {}
+    for pos, slide in enumerate(prs.slides, start=1):
+        ids = {sh.shape_id for sh in iter_shapes(slide.shapes)}
+        cands = by_layout.get(slide.slide_layout.name, [])
+        scored = sorted(((len(ids & t) / len(t), n) for n, t in cands if t), reverse=True)
+        if scored and scored[0][0] >= 0.5 and (len(scored) == 1 or scored[1][0] < scored[0][0]):
+            out[pos] = scored[0][1]
+    return out
 
 
 def main_lint(pptx: str | Path, pack_dir: str | Path, language: str | None) -> int:

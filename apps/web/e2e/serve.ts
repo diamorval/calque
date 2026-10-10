@@ -15,7 +15,7 @@ type Json = Record<string, any>; // eslint-disable-line @typescript-eslint/no-ex
 const port = Number(process.argv[2] ?? 4319);
 const publicUrl = `http://localhost:${port}`;
 
-/** A scripted agent: builds the acme deck on the active pack, applies comments, answers "ping". */
+/** A scripted agent: builds the acme deck on the active pack, applies comments, adds a slide, answers "ping". */
 function script(b: Json) {
   const system = String(b.messages[0]?.content ?? "");
   const ask = String(b.messages.findLast((m: Json) => m.role === "user")?.content ?? "");
@@ -32,6 +32,13 @@ function script(b: Json) {
     return { content: `Applied the comments: ${lastResult(b).errors} lint error.` };
   }
   if (/ping/i.test(ask)) return { content: `pong from ${b.model}` };
+  if (ask.startsWith("Add slides to this deck")) {
+    const deck_id = system.match(/The user has deck `([^`]+)` open/)?.[1];
+    if (!system.includes("Workflow: draft")) return { content: "Wrong workflow." };
+    const slide = { ...acmeDeck().slides.find((s) => s.id === "regions"), id: "added" };
+    if (steps === 0) return { tool: { name: "add_slides", args: { deck_id, slides: [slide] } } };
+    return { content: "Added 1 slide before the closing slide." };
+  }
   const pack = system.match(/Active pack: `([^`]+)`/)?.[1];
   if (!pack || system.includes("# Open deck")) return { content: "Noted." };
   if (steps === 0) return { tool: { name: "create_deck", args: { deck: { ...acmeDeck(), pack_id: pack } } } };
@@ -44,9 +51,10 @@ const model = await fakeModel(script, port + 1); // e2e/models.spec.ts configure
 process.env.CALQUE_LLM_BASE_URL = model.url;
 process.env.CALQUE_LLM_API_KEY = "good-key";
 process.env.CALQUE_LLM_MODEL = "gateway-e2e";
+process.env.CALQUE_TEST_PACKS = "1"; // the acme-test pack the scripted agent builds on
 const app = await createApp({ data: mkdtempSync(join(tmpdir(), "calque-e2e-")), db: "memory://", publicUrl });
 const auth = { issuer: idp.issuer, audience: "calque", resource: new URL("/mcp", publicUrl), teamsClaim: "groups" };
-const web = sessions({ issuer: idp.issuer, clientId: "calque-web", publicUrl, teamsClaim: "groups", secret: app.secret });
+const web = sessions({ issuer: idp.issuer, clientId: "calque-web", publicUrl, teamsClaim: "groups", secret: app.secret, access: app.access });
 serve({ fetch: createHttp(app, auth, web).fetch, port, hostname: "localhost" }, () => {
   console.log(`e2e stack on ${publicUrl} (model ${model.url})`);
 });
