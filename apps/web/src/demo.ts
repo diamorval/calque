@@ -290,6 +290,8 @@ export async function startDemo() {
         return { deck_id: b.deck_id, url: s.url };
       },
     ],
+    // the slide library starts empty (adding to it is read-only here)
+    [/^POST \/api\/tools\/library_list$/, () => ({ entries: [] })],
     // an imported file opens a deck the engine built earlier on that pack
     [
       /^POST \/api\/tools\/import_pptx$/,

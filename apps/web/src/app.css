@@ -49,6 +49,31 @@
 
 .cq-center { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
 
+/* Microsoft 365 browser (OneDrive, SharePoint) and the slide library panel */
+.cq-m365 { display: grid; gap: 10px; }
+.cq-m365-connect { display: grid; gap: 12px; justify-items: start; }
+.cq-m365-places { display: flex; flex-wrap: wrap; gap: 6px; }
+.cq-m365-search { display: flex; gap: 6px; }
+.cq-m365-trail { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; font-size: 13px; color: var(--cq-muted); }
+.cq-m365-trail span { display: inline-flex; align-items: center; }
+.cq-m365-trail svg { width: 14px; height: 14px; }
+.cq-m365-trail button { background: none; border: 0; padding: 2px 4px; color: var(--cq-fg); cursor: pointer; }
+.cq-m365-list { list-style: none; margin: 0; padding: 0; max-height: min(48vh, 420px); overflow-y: auto; border: 1px solid var(--cq-line); }
+.cq-m365-list li + li { border-top: 1px solid var(--cq-line); }
+.cq-m365-list li.cq-muted { padding: 10px 12px; }
+.cq-m365-list button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 12px; background: none; border: 0; text-align: left; color: var(--cq-fg); cursor: pointer; }
+.cq-m365-list button:hover:not(:disabled) { background: var(--cq-surface-2); }
+.cq-m365-list button:disabled { cursor: default; color: var(--cq-muted); }
+.cq-m365-list svg { width: 16px; height: 16px; flex: none; color: var(--cq-muted); }
+.cq-m365-list span { min-width: 0; overflow-wrap: anywhere; }
+.cq-lib { display: grid; gap: 12px; padding: 12px; }
+.cq-lib-head { margin: 4px 0 0; font-size: 13px; font-weight: 600; }
+.cq-lib-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.cq-lib-item { display: grid; gap: 6px; }
+.cq-lib-item img { width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: var(--cq-sunken); border: 1px solid var(--cq-line); }
+.cq-lib-item > div { display: grid; gap: 6px; font-size: 13px; }
+.cq-lib-tags, .cq-lib-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+
 /* ---------- shell: icon rail + main ---------- */
 
 .cq-app { display: grid; grid-template-columns: 68px minmax(0, 1fr); min-height: 100vh; }

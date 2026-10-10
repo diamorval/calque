@@ -2,7 +2,7 @@ import { Check, ChevronLeft, ChevronRight, MessageSquare, MessageSquarePlus, Rep
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { shapeLabel, SlideCanvas } from "./SlideCanvas.tsx";
 import { Thumbnails } from "./Thumbnails.tsx";
-import type { Comment, DeckView, NewComment, NewReply } from "./types.ts";
+import type { Comment, DeckView, NewComment, NewReply, SlideView } from "./types.ts";
 
 const plural = (n: number, word: string) => `${n} ${word}${n > 1 ? "s" : ""}`;
 const APPROVAL = { draft: "Draft", in_review: "In review", approved: "Approved" } as const;
@@ -26,6 +26,10 @@ export function DeckViewer(props: {
   actions?: ReactNode;
   /** The host's agent chat, shown in a tab next to Comments (web app only). */
   agent?: ReactNode;
+  /** The host's other side-panel tabs, after Comments (web: the slide library). */
+  tabs?: { id: string; label: string; icon?: ReactNode; content: ReactNode }[];
+  /** The host's actions on the slide shown, in the bar above it (web: add it to the library). */
+  slideActions?: (slide: SlideView) => ReactNode;
   /** What the agent is doing to the deck right now, shown over the slide. */
   working?: string | null;
 }) {
@@ -36,7 +40,7 @@ export function DeckViewer(props: {
   const [busy, setBusy] = useState(false);
   const [outline, setOutline] = useState(false);
   // open comments win the first look: after a reload, Apply and the threads are where they were
-  const [tab, setTab] = useState<"agent" | "comments">(props.agent && !deck.open_comments.length ? "agent" : "comments");
+  const [tab, setTab] = useState<string>(props.agent && !deck.open_comments.length ? "agent" : "comments");
   const last = deck.slides.length - 1;
   const index = Math.min(current, last);
   const slide = deck.slides[index];
@@ -127,6 +131,7 @@ export function DeckViewer(props: {
           </button>
           <span className="cq-spacer" />
           {props.onComment && <span className="cq-stagebar-hint">Click an element to comment on it</span>}
+          {props.slideActions?.(slide)}
           <button
             type="button"
             className="cq-btn"
@@ -204,6 +209,11 @@ export function DeckViewer(props: {
             <button type="button" role="tab" aria-selected={tab === "comments"} onClick={() => setTab("comments")}>
               <MessageSquare /> Comments {open > 0 && <span className="cq-count">{open}</span>}
             </button>
+            {props.tabs?.map((t) => (
+              <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} onClick={() => setTab(t.id)}>
+                {t.icon} {t.label}
+              </button>
+            ))}
           </div>
         </div>
         <div className="cq-panel-body">
@@ -215,6 +225,11 @@ export function DeckViewer(props: {
           <div role="tabpanel" aria-label="Comments" hidden={tab !== "comments"}>
             {comments}
           </div>
+          {props.tabs?.map((t) => (
+            <div key={t.id} role="tabpanel" aria-label={t.label} hidden={tab !== t.id}>
+              {t.content}
+            </div>
+          ))}
         </div>
       </aside>
     </div>
