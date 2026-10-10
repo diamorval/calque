@@ -27,6 +27,7 @@ Every recipe:
 - Clones the pack role `content`, keeps its title box (`grid.title`) and rewrites the title as the
   **verdict**, one line, within `grid.title.max_chars`.
 - Draws inside `[m, W − m] × [top, bot]` only. Nothing crosses `bot` (footer, page number).
+  With `params.source`, `bot` moves up above the source line drawn at the bottom of the band.
 - Uses `n = 3` or `n = 4` column grids, whichever the pack declares; if a recipe asks for `n = 3`
   and the pack has only `"4"`, use spans of the declared grid (`span(4, 0, 3)` for a two-thirds
   block, etc.).

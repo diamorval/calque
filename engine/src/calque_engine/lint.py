@@ -3,7 +3,8 @@
 Severities:
   ERROR  exact, no judgement involved: fails the run.
   WARN   needs eyes: an overflow estimate, a single-use colour on two shapes (a shape and its own
-         label may legitimately be one element), anti-slop vocabulary.
+         label may legitimately be one element), anti-slop vocabulary, language typography, a
+         chart without a source line (when the pack opts in with `lint.chart_source`).
   NOTE   sanctioned but worth surfacing: missing-value markers, slop in speaker notes.
 """
 
@@ -19,7 +20,8 @@ from pptx import Presentation
 from pptx.oxml.ns import qn
 from pptx.util import Emu
 
-from .core import SlopRule, slop_rules
+from .build import SOURCE_NAME
+from .core import SlopRule, slop_rules, typography_rules
 from .extract import is_page_number
 from .pack import Pack, load_pack
 from .placeholders import missing_markers, placeholder_hits
@@ -33,6 +35,7 @@ P = "{http://schemas.openxmlformats.org/presentationml/2006/main}"
 CANVAS_TOL = 0.02  # ignore hairline bleed from rounded EMU
 LINE_FACTOR = 1.05  # line height as a multiple of font size
 DEEP_NESTING = 2  # paragraph level 0 = bullet, 1 = sub-bullet, 2 = too deep
+SOURCE_LINE = re.compile(r"^\s*sources?\b", re.I)  # a hand-written source line in an imported deck
 
 
 @dataclass(frozen=True)
@@ -93,14 +96,30 @@ def _rules(pack: Pack, language: str | None) -> list[SlopRule]:
             rules.append(rule)
         elif RANK[rule.severity] > RANK[rules[i].severity]:
             rules[i] = SlopRule(rule.severity, rules[i].lang, rules[i].pattern, rules[i].note)
+    return _for_language(rules, language)
+
+
+def _for_language(rules, language: str | None) -> list[SlopRule]:
     lang = (language or "").split("-")[0].lower()
     return [r for r in rules if r.lang == "any" or r.lang == lang]
+
+
+def _hits(rule: SlopRule, text: str) -> list[str]:
+    """Every distinct match of `rule` in `text`, in order, with a count when it repeats."""
+    seen: dict[str, int] = {}
+    for m in rule.pattern.finditer(text):
+        hit = m.group(0).strip()
+        if hit:
+            seen[hit] = seen.get(hit, 0) + 1
+    return [f"{h!r} x{n}" if n > 1 else repr(h) for h, n in seen.items()]
 
 
 class _Linter:
     def __init__(self, pack: Pack, language, template_map, closing, template):
         self.pack, self.st, self.template = pack, Style(pack), template
         self.rules = _rules(pack, language)
+        self.typography = _for_language(typography_rules(), language)
+        self.chart_source = bool(pack.manifest["lint"].get("chart_source"))
         self.palette = pack.palette()
         self.fonts = {f.lower() for f in pack.fonts()}
         self.single = {pack.color_at(p) for p in pack.manifest["lint"].get("single_use_colors", [])}
@@ -144,6 +163,8 @@ class _Linter:
         if not self.template:
             self.text_check(num, slide)
             self.slop(num, slide, pages)
+            if self.chart_source:
+                self.source_check(num, slide)
         self.geometry(num, slide, w, h, pages)
         self.page_number(num, slide, pages)
         self.run_order(num, root)
@@ -217,6 +238,26 @@ class _Linter:
                     f"template placeholder left in {_snippet(text)!r}",
                 )
 
+    def source_check(self, num, slide) -> None:
+        """Pack opt-in (`lint.chart_source`): a native chart says where its numbers come from, in
+        the build's source line or any text opening with "Source"."""
+        shapes = list(iter_shapes(slide.shapes))
+        charts = [sh for sh in shapes if getattr(sh, "has_chart", False)]
+        if not charts or any(
+            sh.has_text_frame
+            and sh.text_frame.text.strip()
+            and (sh.name == SOURCE_NAME or SOURCE_LINE.match(sh.text_frame.text))
+            for sh in shapes
+        ):
+            return
+        self.add(
+            "WARN",
+            num,
+            charts[0].shape_id,
+            "source",
+            "chart without a source line: set the slide's `source` (who measured it, when)",
+        )
+
     def is_footer(self, shape, pages: set[int]) -> bool:
         """The footer band's own furniture: the page number and a one-line running footer at the
         bottom right."""
@@ -247,16 +288,17 @@ class _Linter:
         # A `closing` clone keeps its signature line ("thank you", charter punctuation and all).
         closing = num in self.closing
         for shape, text, in_notes in texts:
-            for r in () if closing and not in_notes else self.rules:
-                m = r.pattern.search(text)
-                if m:
-                    self.add(
-                        "NOTE" if in_notes else r.severity,  # notes are not projected
-                        num,
-                        None if in_notes else shape.shape_id,
-                        "slop",
-                        f"{'speaker notes ' if in_notes else ''}{m.group(0).strip()!r}: {r.note}",
-                    )
+            skip = closing and not in_notes
+            for check, rules in (("slop", self.rules), ("typography", self.typography)):
+                for r in () if skip else rules:
+                    for hit in _hits(r, text):
+                        self.add(
+                            "NOTE" if in_notes else r.severity,  # notes are not projected
+                            num,
+                            None if in_notes else shape.shape_id,
+                            check,
+                            f"{'speaker notes ' if in_notes else ''}{hit}: {r.note}",
+                        )
             if in_notes or not shape.has_text_frame:
                 continue
             for para in shape.text_frame.paragraphs:

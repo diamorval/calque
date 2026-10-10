@@ -288,6 +288,11 @@
                       },
                       "y_title": {
                         "type": "string"
+                      },
+                      "source": {
+                        "description": "Source line at the bottom of the slide, written in full, e.g. 'Source: CRM, Sept. 2026'.",
+                        "type": "string",
+                        "minLength": 1
                       }
                     },
                     "additionalProperties": false
@@ -1054,6 +1059,11 @@
                               "3/1",
                               "full"
                             ]
+                          },
+                          "source": {
+                            "description": "Source line at the bottom of the slide, written in full, e.g. 'Source: CRM, Sept. 2026'.",
+                            "type": "string",
+                            "minLength": 1
                           }
                         },
                         "required": [
@@ -1147,6 +1157,11 @@
                               "horizontal",
                               "vertical"
                             ]
+                          },
+                          "source": {
+                            "description": "Source line at the bottom of the slide, written in full, e.g. 'Source: CRM, Sept. 2026'.",
+                            "type": "string",
+                            "minLength": 1
                           }
                         },
                         "required": [
@@ -1235,6 +1250,11 @@
                             "type": "integer",
                             "minimum": 0,
                             "maximum": 9007199254740991
+                          },
+                          "source": {
+                            "description": "Source line at the bottom of the slide, written in full, e.g. 'Source: CRM, Sept. 2026'.",
+                            "type": "string",
+                            "minLength": 1
                           }
                         },
                         "required": [
@@ -1313,6 +1333,11 @@
                               "values"
                             ],
                             "additionalProperties": false
+                          },
+                          "source": {
+                            "description": "Source line at the bottom of the slide, written in full, e.g. 'Source: CRM, Sept. 2026'.",
+                            "type": "string",
+                            "minLength": 1
                           }
                         },
                         "required": [
@@ -1405,6 +1430,11 @@
                               ],
                               "additionalProperties": false
                             }
+                          },
+                          "source": {
+                            "description": "Source line at the bottom of the slide, written in full, e.g. 'Source: CRM, Sept. 2026'.",
+                            "type": "string",
+                            "minLength": 1
                           }
                         },
                         "required": [
@@ -1484,6 +1514,11 @@
                               }
                             },
                             "additionalProperties": false
+                          },
+                          "source": {
+                            "description": "Source line at the bottom of the slide, written in full, e.g. 'Source: CRM, Sept. 2026'.",
+                            "type": "string",
+                            "minLength": 1
                           }
                         },
                         "required": [
@@ -1566,6 +1601,11 @@
                               "lines"
                             ],
                             "additionalProperties": false
+                          },
+                          "source": {
+                            "description": "Source line at the bottom of the slide, written in full, e.g. 'Source: CRM, Sept. 2026'.",
+                            "type": "string",
+                            "minLength": 1
                           }
                         },
                         "required": [

@@ -169,6 +169,23 @@
               "type": "number"
             }
           }
+        },
+        "source": {
+          "description": "Box of the source line under a chart or composition when the content slide has no `source` slot. Default: the last caption line above footer_top_in, across the body.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "left_in": {
+              "type": "number"
+            },
+            "top_in": {
+              "type": "number"
+            },
+            "width_in": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          }
         }
       }
     },
@@ -228,6 +245,10 @@
           "items": {
             "type": "string"
           }
+        },
+        "chart_source": {
+          "description": "WARN on a slide with a native chart and no source line.",
+          "type": "boolean"
         },
         "slop_rules": {
           "description": "Pack-specific anti-slop rules, same shape as the core ```anti-slop block.",
