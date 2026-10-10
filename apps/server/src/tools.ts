@@ -494,13 +494,20 @@ export const TOOLS = {
   set_general_access: tool({
     title: "Set general access",
     description:
-      "Owner only (an admin may only set private). Who the deck's share link opens for besides the people with access: private (nobody else), workspace (anyone signed in who sees its brand pack) or anyone (anybody with the link, no sign-in), with `role` viewer or commenter.",
+      "Owner only (an admin may only set private). Who the deck's share link opens for besides the people with access: private (nobody else), workspace (anyone signed in who sees its brand pack) or anyone (anybody with the link, no sign-in), with `role` viewer or commenter, until `expires_at` (past it the link opens for people with access only).",
     input: z.object({
       deck_id: deckId,
       access: z.enum(["private", "workspace", "anyone"]),
       role: z.enum(["viewer", "commenter"]).default("viewer"),
+      expires_in_days: z
+        .number()
+        .int()
+        .min(0)
+        .max(3650)
+        .optional()
+        .describe("The link opens for general access for this many days from now; 0: no expiry. Default: unchanged, or the workspace default when the deck was private."),
     }),
-    run: (app, user, a) => setGeneralAccess(app.decks, user, a.deck_id, a.access, a.role),
+    run: (app, user, a) => setGeneralAccess(app.decks, user, a.deck_id, a.access, a.role, a.expires_in_days),
   }),
 
   reset_link: tool({

@@ -68,7 +68,7 @@ export async function startDemo() {
       shares.set(id, {
         owner: "local",
         people: [],
-        general: { access: "private", role: "viewer" },
+        general: { access: "private", role: "viewer", expires_at: null },
         url: link(id),
       });
     return shares.get(id) as Json;
@@ -294,7 +294,10 @@ export async function startDemo() {
     [
       /^POST \/api\/tools\/set_general_access$/,
       (_, b) => {
-        sharing(b.deck_id).general = { access: b.access, role: b.role ?? "viewer" };
+        const was = sharing(b.deck_id).general;
+        const days = b.expires_in_days;
+        const expires_at = days === undefined ? was.expires_at : days ? new Date(Date.now() + days * 86_400_000).toISOString() : null;
+        sharing(b.deck_id).general = { access: b.access, role: b.role ?? "viewer", expires_at };
         return sharing(b.deck_id).general;
       },
     ],

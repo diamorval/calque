@@ -37,6 +37,7 @@ node apps/server/src/stdio.ts          # stdio, for a local MCP client (bridge t
 | `CALQUE_M365_CLIENT_SECRET` | unset: public client | its secret, for a confidential (Web) client |
 | `CALQUE_M365_TENANT` | `organizations` | tenant id or domain to sign in against (`organizations`: any work account) |
 | `CALQUE_M365_AUTHORITY` / `_GRAPH` | `https://login.microsoftonline.com` / `https://graph.microsoft.com/v1.0` | sign-in and Graph endpoints (national clouds, tests) |
+| `CALQUE_LINK_DAYS` | unset: no expiry | days a deck's share link keeps opening for general access when a private deck is opened up (`set_general_access`); the owner may change it per deck |
 | `CALQUE_RETENTION_DAYS` | unset: keep everything | delete decks untouched for that many days and uploads older than that, at start and daily (the audit log is kept) |
 | `CALQUE_RATE_LIMIT` | on | `off` lifts the per-minute limits on `/auth/*` (30 per address), agent runs (30 per user) and model tests (10 per user) |
 | `CALQUE_TRUST_PROXY` | unset | `1`: rate-limit by the first `X-Forwarded-For` hop (behind your reverse proxy) instead of the socket address |
@@ -151,10 +152,14 @@ more than their role answers 403. The caller's role is the best of the ones belo
   the deck. Its **general access** (`set_general_access {access, role}`) says who else it opens for:
   `private` (default: only the owner and people with access, signed in), `workspace` (anyone signed
   in who sees the deck's pack gets the general role) or `anyone` (no sign-in, no pack gate), with the
-  general role `viewer` or `commenter`, never editor. No expiry: `reset_link` rotates the key, and
+  general role `viewer` or `commenter`, never editor. **Expiry**: `set_general_access
+  {expires_in_days}` (0: none) makes the link stop opening for general access after that many days
+  (people with access still open it; a holder of the expired link gets 403 "share link expired");
+  when a private deck opens up without it, `CALQUE_LINK_DAYS` sets the default (unset: no expiry).
+  The Share dialog shows the date and changes it. `reset_link` rotates the key, and
   every copy of the old link stops working at once. Comments through an anonymous link are signed
-  `guest`. `list_shares` returns the owner, the people, the general access and, for the owner, the
-  link `url`.
+  `guest`. `list_shares` returns the owner, the people, the general access (with `expires_at`) and, for the
+  owner, the link `url`.
 - **URL tokens** (internal): the URLs in tool results (`preview_url`, `image_url`, `download_url`)
   and the MCP App's PNGs must work with no browser session, so they carry `?t=`, a per-user token
   (HMAC with `CALQUE_SECRET`, 24 h, bound to the user and the deck). It is no grant: every request

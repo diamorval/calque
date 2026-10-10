@@ -39,6 +39,8 @@ alter table decks add column if not exists pack_version int;
 alter table decks add column if not exists general_access text not null default 'private' check (general_access in ('private', 'workspace', 'anyone'));
 alter table decks add column if not exists general_role text not null default 'viewer' check (general_role in ('viewer', 'commenter'));
 alter table decks add column if not exists link_key text not null default replace(gen_random_uuid()::text, '-', '');
+-- when the share link stops opening for general access (null: never)
+alter table decks add column if not exists link_expires_at timestamptz;
 create table if not exists deck_versions (
   deck_id uuid not null references decks(id),
   version int not null,

@@ -83,7 +83,7 @@ describe("deck sharing", { timeout: ENGINE_TIMEOUT }, () => {
   });
 
   it("workspace: anyone signed in who has the link and sees the pack gets the general role", async () => {
-    expect(await call(alice, "set_general_access", { deck_id: id, access: "workspace", role: "commenter" })).toEqual({ access: "workspace", role: "commenter" });
+    expect(await call(alice, "set_general_access", { deck_id: id, access: "workspace", role: "commenter" })).toEqual({ access: "workspace", role: "commenter", expires_at: null });
     // with the link: the general role
     expect((await viaLink("dave")).body).toMatchObject({ deck_id: id, role: "commenter" });
     expect((await commentViaLink("dave")).body.comment).toMatchObject({ author: "dave" });
@@ -141,6 +141,42 @@ describe("deck sharing", { timeout: ENGINE_TIMEOUT }, () => {
     expect((await viaLink("dave", old)).status).toBe(404);
     expect((await viaLink()).status).toBe(200);
     expect(keyOf((await call(alice, "list_shares", { deck_id: id })).url)).toBe(key);
+  });
+
+  it("link expiry: past it the link opens for people with access only; the default comes from CALQUE_LINK_DAYS", async () => {
+    // an expiry set with the general access
+    const r = await call(alice, "set_general_access", { deck_id: id, access: "anyone", role: "viewer", expires_in_days: 7 });
+    expect(Date.parse(r.expires_at) - Date.now()).toBeGreaterThan(6.9 * 86_400_000);
+    expect((await call(alice, "list_shares", { deck_id: id })).general.expires_at).toBe(r.expires_at);
+    // changing the role keeps it
+    expect((await call(alice, "set_general_access", { deck_id: id, access: "anyone", role: "commenter" })).expires_at).toBe(r.expires_at);
+    expect((await viaLink()).status).toBe(200);
+
+    // past it: anonymous and workspace holders are told it expired; people with access still open it
+    await app.db.query("update decks set link_expires_at = now() - interval '1 minute' where id = $1", [id]);
+    const expired = await viaLink();
+    expect(expired.status).toBe(403);
+    expect(expired.body.message).toMatch(/share link expired/);
+    expect((await viaLink("dave")).status).toBe(403);
+    expect((await viaLink("bob")).body.role).toBe("viewer");
+    // a wrong key still says nothing
+    expect((await viaLink(undefined, `${key.slice(0, -1)}x`)).status).toBe(404);
+
+    // 0: no expiry
+    expect((await call(alice, "set_general_access", { deck_id: id, access: "anyone", role: "viewer", expires_in_days: 0 })).expires_at).toBeNull();
+    expect((await viaLink()).status).toBe(200);
+
+    // the workspace default applies when a private deck opens up, not otherwise
+    process.env.CALQUE_LINK_DAYS = "30";
+    try {
+      expect((await call(alice, "set_general_access", { deck_id: id, access: "workspace", role: "viewer" })).expires_at).toBeNull();
+      await call(alice, "set_general_access", { deck_id: id, access: "private" });
+      const opened = await call(alice, "set_general_access", { deck_id: id, access: "anyone", role: "viewer" });
+      expect(Math.round((Date.parse(opened.expires_at) - Date.now()) / 86_400_000)).toBe(30);
+    } finally {
+      delete process.env.CALQUE_LINK_DAYS;
+    }
+    await call(alice, "set_general_access", { deck_id: id, access: "private", expires_in_days: 0 });
   });
 
   it("team grants and the best role; a grant counts only while the user sees the pack", async () => {

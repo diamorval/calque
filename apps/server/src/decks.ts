@@ -80,6 +80,7 @@ interface DeckRow {
   general_access: GeneralAccess;
   general_role: "viewer" | "commenter";
   link_key: string;
+  link_expires_at: Date | string | null;
   approval: "draft" | "in_review" | "approved";
   /** The pack release the deck was created on. */
   pack_version: number | null;
@@ -121,7 +122,15 @@ const rank = (r: Role) => ROLES.indexOf(r);
 /** Who the deck's share link opens for, besides its owner and the people and teams it is shared
 with: nobody else, anyone signed in who sees its pack, or anyone at all. */
 export type GeneralAccess = "private" | "workspace" | "anyone";
-type Sharing = { id: string; owner: string; pack_id: string; general_access: GeneralAccess; general_role: "viewer" | "commenter"; link_key: string };
+type Sharing = {
+  id: string;
+  owner: string;
+  pack_id: string;
+  general_access: GeneralAccess;
+  general_role: "viewer" | "commenter";
+  link_key: string;
+  link_expires_at?: Date | string | null;
+};
 
 /** The best role `user` holds on each of `ids` through a share: to them or to one of their teams. */
 export async function granted(db: Db, user: User, ids: string[]): Promise<Map<string, Role>> {
@@ -139,11 +148,17 @@ export async function granted(db: Db, user: User, ids: string[]): Promise<Map<st
   return out;
 }
 
-/** Whether `user` presented deck `deck`'s current share link key. */
-function presents(user: User, deck: Sharing): boolean {
+/** Whether `user` presented deck `deck`'s current share link key, expired or not. */
+function presentsKey(user: User, deck: Sharing): boolean {
   const [got, want] = [Buffer.from(user.key ?? ""), Buffer.from(deck.link_key)];
   return !!user.key && got.length === want.length && timingSafeEqual(got, want);
 }
+
+/** Whether deck `deck`'s share link has expired: it no longer opens for general access. */
+export const linkExpired = (deck: Pick<Sharing, "link_expires_at">, now = Date.now()) => !!deck.link_expires_at && new Date(deck.link_expires_at).getTime() <= now;
+
+/** Whether `user` presented deck `deck`'s current share link key, still valid. */
+const presents = (user: User, deck: Sharing) => presentsKey(user, deck) && !linkExpired(deck);
 
 /** The caller's role on a deck, null: none (the deck does not exist for them). The best of: owner;
 a share to them or their team, while they see the deck's pack; the general role if they present
@@ -194,7 +209,9 @@ export class Decks {
     const { rows } = await this.db.query<DeckRow>("select * from decks where id = $1", [id]).catch(() => ({ rows: [] }));
     const row = rows[0];
     const role = row ? await access(this.db, user, row) : null;
-    // a deck the caller has no access to does not exist for them
+    // a deck the caller has no access to does not exist for them; one whose link they hold says it expired
+    if (row && !role && presentsKey(user, row) && linkExpired(row))
+      throw new Forbidden(`this share link expired on ${new Date(row.link_expires_at as string).toISOString().slice(0, 10)}: ask the deck's owner for a new one`);
     if (!row || !role) throw new NotFound(`no deck ${JSON.stringify(id)}`);
     if (rank(role) < rank(need)) throw new Forbidden(`${need} access needed on deck ${id}`);
     // a deck on a hidden pack is hidden too, except through an "Anyone with the link" link
