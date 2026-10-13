@@ -23,8 +23,8 @@ test("insights derive from the compliance report", () => {
   };
   const byId = Object.fromEntries(insights(p).map((c) => [c.id, c]));
   expect(Object.keys(byId)).toEqual(["clean", "trend", "activity", "owners", "approval"]);
-  expect(byId.clean.text).toBe("1 deck still has ERRORs on its latest version.");
-  expect(byId.trend.text).toMatch(/^Down from 2\.0/); // 4/2 the week before, 2/4 now
-  expect(byId.owners.text).toBe("Ann owns 3 of the 3 ERRORs.");
-  expect(byId.approval.text).toBe("2 decks waiting for review.");
+  expect(byId.clean?.text).toBe("1 deck still has ERRORs on its latest version.");
+  expect(byId.trend?.text).toMatch(/^Down from 2\.0/); // 4/2 the week before, 2/4 now
+  expect(byId.owners?.text).toBe("Ann owns 3 of the 3 ERRORs.");
+  expect(byId.approval?.text).toBe("2 decks waiting for review.");
 });
