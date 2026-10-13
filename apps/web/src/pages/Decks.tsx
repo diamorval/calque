@@ -3,33 +3,17 @@ import { Button } from "diametral-ds/button";
 import { DialogFooter } from "diametral-ds/dialog";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "diametral-ds/empty";
 import { Input } from "diametral-ds/input";
-import { Cloud, Copy, FileUp, LayoutGrid, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { ToggleGroup, ToggleGroupItem } from "diametral-ds/toggle-group";
+import { Cloud, FileUp, LayoutGrid, Pencil, Plus, Search, Table2, Trash2 } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { api, fileArg, tool, type Pack } from "../api.ts";
+import { DeckActionButtons, DeckTable, ROLE, type DeckActions, type DeckRow } from "../components/DeckTable.tsx";
 import { M365Picker, useM365 } from "../components/M365.tsx";
 import { t } from "../i18n.ts";
 import { go, navigate } from "../nav.ts";
 import { ago, Dialog, Field, FileDrop, PageHead, Spinner } from "../ui.tsx";
 
-interface DeckRow {
-  id: string;
-  title: string;
-  pack_id: string;
-  head: number;
-  updated_at: string;
-  owner: string;
-  role: "owner" | "editor" | "commenter" | "viewer";
-}
-
-const ROLE = { owner: "Owner", editor: "Editor", commenter: "Commenter", viewer: "Viewer" } as const;
-
-interface CardActions {
-  onRename?: (() => void) | undefined;
-  onDuplicate: () => void;
-  onDelete?: (() => void) | undefined;
-}
-
-function DeckCard({ d, onRename, onDuplicate, onDelete }: { d: DeckRow } & CardActions) {
+function DeckCard({ d, ...actions }: { d: DeckRow } & DeckActions) {
   return (
     <li className="cq-deck-item">
       <a className="cq-deck-card" href={`/d/${d.id}`} onClick={(e) => go(e, `/d/${d.id}`)}>
@@ -49,22 +33,20 @@ function DeckCard({ d, onRename, onDuplicate, onDelete }: { d: DeckRow } & CardA
         </span>
       </a>
       <span className="cq-deck-actions">
-        {onRename && (
-          <Button size="icon" variant="outline" aria-label={t("Rename {title}", { title: d.title })} title={t("Rename")} onClick={onRename}>
-            <Pencil />
-          </Button>
-        )}
-        <Button size="icon" variant="outline" aria-label={t("Duplicate {title}", { title: d.title })} title={t("Duplicate")} onClick={onDuplicate}>
-          <Copy />
-        </Button>
-        {onDelete && (
-          <Button size="icon" variant="outline" aria-label={t("Delete {title}", { title: d.title })} title={t("Delete")} onClick={onDelete}>
-            <Trash2 />
-          </Button>
-        )}
+        <DeckActionButtons d={d} {...actions} />
       </span>
     </li>
   );
+}
+
+type View = "grid" | "table";
+const VIEW_KEY = "cq-decks-view";
+function savedView(): View {
+  try {
+    return localStorage.getItem(VIEW_KEY) === "table" ? "table" : "grid";
+  } catch {
+    return "grid";
+  }
 }
 
 export function Decks() {
@@ -77,7 +59,17 @@ export function Decks() {
   const [deleting, setDeleting] = useState<DeckRow | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const filtered = !!query.trim() || !!packId;
+  const [view, setView] = useState<View>(savedView);
+  // one chip at a time: "role:<role>" or "kind:<kind>"; "" is every deck
+  const [chip, setChip] = useState("");
+  const pickView = (v: View) => {
+    setView(v);
+    try {
+      localStorage.setItem(VIEW_KEY, v);
+    } catch {
+      // storage blocked: the choice lasts for this page only
+    }
+  };
   const load = () => {
     const q = new URLSearchParams();
     if (query.trim()) q.set("q", query.trim());
@@ -121,13 +113,24 @@ export function Decks() {
   // the copy opens in the editor, as a new deck of the caller's
   const duplicate = (d: DeckRow) =>
     run(t("Duplicating {title}", { title: d.title }), async () => navigate(`/d/${(await tool<{ deck_id: string }>("duplicate_deck", { deck_id: d.id })).deck_id}`));
-  const actions = (d: DeckRow): CardActions => ({
+  const actions = (d: DeckRow): DeckActions => ({
     onRename: d.role === "owner" || d.role === "editor" ? () => setRenaming(d) : undefined,
     onDuplicate: () => void duplicate(d),
     onDelete: d.role === "owner" ? () => setDeleting(d) : undefined,
   });
-  const decks = all && all.filter((d) => d.role === "owner");
-  const shared = all?.filter((d) => d.role !== "owner") ?? [];
+  // the chips and their live counts, over the decks the search and pack filter returned
+  const chips = new Map<string, { label: string; n: number }>();
+  const count = (key: string, label: string) => chips.set(key, { label, n: (chips.get(key)?.n ?? 0) + 1 });
+  for (const d of all ?? []) {
+    count(`role:${d.role}`, t(ROLE[d.role]));
+    if (d.kind) count(`kind:${d.kind}`, d.kind);
+  }
+  const active = chips.has(chip) ? chip : ""; // a chip whose last deck went is dropped
+  const rows = all && (active ? all.filter((d) => `role:${d.role}` === active || `kind:${d.kind}` === active) : all);
+  const filtered = !!query.trim() || !!packId || !!active;
+  const decks = rows && rows.filter((d) => d.role === "owner");
+  const shared = rows?.filter((d) => d.role !== "owner") ?? [];
+  const packName = (id: string) => packs.find((p) => p.id === id)?.name ?? id;
 
   return (
     <div className="cq-page">
@@ -153,6 +156,23 @@ export function Decks() {
               </option>
             ))}
           </select>
+          <ToggleGroup variant="outline" spacing={0} aria-label={t("Deck view")} value={[view]} onValueChange={(v: string[]) => v[0] && pickView(v[0] as View)}>
+            <ToggleGroupItem value="grid" className="aria-pressed:bg-foreground aria-pressed:text-background" aria-label={t("Grid")} title={t("Grid")}>
+              <LayoutGrid />
+            </ToggleGroupItem>
+            <ToggleGroupItem value="table" className="aria-pressed:bg-foreground aria-pressed:text-background" aria-label={t("Table")} title={t("Table")}>
+              <Table2 />
+            </ToggleGroupItem>
+          </ToggleGroup>
+          {chips.size > 1 && (
+            <div className="flex basis-full flex-wrap gap-2" role="group" aria-label={t("Filter decks")}>
+              {[["", { label: t("All"), n: all?.length ?? 0 }] as const, ...chips].map(([key, c]) => (
+                <Button key={key} size="sm" variant={active === key ? "default" : "outline"} aria-pressed={active === key} onClick={() => setChip(key)}>
+                  {c.label} <span className="tabular-nums opacity-70">{c.n}</span>
+                </Button>
+              ))}
+            </div>
+          )}
         </div>
       )}
       {error && (
@@ -162,7 +182,7 @@ export function Decks() {
       )}
       {busy && <Spinner label={busy} />}
       {!decks && <Spinner label={t("Loading decks")} />}
-      {filtered && all?.length === 0 && (
+      {filtered && rows?.length === 0 && (
         <Empty className="border">
           <EmptyHeader>
             <EmptyMedia variant="icon">
@@ -173,7 +193,7 @@ export function Decks() {
           </EmptyHeader>
         </Empty>
       )}
-      {!filtered && decks?.length === 0 && (
+      {!filtered && (view === "grid" ? decks : rows)?.length === 0 && (
         <Empty className="border">
           <EmptyHeader>
             <EmptyMedia variant="icon">
@@ -192,7 +212,8 @@ export function Decks() {
           </EmptyContent>
         </Empty>
       )}
-      {!!decks?.length && (
+      {view === "table" && !!rows?.length && <DeckTable decks={rows} packName={packName} actions={actions} />}
+      {view === "grid" && !!decks?.length && (
         <ul className="cq-deck-grid">
           {!filtered && (
             <li>
@@ -207,7 +228,7 @@ export function Decks() {
           ))}
         </ul>
       )}
-      {shared.length > 0 && (
+      {view === "grid" && shared.length > 0 && (
         <section className="cq-shared" aria-label={t("Shared with me")}>
           <h2>{t("Shared with me")}</h2>
           <ul className="cq-deck-grid">

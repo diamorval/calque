@@ -7,13 +7,14 @@ import { Tag } from "diametral-ds/tag";
 import { ArrowLeft, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { api } from "../api.ts";
+import { InsightCards } from "../components/InsightCards.tsx";
 import { day, num, t, tn } from "../i18n.ts";
 import { go } from "../nav.ts";
 import { ago, PageHead, Spinner } from "../ui.tsx";
 
 type Tally = { decks: number; errors: number; warns: number };
 /** GET /api/compliance (apps/server/src/compliance.ts), one entry per pack the caller manages. */
-interface PackReport {
+export interface PackReport {
   pack_id: string;
   name: string;
   summary: Tally & { linted: number; clean: number };
@@ -120,6 +121,7 @@ export function Compliance() {
       )}
       {p && (
         <>
+          <InsightCards key={p.pack_id} report={p} />
           <div className="cq-stats" data-compliance={p.pack_id}>
             {[
               [t("Decks"), num(p.summary.decks)],

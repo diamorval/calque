@@ -51,6 +51,11 @@ const raw = {
     "Décrivez la présentation dont vous avez besoin ; l'agent la construit sur le pack de marque de votre entreprise.",
   "Start from a brief": "Partir d'un brief",
   "Shared with me": "Partagées avec moi",
+  "Deck view": "Affichage des présentations",
+  Grid: "Grille",
+  Table: "Tableau",
+  "Filter decks": "Filtrer les présentations",
+  All: "Toutes",
   Owner: "Propriétaire",
   Editor: "Éditeur",
   Commenter: "Commentateur",
@@ -152,6 +157,22 @@ const raw = {
   "Slide {n}": "Diapositive {n}",
   Deck: "Présentation",
   "shape {id}": "forme {id}",
+  Changes: "Modifications",
+  "Changes in v{version}": "Modifications de la v{version}",
+  "Comparing versions": "Comparaison des versions",
+  "No text change in v{version}.": "Aucun texte modifié dans la v{version}.",
+  Element: "Élément",
+  "Before v{version}": "Avant la v{version}",
+  "In v{version}": "Dans la v{version}",
+  "Slide added": "Diapositive ajoutée",
+  "Slide removed": "Diapositive supprimée",
+  Content: "Contenu",
+  Eyebrow: "Surtitre",
+  "Fix with the agent": "Corriger avec l'agent",
+  "Fix this lint finding on the deck ({check}): {message}": "Corrige ce constat du contrôle sur la présentation ({check}) : {message}",
+  "Fix this lint finding on slide {n} ({check}): {message}": "Corrige ce constat du contrôle sur la diapositive {n} ({check}) : {message}",
+  "Fix this lint finding on slide {n}, shape {id} ({check}): {message}":
+    "Corrige ce constat du contrôle sur la diapositive {n}, forme {id} ({check}) : {message}",
 
   // the deck UI (packages/slide-ui)
   "Empty deck.": "Présentation vide.",
@@ -392,6 +413,21 @@ const raw = {
   "Versions linted": "Versions contrôlées",
   "ERRORs per version": "Erreurs par version",
   "No deck on this pack yet.": "Aucune présentation sur ce pack pour l'instant.",
+  Insights: "Constats",
+  Previous: "Précédente",
+  "{n} deck still has ERRORs on its latest version.": "{n} présentation a encore des erreurs dans sa dernière version.",
+  "{n} decks still have ERRORs on their latest version.": "{n} présentations ont encore des erreurs dans leur dernière version.",
+  "No linted deck has an ERROR on its latest version.": "Aucune présentation contrôlée n'a d'erreur dans sa dernière version.",
+  "{n} ERRORs per version the week of {week}.": "{n} erreurs par version la semaine du {week}.",
+  "Down from {a} the week before.": "En baisse, contre {a} la semaine précédente.",
+  "Up from {a} the week before.": "En hausse, contre {a} la semaine précédente.",
+  "Same as the week before.": "Comme la semaine précédente.",
+  "{n} deck worked on the week of {week}.": "{n} présentation travaillée la semaine du {week}.",
+  "{n} decks worked on the week of {week}.": "{n} présentations travaillées la semaine du {week}.",
+  "ERRORs by owner": "Erreurs par propriétaire",
+  "{name} owns {n} of the {total} ERRORs.": "{name} porte {n} des {total} erreurs.",
+  "{n} deck waiting for review.": "{n} présentation en attente de relecture.",
+  "{n} decks waiting for review.": "{n} présentations en attente de relecture.",
 
   // a pack's charter
   "from {pack}": "hérité de {pack}",
@@ -694,6 +730,9 @@ const raw = {
   "Sample deck on this draft": "Présentation d'essai sur ce brouillon",
   "Sample slide {n}": "Diapositive d'essai {n}",
   "Preview on a sample deck": "Aperçu sur une présentation d'essai",
+  "Manifest (pack.yaml)": "Manifeste (pack.yaml)",
+  "What this screen will publish as pack.yaml, shown as JSON. It follows your changes above.":
+    "Ce que cet écran publiera comme pack.yaml, affiché en JSON. Il suit vos modifications ci-dessus.",
 };
 
 export type Key = keyof typeof raw;
