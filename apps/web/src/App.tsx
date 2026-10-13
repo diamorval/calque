@@ -1,9 +1,10 @@
 import { Avatar, AvatarFallback } from "diametral-ds/avatar";
-import { Cpu, Languages, LayoutGrid, LogOut, Moon, Palette, Plus, Sun, type LucideIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Languages, LogOut, Moon, Sun, type LucideIcon } from "lucide-react";
+import { Fragment, useEffect, useState } from "react";
 import { api, ApiError, NEUTRAL, type Branding, type Me } from "./api.ts";
 import { LANGS, setLang, t, useLang } from "./i18n.ts";
-import { go, usePath } from "./nav.ts";
+import { CommandPalette } from "./components/CommandPalette.tsx";
+import { go, PAGES, usePath } from "./nav.ts";
 import { Decks } from "./pages/Decks.tsx";
 import { Editor } from "./pages/Editor.tsx";
 import { Login } from "./pages/Login.tsx";
@@ -101,11 +102,13 @@ export function App() {
         <a className="cq-logo" href="/" aria-label={t("{name} home", { name: brand.name })} title={brand.name} onClick={(e) => go(e, "/")}>
           <Logo brand={brand} />
         </a>
-        <NavItem href="/" label={t("Decks")} short={t("Decks (short)")} icon={LayoutGrid} active={path === "/" || path.startsWith("/d/")} />
-        <NavItem href="/new" label={t("New deck")} short={t("New (short)")} icon={Plus} active={path === "/new"} />
-        <span className="cq-side-gap" />
-        <NavItem href="/settings/models" label={t("AI models")} short={t("Models (short)")} icon={Cpu} active={path === "/settings/models"} />
-        <NavItem href="/settings/packs" label={t("Brand packs")} short={t("Packs (short)")} icon={Palette} active={path.startsWith("/settings/packs") || path === "/settings/compliance"} />
+        <CommandPalette theme={theme} toggleTheme={toggleTheme} />
+        {PAGES.map((p, i) => (
+          <Fragment key={p.href}>
+            {i === 2 && <span className="cq-side-gap" />}
+            <NavItem href={p.href} label={t(p.label)} short={t(p.short)} icon={p.icon} active={p.active(path)} />
+          </Fragment>
+        ))}
         <span className="cq-side-rule" />
         <button type="button" className="cq-nav cq-me-toggle" aria-label={t("Account")} aria-expanded={account} onClick={() => setAccount((a) => !a)}>
           <span className="cq-me-initials" aria-hidden>

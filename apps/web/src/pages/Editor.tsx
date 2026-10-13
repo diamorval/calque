@@ -110,6 +110,12 @@ export function Editor({ id }: { id: string }) {
         deck={deck}
         strings={slideUiStrings()}
         working={busy}
+        {...(edits
+          ? {
+              onAskShape: ({ slide, shape_id, label, instruction }: { slide: number; shape_id: number; label: string; instruction: string }) =>
+                setAsk({ text: t('On slide {n}, shape "{label}" (#{id}): {instruction}', { n: slide, label, id: shape_id, instruction }), workflow: "edit-slides" }),
+            }
+          : {})}
         back={
           <a className="cq-btn cq-bar-back" data-variant="ghost" data-icon href="/" aria-label={t("Decks")} onClick={(e) => go(e, "/")}>
             <ChevronLeft />
@@ -253,6 +259,7 @@ export function Editor({ id }: { id: string }) {
         agent={
           <Chat
             deck_id={id}
+            slides={deck.slides.length}
             pack_id={deck.pack_id}
             placeholder={t("Ask for a change: reword, add a slide, review…")}
             suggestions={EDITS.map((e) => t(e))}

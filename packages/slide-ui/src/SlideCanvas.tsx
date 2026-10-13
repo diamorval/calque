@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { EN_STRINGS, type SlideUiStrings } from "./strings.ts";
 import type { Comment, ShapeBox, SlideView } from "./types.ts";
 
@@ -16,6 +16,8 @@ export function SlideCanvas(props: {
   outline?: boolean;
   onSelect: (shapeId: number | null) => void;
   strings?: SlideUiStrings | undefined;
+  /** Drawn over the slide, in its coordinates (the agent's quick actions on the picked shape). */
+  children?: ReactNode;
 }) {
   const { slide, selected, comments, onSelect } = props;
   const strings = props.strings ?? EN_STRINGS;
@@ -49,6 +51,7 @@ export function SlideCanvas(props: {
             )}
           </button>
         ))}
+      {props.children}
     </div>
   );
 }

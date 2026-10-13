@@ -1,18 +1,14 @@
 import { Alert, AlertDescription } from "diametral-ds/alert";
 import { Button } from "diametral-ds/button";
-import { Kbd } from "diametral-ds/kbd";
-import { ArrowUp, Check, Cloud, MessageSquarePlus, Paperclip, Sparkles, X } from "lucide-react";
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { Sparkles } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { agent, api, tool, upload, type ToolStep } from "../api.ts";
 import { t } from "../i18n.ts";
+import { AgentTrace } from "./ai/AgentTrace.tsx";
+import { PromptBar, type Attached, type ModelChoice, type Workflow } from "./ai/PromptBar.tsx";
+import { StreamingText } from "./ai/StreamingText.tsx";
 import { M365Picker, useM365 } from "./M365.tsx";
 
-/** A file attached to the conversation, uploaded to /api/files. */
-interface Attached {
-  file_id: string;
-  name: string;
-}
-const ACCEPT = "image/*,.pptx,.pdf,.docx,.xlsx,.csv,.txt,.md";
 const M365_ACCEPT = /\.(pptx|pdf|docx|xlsx|csv|txt|md|png|jpe?g|gif|webp|svg)$/i;
 
 /** An AI SDK model message, as the server returns them; the server keeps the conversation. */
@@ -23,7 +19,7 @@ export interface ChatMessage {
 /** A message sent from outside the composer (a toolbar action), with the workflow it runs. */
 export interface Ask {
   text: string;
-  workflow?: "draft-slides" | "edit-slides" | "review-deck";
+  workflow?: Workflow;
 }
 export interface AgentResult {
   model: string;
@@ -31,19 +27,6 @@ export interface AgentResult {
   messages: ChatMessage[];
   /** A new-deck draft that created a deck: the deck its conversation moved to. */
   deck_id?: string;
-}
-
-/** A failed tool's error, short: the server's `message` when the error is its JSON. */
-function shortError(error: string, max = 160): string {
-  let msg = error;
-  try {
-    const e = JSON.parse(error);
-    if (typeof e?.message === "string") msg = e.message;
-    else if (Array.isArray(e)) msg = e.map((c) => c?.text ?? "").join(" ");
-  } catch {
-    // not JSON: the message as is
-  }
-  return msg.length > max ? `${msg.slice(0, max - 1)}…` : msg;
 }
 
 /** The errors of a conversation's failed tool calls, by call id. */
@@ -70,14 +53,6 @@ function lines(m: ChatMessage, failed: Map<string, string>): { text: string; too
   };
 }
 
-interface ModelChoice {
-  id: string;
-  model: string;
-  label: string | null;
-  is_default: boolean;
-  /** the one the agent runs for this viewer by default (their team's, else the workspace's) */
-  your_default?: boolean;
-}
 const PICKED = "calque:model";
 
 /** The models this viewer may run, and the one they picked ("" = their default). */
@@ -107,30 +82,6 @@ function useModelChoice() {
   return { models, mine: models.find((m) => m.your_default), picked: models.some((m) => m.id === picked) ? picked : "", pick };
 }
 
-/** The tools the agent called, one row each (a check, or a cross and why); the last one live while it runs. */
-function Trace({ tools, live }: { tools: ToolStep[]; live?: boolean }) {
-  return (
-    <ul className="cq-trace">
-      {tools.map((step, i) =>
-        step.error === undefined ? (
-          <li key={i}>
-            <Check aria-label={t("done")} /> <span className="cq-mono">{step.name}</span>
-          </li>
-        ) : (
-          <li key={i} data-failed>
-            <X aria-label={t("failed")} /> <span className="cq-mono">{step.name}</span> <span>{shortError(step.error)}</span>
-          </li>
-        ),
-      )}
-      {live && (
-        <li data-live>
-          <span className="cq-spinner" /> <span className="cq-shimmer">{tools.length ? t("Working") : t("Thinking")}</span>
-        </li>
-      )}
-    </ul>
-  );
-}
-
 /** The co-editing chat. The server keeps the conversation: the deck's (everyone with access reads
 it, editors continue it), or without `deck_id` the viewer's new-deck draft. */
 export function Chat(props: {
@@ -142,6 +93,8 @@ export function Chat(props: {
   empty?: ReactNode;
   /** One-click briefs, while the conversation is empty. */
   suggestions?: string[];
+  /** The deck's slide count: "@" references a slide. */
+  slides?: number | undefined;
   /** Left of the send button (the new deck's brand pack). */
   footer?: ReactNode;
   /** Sent as soon as it changes; its workflow stays on for the replies that follow. */
@@ -156,6 +109,8 @@ export function Chat(props: {
   const [steps, setSteps] = useState<ToolStep[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [model, setModel] = useState<string | null>(null);
+  // the reply that just arrived reveals word by word; a loaded conversation shows at once
+  const [fresh, setFresh] = useState(false);
   const choice = useModelChoice();
   const [workflow, setWorkflow] = useState<Ask["workflow"]>();
   // go with the next message; the server keeps them with the conversation, as context for the agent
@@ -165,7 +120,6 @@ export function Chat(props: {
   const [picking, setPicking] = useState(false);
   const log = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
-  const picker = useRef<HTMLInputElement>(null);
   useEffect(() => {
     let live = true;
     tool<{ messages: ChatMessage[]; can_write: boolean }>("get_chat", props.deck_id ? { deck_id: props.deck_id } : {}).then(
@@ -203,15 +157,13 @@ export function Chat(props: {
       setError((err as Error).message);
     } finally {
       setUploading(false);
-      if (picker.current) picker.current.value = "";
     }
   }
   useEffect(() => {
     log.current?.scrollTo({ top: log.current.scrollHeight, behavior: "smooth" });
   }, [messages, steps, error]);
 
-  async function send(e?: FormEvent, ask?: Ask) {
-    e?.preventDefault();
+  async function send(ask?: Ask) {
     const typed = ask?.text ?? text.trim();
     if (!typed || steps || uploading || disabled) return;
     const note = pending.length ? `\n\n${t("Attached: {files}", { files: pending.map((f) => f.name).join(", ") })}` : "";
@@ -223,6 +175,7 @@ export function Chat(props: {
     setPending([]);
     if (!ask) setText("");
     setSteps([]);
+    setFresh(false);
     setError(null);
     try {
       const r = await agent<AgentResult>(
@@ -240,6 +193,7 @@ export function Chat(props: {
       const conversation = [...asked, ...r.messages];
       setMessages(conversation);
       setModel(r.model);
+      setFresh(true);
       props.onDone?.(r, conversation);
     } catch (err) {
       setError((err as Error).message);
@@ -249,7 +203,7 @@ export function Chat(props: {
   }
 
   useEffect(() => {
-    if (props.ask) void send(undefined, props.ask);
+    if (props.ask) void send(props.ask);
   }, [props.ask]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // one turn per run of assistant messages: the agent's steps, then its answer
@@ -280,8 +234,8 @@ export function Chat(props: {
                 <Sparkles />
               </span>
               <div>
-                {m.tools.length > 0 && <Trace tools={m.tools} />}
-                {m.text && <p>{m.text}</p>}
+                {m.tools.length > 0 && <AgentTrace tools={m.tools} />}
+                {m.text && <StreamingText text={m.text} animate={fresh && i === shown.length - 1} />}
               </div>
             </div>
           ),
@@ -291,7 +245,7 @@ export function Chat(props: {
             <span className="cq-msg-avatar" aria-hidden>
               <Sparkles />
             </span>
-            <Trace tools={steps} live />
+            <AgentTrace tools={steps} live />
           </div>
         )}
         {error && (
@@ -321,94 +275,30 @@ export function Chat(props: {
       {!writes ? (
         <p className="cq-hint cq-chat-readonly">{t("Only the deck's editors talk to the agent: you read the conversation.")}</p>
       ) : (
-        <form className="cq-composer" onSubmit={send}>
-          <textarea
-            ref={input}
-            aria-label={t("Message")}
-            value={text}
-            rows={2}
-            placeholder={props.placeholder}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                e.preventDefault();
-                void send();
-              }
-            }}
-          />
-          {pending.length > 0 && (
-            <div className="cq-attached">
-              {pending.map((f) => (
-                <Button
-                  key={f.file_id}
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  aria-label={t("Remove {name}", { name: f.name })}
-                  onClick={() => setPending((p) => p.filter((x) => x !== f))}
-                >
-                  {f.name} <X />
-                </Button>
-              ))}
-            </div>
-          )}
-          <div className="cq-composer-foot">
-            <input ref={picker} type="file" multiple hidden accept={ACCEPT} onChange={(e) => void attach(e.target.files)} />
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              aria-label={t("Attach files")}
-              title={t("Attach images, PPTX, PDF, Word, Excel, CSV, text or Markdown")}
-              disabled={uploading || !!steps || disabled}
-              onClick={() => picker.current?.click()}
-            >
-              {uploading ? <span className="cq-spinner" /> : <Paperclip />}
-            </Button>
-            {m365 && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                aria-label={t("From Microsoft 365")}
-                title={t("Attach a file from OneDrive or SharePoint")}
-                disabled={uploading || !!steps || disabled}
-                onClick={() => setPicking(true)}
-              >
-                <Cloud />
-              </Button>
-            )}
-            {props.footer}
-            {choice.models.length > 1 && (
-              <select className="cq-select cq-model-pick" aria-label={t("AI model")} value={choice.picked} onChange={(e) => choice.pick(e.target.value)}>
-                <option value="">
-                  {t("Default model")}
-                  {choice.mine ? ` (${choice.mine.model})` : ""}
-                </option>
-                {choice.models.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.model}
-                    {m.label ? ` (${m.label})` : ""}
-                    {m.is_default ? ` · ${t("default")}` : ""}
-                  </option>
-                ))}
-              </select>
-            )}
-            {model && <span className="cq-hint">{t("Model: {model}", { model })}</span>}
-            {messages.length > 0 && (
-              <Button type="button" variant="ghost" size="icon" aria-label={t("New conversation")} title={t("Start the conversation over")} disabled={!!steps || disabled} onClick={() => void restart()}>
-                <MessageSquarePlus />
-              </Button>
-            )}
-            <span className="cq-spacer" />
-            <span className="cq-hint cq-keys">
-              <Kbd>↵</Kbd> {t("send")} · <Kbd>⇧↵</Kbd> {t("new line")}
-            </span>
-            <Button type="submit" size="icon" aria-label={t("Send")} disabled={!!steps || uploading || disabled || !text.trim()}>
-              <ArrowUp />
-            </Button>
-          </div>
-        </form>
+        <PromptBar
+          value={text}
+          onChange={setText}
+          onSubmit={() => void send()}
+          placeholder={props.placeholder}
+          inputRef={input}
+          busy={!!steps}
+          uploading={uploading}
+          disabled={disabled}
+          workflow={workflow}
+          onWorkflow={setWorkflow}
+          slides={props.slides}
+          attached={pending}
+          onDetach={(f) => setPending((p) => p.filter((x) => x !== f))}
+          onAttach={(files) => void attach(files)}
+          onM365={m365 ? () => setPicking(true) : undefined}
+          models={choice.models}
+          mine={choice.mine}
+          picked={choice.picked}
+          onPick={choice.pick}
+          model={model}
+          onRestart={messages.length > 0 ? () => void restart() : undefined}
+          footer={props.footer}
+        />
       )}
       {picking && m365 && (
         <M365Picker

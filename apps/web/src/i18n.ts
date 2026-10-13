@@ -135,5 +135,14 @@ export function slideUiStrings(): SlideUiStrings {
     required: t("Required"),
     requiredHint: t("A required comment blocks the deck's approval until it is resolved"),
     moreActions: t("More actions"),
+    shapeActions: {
+      rewrite: { label: t("Rewrite"), instruction: t("Rewrite this text, same meaning, clearer.") },
+      shorten: { label: t("Shorten"), instruction: t("Shorten this text, keep the key message.") },
+      expand: { label: t("Expand"), instruction: t("Expand this text with more detail.") },
+      spelling: { label: t("Fix spelling"), instruction: t("Fix the spelling and grammar of this text.") },
+      translate: { label: t("Translate"), instruction: t("Translate this text into English.") },
+    },
+    agentOnShape: (label) => t("Ask the agent about this {label}", { label }),
+    askAgent: t("Ask the agent…"),
   };
 }

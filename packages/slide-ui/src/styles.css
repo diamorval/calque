@@ -86,11 +86,14 @@
   color-scheme: dark;
 }
 
-*, *::before, *::after { box-sizing: border-box; }
-body { margin: 0; background: var(--cq-bg); color: var(--cq-fg); }
-h1, h2, h3, p { margin: 0; }
-button, input, select, textarea { font: inherit; color: inherit; }
-:focus-visible { outline: none; box-shadow: var(--cq-ring); }
+/* element resets in the base layer: a host on Tailwind (the web app) keeps its utilities above them */
+@layer base {
+  *, *::before, *::after { box-sizing: border-box; }
+  body { margin: 0; background: var(--cq-bg); color: var(--cq-fg); }
+  h1, h2, h3, p { margin: 0; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  :focus-visible { outline: none; box-shadow: var(--cq-ring); }
+}
 .cq-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .cq-muted { color: var(--cq-muted); }
 .cq-mono { font-family: var(--cq-mono); font-size: 12px; }
@@ -265,6 +268,20 @@ button, input, select, textarea { font: inherit; color: inherit; }
   position: absolute; bottom: calc(100% + 4px); left: -2px; padding: 2px 6px; border-radius: 4px;
   background: var(--cq-accent); color: var(--cq-accent-fg); font: 500 11px var(--cq-mono); white-space: nowrap; pointer-events: none;
 }
+
+/* the agent's quick actions on the picked shape: a floating bar, so the one shadow */
+.cq-shape-actions {
+  position: absolute; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 2px; padding: 3px;
+  max-width: min(640px, 100%); width: max-content; background: var(--cq-surface); border: 1px solid var(--cq-line-strong);
+  border-radius: 0; box-shadow: var(--cq-shadow-lg); font-size: 13px;
+}
+.cq-shape-actions .cq-btn { border-radius: 0; }
+.cq-shape-actions .cq-btn svg { width: 14px; height: 14px; }
+.cq-shape-actions-ask { display: flex; align-items: center; gap: 6px; flex: 1 1 180px; padding-left: 8px; border-left: 1px solid var(--cq-line); }
+.cq-shape-actions-ask > svg { width: 14px; height: 14px; color: var(--cq-accent); flex: none; }
+.cq-shape-actions input { flex: 1; min-width: 0; height: 28px; border: 0; padding: 0; background: transparent; border-radius: 0; }
+.cq-shape-actions input:focus { box-shadow: none; outline: none; }
+.cq-shape-actions-ask:focus-within { box-shadow: inset 0 -1px var(--cq-accent); }
 
 .cq-working {
   position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none;

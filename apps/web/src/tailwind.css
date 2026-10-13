@@ -1,0 +1,4 @@
+/* diametral-ds in Tailwind mode: its tokens, theme and components, plus utilities from our own markup. */
+@import "diametral-ds/styles.tailwind.css";
+@source "./";
+@source "../../../packages/slide-ui/src";

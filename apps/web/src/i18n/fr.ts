@@ -21,6 +21,13 @@ const raw = {
   "Signed in as {name}": "Connecté en tant que {name}",
   "Sign out": "Se déconnecter",
   Account: "Compte",
+  // the command palette (⌘K)
+  "Command palette": "Palette de commandes",
+  "Search for a page, a deck or an action": "Chercher une page, une présentation ou une action",
+  "Search pages, decks, actions…": "Pages, présentations, actions…",
+  "No results": "Aucun résultat",
+  Pages: "Pages",
+  Actions: "Actions",
   "The agent stopped without an answer.": "L'agent s'est arrêté sans répondre.",
 
   // sign-in
@@ -191,6 +198,19 @@ const raw = {
   Required: "Obligatoire",
   "A required comment blocks the deck's approval until it is resolved": "Un commentaire obligatoire bloque l'approbation de la présentation tant qu'il n'est pas résolu",
   "More actions": "Plus d'actions",
+  Rewrite: "Reformuler",
+  "Rewrite this text, same meaning, clearer.": "Reformule ce texte, même sens, plus clair.",
+  Shorten: "Raccourcir",
+  "Shorten this text, keep the key message.": "Raccourcis ce texte en gardant le message clé.",
+  Expand: "Développer",
+  "Expand this text with more detail.": "Développe ce texte avec plus de détails.",
+  "Fix spelling": "Corriger l'orthographe",
+  "Fix the spelling and grammar of this text.": "Corrige l'orthographe et la grammaire de ce texte.",
+  Translate: "Traduire",
+  "Translate this text into English.": "Traduis ce texte en anglais.",
+  "Ask the agent about this {label}": "Demander à l'agent pour ce {label}",
+  "Ask the agent…": "Demander à l'agent…",
+  "On slide {n}, shape \"{label}\" (#{id}): {instruction}": "Diapositive {n}, forme « {label} » (#{id}) : {instruction}",
 
   // the chat
   done: "terminé",
@@ -212,6 +232,19 @@ const raw = {
   send: "envoyer",
   "new line": "nouvelle ligne",
   "Attach from Microsoft 365": "Joindre depuis Microsoft 365",
+  "{n}s": "{n} s",
+  "Used {n} tool": "{n} outil utilisé",
+  "Used {n} tools": "{n} outils utilisés",
+  "{n} failed": "{n} en échec",
+  Workflows: "Modes de travail",
+  workflow: "mode de travail",
+  slide: "diapositive",
+  "slide {n}": "diapositive {n}",
+  "Draft slides": "Rédiger des diapositives",
+  "Edit slides": "Modifier des diapositives",
+  "Review the deck": "Relire la présentation",
+  Dictate: "Dicter",
+  "Stop dictation": "Arrêter la dictée",
 
   // add slides, review, export
   "What should the new slides say?": "Que doivent dire les nouvelles diapositives ?",
