@@ -161,6 +161,24 @@ describe("DeckViewer", () => {
     expect(act).toHaveBeenCalledWith("regions");
   });
 
+  it("asks the agent about the picked shape: a quick action or your own words; Escape closes", () => {
+    const onAskShape = vi.fn();
+    render(<DeckViewer deck={deck} onAskShape={onAskShape} agent={<p>chat here</p>} />);
+    expect(screen.queryByRole("toolbar")).toBeNull(); // nothing picked
+    fireEvent.click(screen.getByRole("button", { name: "Shape 2 (title)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Shorten" }));
+    expect(onAskShape).toHaveBeenLastCalledWith({ slide: 1, shape_id: 2, label: "title", instruction: "Shorten this text, keep the key message." });
+    fireEvent.change(screen.getByRole("textbox", { name: "Ask the agent…" }), { target: { value: "Make it a question" } });
+    fireEvent.submit(screen.getByRole("toolbar"));
+    expect(onAskShape).toHaveBeenLastCalledWith({ slide: 1, shape_id: 2, label: "title", instruction: "Make it a question" });
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Ask the agent…" }), { key: "Escape" });
+    expect(screen.queryByRole("toolbar")).toBeNull();
+    cleanup();
+    render(<DeckViewer deck={deck} onComment={vi.fn()} />); // no onAskShape (MCP Apps UI): no bar
+    fireEvent.click(screen.getByRole("button", { name: "Shape 2 (title)" }));
+    expect(screen.queryByRole("toolbar")).toBeNull();
+  });
+
   it("shows the approval status when the pack turns it on", () => {
     render(<DeckViewer deck={{ ...deck, approval: { enabled: true, status: "in_review", can_request: false, can_withdraw: true, can_approve: false } }} />);
     expect(screen.getByText("In review")).toBeTruthy();

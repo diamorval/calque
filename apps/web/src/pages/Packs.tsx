@@ -11,6 +11,7 @@ import { Archive, ArchiveRestore, Eye, FileUp, GitBranch, Globe, History, Lock, 
 import { Fragment, useCallback, useEffect, useState, type FormEvent } from "react";
 import { api, upload, type Me, type Pack } from "../api.ts";
 import { dateTime, t, tn } from "../i18n.ts";
+import { SourceFile } from "../components/SourceFile.tsx";
 import { go } from "../nav.ts";
 import { Dialog, Field, FileDrop, PageHead, Spinner } from "../ui.tsx";
 
@@ -812,6 +813,11 @@ function Import({ me, editing, packs, onDone }: { me: Me; editing?: Draft | null
               </div>
             </FieldSet>
           </div>
+          <details className="cq-card cq-form" data-manifest>
+            <summary className="cursor-pointer">{t("Manifest (pack.yaml)")}</summary>
+            <p className="cq-hint">{t("What this screen will publish as pack.yaml, shown as JSON. It follows your changes above.")}</p>
+            <SourceFile name="pack.yaml · JSON" text={JSON.stringify(manifestOf(draft), null, 2)} />
+          </details>
           {editing && (
             <div className="cq-columns">
               <div className="cq-card cq-form">

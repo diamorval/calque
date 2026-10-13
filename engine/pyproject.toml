@@ -38,3 +38,7 @@ dev = [
     "pytest>=9.1.1",
     "ruff>=0.16.9",
 ]
+
+[tool.uv]
+# matches the 7-day quarantine of local uv configs, so uv.lock is the same everywhere (CI runs uv sync --locked)
+exclude-newer = "7 days"

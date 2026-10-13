@@ -27,6 +27,8 @@ test("a deck end to end: brief, build, comment, apply, history, export, present"
   // version history: back to v1, as a new version
   await page.getByRole("button", { name: "History" }).click();
   await expect(page.getByRole("dialog").getByRole("row")).toHaveCount(3);
+  await page.getByRole("button", { name: "Changes in v2" }).click();
+  await expect(page.getByRole("table", { name: "Changes in v2" })).toContainText("Sales grew 12%");
   await page.getByRole("button", { name: "Restore v1" }).click();
   await expect(page.getByText("acme-test · v3")).toBeVisible({ timeout: 60_000 });
 

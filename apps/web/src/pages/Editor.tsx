@@ -3,9 +3,11 @@ import { Alert, AlertDescription } from "diametral-ds/alert";
 import { Button } from "diametral-ds/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "diametral-ds/table";
 import { Tag } from "diametral-ds/tag";
-import { BadgeCheck, BookMarked, ChevronLeft, CircleCheck, Cloud, Download, FileText, History, ListChecks, ListPlus, MessageSquareShare, Play, RefreshCw, Send, Share2, Sparkles, TriangleAlert, Undo2, X } from "lucide-react";
+import { BadgeCheck, BookMarked, ChevronLeft, CircleCheck, Cloud, Download, FileText, GitCompare, History, ListChecks, ListPlus, MessageSquareShare, Play, RefreshCw, Send, Share2, Sparkles, TriangleAlert, Undo2, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { agent, api, tool, type Me, type Pack } from "../api.ts";
+import { DeckDiff } from "../components/ai/DeckDiff.tsx";
+import { FindingCard, fixAsk } from "../components/ai/FindingCard.tsx";
 import { Chat, type Ask } from "../components/Chat.tsx";
 import { AddSlides, ReviewDeck } from "../components/DeckActions.tsx";
 import { ExportWithErrors } from "../components/ExportGate.tsx";
@@ -38,6 +40,8 @@ export function Editor({ id }: { id: string }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [history, setHistory] = useState(false);
+  // the version whose changes the history shows, against the one before it
+  const [compare, setCompare] = useState<number | null>(null);
   // toolbar actions that go through the agent chat, and their dialogs
   const [ask, setAsk] = useState<Ask | null>(null);
   const [dialog, setDialog] = useState<"add" | "review" | "share" | "export" | "m365" | "teams" | null>(null);
@@ -110,6 +114,12 @@ export function Editor({ id }: { id: string }) {
         deck={deck}
         strings={slideUiStrings()}
         working={busy}
+        {...(edits
+          ? {
+              onAskShape: ({ slide, shape_id, label, instruction }: { slide: number; shape_id: number; label: string; instruction: string }) =>
+                setAsk({ text: t('On slide {n}, shape "{label}" (#{id}): {instruction}', { n: slide, label, id: shape_id, instruction }), workflow: "edit-slides" }),
+            }
+          : {})}
         back={
           <a className="cq-btn cq-bar-back" data-variant="ghost" data-icon href="/" aria-label={t("Decks")} onClick={(e) => go(e, "/")}>
             <ChevronLeft />
@@ -253,6 +263,7 @@ export function Editor({ id }: { id: string }) {
         agent={
           <Chat
             deck_id={id}
+            slides={deck.slides.length}
             pack_id={deck.pack_id}
             placeholder={t("Ask for a change: reword, add a slide, review…")}
             suggestions={EDITS.map((e) => t(e))}
@@ -345,7 +356,14 @@ export function Editor({ id }: { id: string }) {
         />
       )}
       {history && (
-        <Dialog title={t("Version history")} wide onClose={() => setHistory(false)}>
+        <Dialog
+          title={t("Version history")}
+          wide
+          onClose={() => {
+            setHistory(false);
+            setCompare(null);
+          }}
+        >
           <div className="cq-dialog-body">
             <Table>
               <TableHeader>
@@ -358,7 +376,7 @@ export function Editor({ id }: { id: string }) {
               </TableHeader>
               <TableBody>
                 {[...deck.versions].reverse().map((v) => (
-                  <TableRow key={v.version}>
+                  <TableRow key={v.version} data-state={compare === v.version ? "selected" : undefined}>
                     <TableCell>
                       <span className="cq-mono">v{v.version}</span>
                     </TableCell>
@@ -371,60 +389,62 @@ export function Editor({ id }: { id: string }) {
                     </TableCell>
                     <TableCell>{v.author_name || v.author}</TableCell>
                     <TableCell>
-                      {v.version === deck.head ? (
-                        <Tag>{t("Current")}</Tag>
-                      ) : (
-                        edits && (
+                      <div className="flex items-center justify-end gap-2">
+                        {v.version > 1 && (
                           <Button
                             size="sm"
-                            variant="outline"
-                            aria-label={t("Restore v{version}", { version: v.version })}
-                            onClick={() => {
-                              setHistory(false);
-                              void run(t("Restoring"), () => tool("restore_version", { deck_id: id, version: v.version }));
-                            }}
+                            variant="ghost"
+                            aria-label={t("Changes in v{version}", { version: v.version })}
+                            aria-pressed={compare === v.version}
+                            onClick={() => setCompare(compare === v.version ? null : v.version)}
                           >
-                            {t("Restore")}
+                            <GitCompare /> {t("Changes")}
                           </Button>
-                        )
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </Dialog>
-      )}
-      {report && findings && (
-        <Dialog title={t("Lint: {summary}", { summary: summary?.label ?? "" })} wide onClose={() => setReport(false)}>
-          <div className="cq-dialog-body">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t("Severity")}</TableHead>
-                  <TableHead>{t("Slide")}</TableHead>
-                  <TableHead>{t("Finding")}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {bySeverity(findings).map((f, i) => (
-                  <TableRow key={i}>
-                    <TableCell>
-                      <Tag tone={f.severity === "ERROR" ? "danger" : f.severity === "WARN" ? "warning" : "neutral"}>{f.severity}</Tag>
-                    </TableCell>
-                    <TableCell>{f.slide ? t("Slide {n}", { n: f.slide }) : t("Deck")}</TableCell>
-                    <TableCell>
-                      {f.message}
-                      <div className="cq-hint">
-                        <span className="cq-mono">{f.check}</span>
-                        {f.shape_id !== null && ` · ${t("shape {id}", { id: f.shape_id })}`}
+                        )}
+                        {v.version === deck.head ? (
+                          <Tag>{t("Current")}</Tag>
+                        ) : (
+                          edits && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              aria-label={t("Restore v{version}", { version: v.version })}
+                              onClick={() => {
+                                setHistory(false);
+                                void run(t("Restoring"), () => tool("restore_version", { deck_id: id, version: v.version }));
+                              }}
+                            >
+                              {t("Restore")}
+                            </Button>
+                          )
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
+            {compare !== null && <DeckDiff deck_id={id} version={compare} />}
+          </div>
+        </Dialog>
+      )}
+      {report && findings && (
+        <Dialog title={t("Lint: {summary}", { summary: summary?.label ?? "" })} wide onClose={() => setReport(false)}>
+          <div className="cq-dialog-body grid gap-3" role="list">
+            {bySeverity(findings).map((f, i) => (
+              <FindingCard
+                key={i}
+                finding={f}
+                {...(edits
+                  ? {
+                      onFix: () => {
+                        setReport(false);
+                        setAsk({ text: fixAsk(f), workflow: "edit-slides" });
+                      },
+                    }
+                  : {})}
+              />
+            ))}
           </div>
         </Dialog>
       )}

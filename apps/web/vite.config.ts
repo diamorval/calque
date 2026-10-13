@@ -1,3 +1,4 @@
+import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
@@ -5,7 +6,7 @@ import { defineConfig } from "vite";
 const server = process.env.CALQUE_SERVER ?? "http://localhost:8787";
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   // the GitHub Pages demo (VITE_DEMO=1) serves the responses saved by demo/snapshot.ts
   publicDir: process.env.VITE_DEMO ? "demo/out" : "public",
   // the server refuses cookie writes from another origin (CSRF): the proxy presents the server's own

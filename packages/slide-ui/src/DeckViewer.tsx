@@ -1,9 +1,9 @@
-import { Check, ChevronLeft, ChevronRight, Ellipsis, Images, MessageSquare, MessageSquarePlus, Reply, RotateCcw, Sparkles, SquareDashed, X } from "lucide-react";
+import { ArrowUp, Check, ChevronLeft, ChevronRight, Ellipsis, Images, Languages, Maximize2, MessageSquare, MessageSquarePlus, PenLine, Reply, RotateCcw, Scissors, Sparkles, SpellCheck, SquareDashed, X } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode, type TouchEvent } from "react";
 import { shapeLabel, SlideCanvas } from "./SlideCanvas.tsx";
 import { Thumbnails } from "./Thumbnails.tsx";
-import { EN_STRINGS, type SlideUiStrings } from "./strings.ts";
-import type { Comment, DeckView, NewComment, NewReply, SlideView } from "./types.ts";
+import { EN_STRINGS, type ShapeAction, type SlideUiStrings } from "./strings.ts";
+import type { Comment, DeckView, NewComment, NewReply, ShapeBox, SlideView } from "./types.ts";
 
 const typing = (t: EventTarget | null) => t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
 
@@ -32,6 +32,9 @@ export function DeckViewer(props: {
   tabs?: { id: string; label: string; icon?: ReactNode; content: ReactNode }[];
   /** The host's actions on the slide shown, in the bar above it (web: add it to the library). */
   slideActions?: (slide: SlideView) => ReactNode;
+  /** Ask the agent to change the picked shape (web: a chat message); without it there is no
+  quick-action bar on the shape. */
+  onAskShape?: (a: { slide: number; shape_id: number; label: string; instruction: string }) => void;
   /** What the agent is doing to the deck right now, shown over the slide. */
   working?: string | null;
   /** The words shown, in the host's language; English by default. */
@@ -181,7 +184,21 @@ export function DeckViewer(props: {
           </button>
         </div>
         <div className="cq-stage-view" onTouchStart={swipeStart} onTouchEnd={swipeEnd}>
-          <SlideCanvas strings={s} slide={slide} selected={shape} comments={here} outline={outline} onSelect={setShape} />
+          <SlideCanvas strings={s} slide={slide} selected={shape} comments={here} outline={outline} onSelect={setShape}>
+            {picked && props.onAskShape && (
+              <ShapeActions
+                key={`${slide.id}:${picked.shape_id}`}
+                strings={s}
+                slide={slide}
+                shape={picked}
+                onClose={() => setShape(null)}
+                onAsk={(instruction) => {
+                  props.onAskShape?.({ slide: slide.number, shape_id: picked.shape_id, label: shapeLabel(picked), instruction });
+                  if (props.agent) setTab("agent");
+                }}
+              />
+            )}
+          </SlideCanvas>
           {props.working && (
             <div className="cq-working" role="status">
               <div>
@@ -282,6 +299,63 @@ export function DeckViewer(props: {
         </button>
       </div>
     </div>
+  );
+}
+
+const ACTIONS: [ShapeAction, ReactNode][] = [
+  ["rewrite", <PenLine key="rewrite" />],
+  ["shorten", <Scissors key="shorten" />],
+  ["expand", <Maximize2 key="expand" />],
+  ["spelling", <SpellCheck key="spelling" />],
+  ["translate", <Languages key="translate" />],
+];
+
+/** The agent's quick actions on the picked shape, under it (over it near the slide's foot): one
+click asks for a rewrite, a shorter or longer text, a spelling fix, a translation; or type your own. */
+function ShapeActions(props: { strings: SlideUiStrings; slide: SlideView; shape: ShapeBox; onAsk: (instruction: string) => void; onClose: () => void }) {
+  const { strings: s, slide, shape } = props;
+  const [text, setText] = useState("");
+  const [x, y, w, h] = shape.bbox_px;
+  const pct = (v: number, of: number) => `${(v / of) * 100}%`;
+  // under the shape, or over it near the slide's foot; from its left edge, or its right one past the middle
+  const below = y + h < slide.height_px * 0.75;
+  const pos = {
+    ...(x + w / 2 < slide.width_px / 2 ? { left: pct(x, slide.width_px) } : { right: pct(slide.width_px - x - w, slide.width_px) }),
+    ...(below ? { top: `calc(${pct(y + h, slide.height_px)} + 8px)` } : { bottom: `calc(${pct(slide.height_px - y, slide.height_px)} + 26px)` }),
+  };
+  const ask = (e: FormEvent) => {
+    e.preventDefault();
+    if (!text.trim()) return;
+    props.onAsk(text.trim());
+    setText("");
+  };
+  return (
+    <form
+      className="cq-shape-actions"
+      role="toolbar"
+      aria-label={s.agentOnShape(shapeLabel(shape))}
+      style={pos}
+      onSubmit={ask}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.stopPropagation();
+          props.onClose();
+        }
+      }}
+    >
+      {ACTIONS.map(([id, icon]) => (
+        <button key={id} type="button" className="cq-btn" data-variant="ghost" data-size="sm" onClick={() => props.onAsk(s.shapeActions[id].instruction)}>
+          {icon} {s.shapeActions[id].label}
+        </button>
+      ))}
+      <span className="cq-shape-actions-ask">
+        <Sparkles />
+        <input aria-label={s.askAgent} placeholder={s.askAgent} value={text} onChange={(e) => setText(e.target.value)} />
+        <button type="submit" className="cq-btn" data-variant="primary" data-icon data-size="sm" aria-label={s.send} disabled={!text.trim()}>
+          <ArrowUp />
+        </button>
+      </span>
+    </form>
   );
 }
 

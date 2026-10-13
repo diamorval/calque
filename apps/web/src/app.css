@@ -102,6 +102,8 @@
 /* the account menu: inline in the rail, a menu over the tab bar on a phone */
 .cq-side-me { display: contents; }
 .cq-me-toggle, .cq-bar-back { display: none; }
+/* the search: its shortcut under the icon in the rail, a word in the tab bar (no keyboard on a phone) */
+.cq-search-short { display: none; }
 .cq-me-initials { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 999px; background: var(--cq-surface-2); color: var(--cq-fg); font-size: 11px; font-weight: 600; }
 .cq-main { min-width: 0; }
 .cq-main[data-full] .cq-workspace { height: 100vh; }
@@ -227,6 +229,9 @@
 .cq-attached button { text-transform: none; letter-spacing: normal; font-weight: 400; max-width: 100%; }
 .cq-composer-foot .cq-spacer { flex: 1; }
 .cq-keys { display: inline-flex; align-items: center; gap: 4px; }
+/* the key hint gives way first in a narrow composer (the editor's side panel), never the Send button */
+.cq-composer { container-type: inline-size; }
+@container (max-width: 520px) { .cq-keys { display: none; } }
 .cq-pack-pick, .cq-model-pick { width: auto; height: 30px; font-size: 13px; background-color: var(--cq-surface-2); }
 
 /* the new deck: a centred brief */
@@ -292,6 +297,8 @@
   .cq-side > .cq-nav { flex: 1; width: auto; }
   .cq-nav[aria-current="page"] { box-shadow: inset 0 2px 0 var(--cq-accent); }
   .cq-me-toggle { display: grid; }
+  .cq-search-kbd { display: none; }
+  .cq-search-short { display: inline; }
   .cq-side-me { display: none; }
   .cq-side-me[data-open] {
     display: flex; flex-direction: column; align-items: center; gap: 2px; position: fixed; right: 8px; bottom: calc(var(--cq-tabbar) + 8px);

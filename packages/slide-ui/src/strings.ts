@@ -48,7 +48,14 @@ export interface SlideUiStrings {
   requiredHint: string;
   /** On a phone: the button that opens the host's actions. */
   moreActions: string;
+  /** The agent's quick actions on a picked shape: the button, and what it asks the agent. */
+  shapeActions: Record<ShapeAction, { label: string; instruction: string }>;
+  /** The quick-action bar's label, and its free-text box. */
+  agentOnShape: (label: string) => string;
+  askAgent: string;
 }
+
+export type ShapeAction = "rewrite" | "shorten" | "expand" | "spelling" | "translate";
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
@@ -95,4 +102,13 @@ export const EN_STRINGS: SlideUiStrings = {
   required: "Required",
   requiredHint: "A required comment blocks the deck's approval until it is resolved",
   moreActions: "More actions",
+  shapeActions: {
+    rewrite: { label: "Rewrite", instruction: "Rewrite this text, same meaning, clearer." },
+    shorten: { label: "Shorten", instruction: "Shorten this text, keep the key message." },
+    expand: { label: "Expand", instruction: "Expand this text with more detail." },
+    spelling: { label: "Fix spelling", instruction: "Fix the spelling and grammar of this text." },
+    translate: { label: "Translate", instruction: "Translate this text into English." },
+  },
+  agentOnShape: (label) => `Ask the agent about this ${label}`,
+  askAgent: "Ask the agent…",
 };
