@@ -9,6 +9,8 @@ const raw = {
   "Decks (short)": "Accueil",
   "New deck": "Nouvelle présentation",
   "New (short)": "Créer",
+  Designs: "Créations",
+  "Designs (short)": "Créations",
   "AI models": "Modèles d'IA",
   "Models (short)": "IA",
   "Brand packs": "Packs de marque",
@@ -730,6 +732,31 @@ const raw = {
   "Sample deck on this draft": "Présentation d'essai sur ce brouillon",
   "Sample slide {n}": "Diapositive d'essai {n}",
   "Preview on a sample deck": "Aperçu sur une présentation d'essai",
+  // designs (pages/Designs.tsx)
+  "Social posts, stories, banners, ads, posters and web sections on your brand packs.":
+    "Posts, stories, bannières, publicités, affiches et sections web sur vos packs de marque.",
+  "Loading designs": "Chargement des créations",
+  "No design yet": "Aucune création pour l'instant",
+  "Ask the agent for one in Claude with the create-design prompt: it lays the design out, checks it and saves it here.":
+    "Demandez-en une à l'agent dans Claude avec le prompt create-design : il la met en page, la contrôle et l'enregistre ici.",
+  "{n} artboard": "{n} plan de travail",
+  "{n} artboards": "{n} plans de travail",
+  "Loading the design": "Chargement de la création",
+  Undo: "Annuler la dernière modification",
+  Undoing: "Annulation",
+  "Exporting {format}": "Export {format}",
+  "Design tools": "Outils de création",
+  "Colour mode": "Mode de couleur",
+  Base: "Base",
+  "Artboard {id}": "Plan de travail {id}",
+  "Checks for {id}": "Contrôles de {id}",
+  "No issue found.": "Aucun problème détecté.",
+  "Adapt to…": "Adapter à…",
+  "Adapt {id} to another format": "Adapter {id} à un autre format",
+  "A copy on the new canvas: auto layout reflows, type follows the format. Check its lint after.":
+    "Une copie sur le nouveau format : la mise en page automatique se réorganise, la typographie suit le format. Vérifiez ensuite ses contrôles.",
+  Adapt: "Adapter",
+  "Adapt to {format}": "Adapter à {format}",
   "Manifest (pack.yaml)": "Manifeste (pack.yaml)",
   "What this screen will publish as pack.yaml, shown as JSON. It follows your changes above.":
     "Ce que cet écran publiera comme pack.yaml, affiché en JSON. Il suit vos modifications ci-dessus.",
@@ -753,4 +780,5 @@ export const en: Partial<Record<Key, string>> = {
   "New (short)": "New",
   "Models (short)": "Models",
   "Packs (short)": "Packs",
+  "Designs (short)": "Designs",
 };

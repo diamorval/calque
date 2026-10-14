@@ -129,9 +129,8 @@ def lint_artboard(
             or b["x"] + b["w"] > fmt.width - sx + 0.5
             or b["y"] + b["h"] > fmt.height - sy + 0.5
         ):
-            add(
-                "WARN", nid, "safe_area", f"text inside the safe margin of {fmt.label} ({fmt.safe})"
-            )
+            margin = f"{sy:g}px top and bottom, {sx:g}px sides" if sx != sy else f"{sx:g}px"
+            add("WARN", nid, "safe_area", f"text inside the safe margin of {fmt.label} ({margin})")
         fg_role, back = _role(n.get("color", "ink")), bg[nid]
         ratio = contrast(th.color(fg_role), th.color(back))
         large = size >= 24 or (n.get("bold") and size >= 18.66)

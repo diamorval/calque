@@ -6,6 +6,7 @@ import { LANGS, setLang, t, useLang } from "./i18n.ts";
 import { CommandPalette } from "./components/CommandPalette.tsx";
 import { go, PAGES, usePath } from "./nav.ts";
 import { Decks } from "./pages/Decks.tsx";
+import { DesignEditor, Designs } from "./pages/Designs.tsx";
 import { Editor } from "./pages/Editor.tsx";
 import { Login } from "./pages/Login.tsx";
 import { Models } from "./pages/Models.tsx";
@@ -20,6 +21,9 @@ function page(path: string, me: Me) {
   const deck = path.match(/^\/d\/([^/]+)/)?.[1];
   if (deck) return <Editor id={deck} />;
   if (path === "/new") return <NewDeck />;
+  if (path === "/designs") return <Designs />;
+  const design = path.match(/^\/designs\/([^/]+)$/)?.[1];
+  if (design) return <DesignEditor id={design} />;
   if (path === "/settings/models") return <Models me={me} />;
   if (path === "/settings/packs") return <Packs me={me} />;
   const pack = path.match(/^\/settings\/packs\/([^/]+)$/)?.[1];
@@ -105,7 +109,7 @@ export function App() {
         <CommandPalette theme={theme} toggleTheme={toggleTheme} />
         {PAGES.map((p, i) => (
           <Fragment key={p.href}>
-            {i === 2 && <span className="cq-side-gap" />}
+            {i === 3 && <span className="cq-side-gap" />}
             <NavItem href={p.href} label={t(p.label)} short={t(p.short)} icon={p.icon} active={p.active(path)} />
           </Fragment>
         ))}

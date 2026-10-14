@@ -284,7 +284,9 @@ or `html` per artboard as URLs under `/designs/:id/<artboard>.<ext>?v=<version>`
 as `react` / `tailwind` code inline. `open_design`, `list_designs` and `restore_design` complete
 the set; the `create-design` prompt is the workflow (`core/workflows/design.md`).
 
-Designs are versioned like decks and owner-only for now (no sharing, comments or approval yet).
+In the web app, **Designs** (`/designs`) lists them and opens one: each artboard as rendered with
+its lint beside it, the colour-mode switch, Adapt to another format, Undo, the file exports and
+the React / Tailwind code. Designs are versioned like decks and owner-only for now (no sharing, comments or approval yet).
 Images are pack files or the caller's own uploads (`"src": "file:<file_id>"`). The server needs a
 Chromium: the image ships Debian's `chromium`; elsewhere one on PATH, Playwright's, or
 `CALQUE_CHROMIUM`.

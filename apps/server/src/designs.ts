@@ -92,8 +92,14 @@ export class Designs {
   }
 
   async list(user: User) {
-    const { rows } = await this.db.query<DesignRow>("select * from designs where owner = $1 order by created_at desc", [user.id]);
-    return rows.map(({ id, title, pack_id, head, created_at }) => ({ design_id: id, title, pack_id, version: head, created_at }));
+    // the first artboard of the current version: the cover the lists show
+    const { rows } = await this.db.query<DesignRow & { cover: string | null; artboards: number; updated_at: string }>(
+      `select d.*, v.spec->'artboards'->0->>'id' as cover, jsonb_array_length(v.spec->'artboards') as artboards, v.created_at as updated_at
+       from designs d join design_versions v on v.design_id = d.id and v.version = d.head
+       where d.owner = $1 order by v.created_at desc`,
+      [user.id],
+    );
+    return rows.map(({ id, title, pack_id, head, cover, artboards, updated_at }) => ({ design_id: id, title, pack_id, version: head, cover, artboards, updated_at }));
   }
 
   async spec(id: string, version: number): Promise<DesignSpec> {

@@ -82,7 +82,9 @@ describe("designs", { timeout: ENGINE_TIMEOUT }, () => {
     const other = { id: "other", teams: [] };
     await expect(run("open_design", app, { design_id: id }, other)).rejects.toThrow(/no design/);
     expect((await run("list_designs", app, {}, other)).designs).toEqual([]);
-    expect((await run("list_designs", app, {})).designs.map((d: Json) => d.design_id)).toEqual([id]);
+    expect((await run("list_designs", app, {})).designs).toEqual([
+      expect.objectContaining({ design_id: id, title: "Launch campaign", version: 4, cover: "post", artboards: 2 }),
+    ]);
     const spec = campaign();
     spec.artboards[0]?.children.push({ type: "image", id: "pic", src: "file:someone-elses", alt: "", width: 10, height: 10 });
     await expect(run("create_design", app, { design: spec })).rejects.toThrow(/no file/);
