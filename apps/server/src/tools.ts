@@ -2,20 +2,21 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import { DeckSpec, PatchOp, Slide } from "@calque/deckspec";
+import { DeckSpec, DesignPatchOp, DesignSpec, PatchOp, Slide } from "@calque/deckspec";
 import { compliance } from "./compliance.ts";
 import type { Access } from "./access.ts";
 import { audit } from "./audit.ts";
 import { clearChat, getChat } from "./chats.ts";
 import type { Db } from "./db.ts";
+import { CODE_TARGETS, OUTPUTS, type DesignRender, type Designs } from "./designs.ts";
 import { linkExpired, type Decks, type Finding, type Role } from "./decks.ts";
-import { REPO } from "./engine.ts";
+import { engine, REPO } from "./engine.ts";
 import { getFile, MAX_UPLOAD, TooLarge, uploadTicket } from "./files.ts";
 import { imageAdd, imageApprove, imageList, imageRemove } from "./images.ts";
 import { libraryAdd, libraryApprove, libraryInsert, libraryList, libraryRemove } from "./library.ts";
 import { fileName, teamsMessage, type M365 } from "./m365.ts";
 import type { Models } from "./models.ts";
-import { importPack, listPacks, type User } from "./packs.ts";
+import { getPack, importPack, listPacks, type User } from "./packs.ts";
 import { packPortal } from "./portal.ts";
 import { userToken } from "./preview.ts";
 import { approvalConfig, approvalOf, recordExport, setApproval, setKind } from "./review.ts";
@@ -25,6 +26,7 @@ import { usageReport } from "./usage.ts";
 export interface App {
   db: Db;
   decks: Decks;
+  designs: Designs;
   models: Models;
   /** session revocation and SCIM deprovisioning */
   access: Access;
@@ -89,6 +91,29 @@ key the caller came with, else their per-user token (one they came with is passe
 const token = (app: App, user: User, id: string) =>
   user.key ? `k=${encodeURIComponent(user.key)}` : `t=${encodeURIComponent(user.token ?? userToken(app.secret, user, id))}`;
 const links = (app: App, user: User, id: string) => ({ preview_url: `${app.publicUrl}/decks/${id}?${token(app, user, id)}` });
+/** A design's rendered artboards as image URLs (same per-user token as deck previews), its lint
+grouped by severity. */
+function designResult(app: App, user: User, id: string, version: number, r: DesignRender) {
+  const q = `v=${version}&${token(app, user, id)}`;
+  return {
+    design_id: id,
+    version,
+    artboards: r.artboards.map(({ id: aid, format, width, height, mode, boxes }) => ({
+      id: aid,
+      format,
+      width,
+      height,
+      mode,
+      image_url: `${app.publicUrl}/designs/${id}/${aid}.png?${q}`,
+      boxes,
+    })),
+    errors: r.findings.filter((f) => f.severity === "ERROR"),
+    warnings: [...r.findings.filter((f) => f.severity === "WARN"), ...r.warnings],
+  };
+}
+
+const designId = z.string().describe("Design id, as returned by create_design.");
+
 /** The deck's share link, the one people copy. */
 const shareUrl = (app: App, id: string, key: string) => `${app.publicUrl}/decks/${id}?k=${encodeURIComponent(key)}`;
 
@@ -819,6 +844,108 @@ export const TOOLS = {
         url,
         ...(open ? {} : { note: "the link opens for the people with access to the deck only: share it with them (share_deck) or open its general access (set_general_access)" }),
       };
+    },
+  }),
+
+  list_formats: tool({
+    title: "List design formats",
+    description:
+      "Canvas presets for designs (social posts, stories, banners, display ads, email headers, web sections, posters), with their size, type scale and minimum text size. With pack_id, also the pack's colour roles, text styles and token modes (e.g. dark): the only values a DesignSpec may name.",
+    input: z.object({ pack_id: z.string().optional() }),
+    readOnly: true,
+    run: async (app, user, a) => {
+      const pack = a.pack_id ? await app.decks.releaseDir(await getPack(app.db, user, a.pack_id), undefined) : undefined;
+      const r = await engine<Record<string, unknown>>("design_formats", pack ? { pack } : {});
+      delete r.ok;
+      return r;
+    },
+  }),
+
+  create_design: tool({
+    title: "Create design",
+    description:
+      "Create a design from a DesignSpec: one or more artboards (a social post, a story, a banner, an ad, a poster, a web section), each a node tree with auto layout (frames), text in the pack's type scale, images, shapes and component instances. Colours are pack roles, never hex; a token mode (e.g. dark) re-colours an artboard. Laid out and linted before it is saved: `errors` (overflow, off canvas, too-small text, contrast, slop) must be fixed with patch_design; `warnings` are worth a look. Returns the design id and each artboard's PNG.",
+    input: z.object({ design: DesignSpec, note: z.string().optional() }),
+    run: async (app, user, a) => {
+      const r = await app.designs.create(user, a.design, a.note ?? "create");
+      return designResult(app, user, r.design_id, r.version, r);
+    },
+  }),
+
+  patch_design: tool({
+    title: "Patch design",
+    description:
+      "Edit a design (new version): set_node merges props into a node, replace_node / insert_node / delete_node change the tree, set_artboard / add_artboard / delete_artboard the canvases, adapt_artboard copies an artboard to another format (auto layout reflows, spacing follows the type scale: lint the result), set_component edits a component (every instance follows), set_field the title or mode.",
+    input: z.object({ design_id: designId, ops: z.array(DesignPatchOp).min(1), note: z.string().optional() }),
+    run: async (app, user, a) => {
+      const r = await app.designs.patch(user, a.design_id, a.ops, a.note ?? "patch");
+      return designResult(app, user, r.design_id, r.version, r);
+    },
+  }),
+
+  open_design: tool({
+    title: "Open design",
+    description: "A design's DesignSpec, versions, rendered artboards (PNG URL + node boxes) and lint.",
+    input: z.object({ design_id: designId, version: version }),
+    readOnly: true,
+    run: async (app, user, a) => {
+      const d = await app.designs.design(user, a.design_id);
+      const r = await app.designs.render(user, a.design_id, a.version, ["png"]);
+      return {
+        ...designResult(app, user, a.design_id, r.version, r),
+        title: d.title,
+        pack_id: d.pack_id,
+        head: d.head,
+        versions: await app.designs.versions(a.design_id),
+        spec: await app.designs.spec(a.design_id, r.version),
+      };
+    },
+  }),
+
+  export_design: tool({
+    title: "Export design",
+    description:
+      "Export a design: png (at `scale`), pdf (vector, selectable text) or svg (vector: rects, paths, one text element per line) as download URLs, one per artboard; or one artboard as code (html, react, tailwind), returned inline, colours and fonts as CSS variables named after the pack's roles.",
+    input: z.object({
+      design_id: designId,
+      format: z.enum([...OUTPUTS, ...CODE_TARGETS.filter((t) => t !== "html")]),
+      artboard: z.string().optional().describe("Required for react and tailwind; default: every artboard."),
+      scale: z.number().min(0.25).max(4).default(1).describe("PNG pixel density (2 = retina)."),
+      version,
+    }),
+    readOnly: true,
+    run: async (app, user, a) => {
+      if (a.format === "react" || a.format === "tailwind") {
+        if (!a.artboard) throw new Error(`${a.format} exports one artboard: pass artboard`);
+        return app.designs.code(user, a.design_id, a.artboard, a.format, a.version);
+      }
+      const format = a.format;
+      const r = await app.designs.render(user, a.design_id, a.version, [format], a.scale);
+      const q = `v=${r.version}${a.scale === 1 ? "" : `&scale=${a.scale}`}&${token(app, user, a.design_id)}`;
+      const files = r.artboards
+        .filter((b) => !a.artboard || b.id === a.artboard)
+        .map((b) => ({ artboard: b.id, url: `${app.publicUrl}/designs/${a.design_id}/${b.id}.${format}?${q}` }));
+      if (!files.length) throw new Error(`no artboard ${JSON.stringify(a.artboard)}`);
+      await audit(app.db, user, "export", "design", a.design_id, { format, version: r.version });
+      return { version: r.version, format, files };
+    },
+  }),
+
+  list_designs: tool({
+    title: "List designs",
+    description: "Your designs, newest first.",
+    input: z.object({}),
+    readOnly: true,
+    run: async (app, user) => ({ designs: await app.designs.list(user) }),
+  }),
+
+  restore_design: tool({
+    title: "Restore design version",
+    description: "Undo the last change of a design, or go back to a given version, as a new version: nothing is lost.",
+    input: z.object({ design_id: designId, version }),
+    run: async (app, user, a) => {
+      const r = await app.designs.restore(user, a.design_id, a.version);
+      return designResult(app, user, r.design_id, r.version, r);
     },
   }),
 } satisfies Record<string, Tool>;

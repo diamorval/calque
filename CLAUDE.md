@@ -1,7 +1,8 @@
 # Calque
 
 Co-editing slides with an AI. Outputs native, editable PPTX that follows each company's charter,
-supplied as a **brand pack**. Diametral is the first pack. Two entry points: **MCP** (Claude Code,
+supplied as a **brand pack**. Designs (social posts, stories, banners, ads, posters, web sections)
+use the same packs: a `DesignSpec` laid out by headless Chromium (docs/adr/0002). Diametral is the first pack. Two entry points: **MCP** (Claude Code,
 Cowork, Claude, using the user's Claude subscription) and **API** (our web app, any model provider).
 
 ## Non-negotiable rules
@@ -12,7 +13,7 @@ Cowork, Claude, using the user's Claude subscription) and **API** (our web app, 
    registry. No provider SDK anywhere else.
 3. **The LLM never writes PPTX.** It produces a `DeckSpec` JSON validated by one JSON Schema
    (Zod in TS, Pydantic in the engine). The engine clones the pack template and draws slides
-   deterministically.
+   deterministically. Designs likewise: a `DesignSpec`, colours and type as pack roles only.
 4. **No brand in code.** Everything company-specific lives in its brand pack (`packs/<id>/`), and
    in each pack `tokens.json` is the source of truth. CI fails if `engine/` or `core/` contains a
    brand name, a hex colour or a font name.
@@ -27,12 +28,13 @@ Cowork, Claude, using the user's Claude subscription) and **API** (our web app, 
 apps/server        TS: MCP server (tools, resources, prompts, MCP Apps UI), REST API, DeckSpec versions, preview /decks/:id
 apps/agent         TS: web-app agent, tool-calling loop
 apps/web           TS: React UI on the Diametral design system (diametral-ds) + Calque UI tokens and cq-* classes from slide-ui, lucide icons, AI Models and Brand packs pages
-engine/            Python: DeckSpec -> PPTX, import, patch by shape_id, lint, PNG render + shape map, template extractor
+engine/            Python: DeckSpec -> PPTX, import, patch by shape_id, lint, PNG render + shape map, template extractor;
+                   DesignSpec -> HTML/CSS in Chromium -> PNG, PDF, SVG, React, Tailwind + design lint (design*.py)
 packages/slide-ui  rendered preview, thumbnails, inspector, comments; the Calque UI tokens and styles
 packages/llm       provider registry, the only access to models
-packages/deckspec  Zod schemas + JSON Schema shared with the engine
+packages/deckspec  Zod schemas + JSON Schema shared with the engine (DeckSpec, DesignSpec)
 packages/design    DTCG tokens -> PPTX theme and DESIGN.md, per pack
-core/              doctrine, compositions, anti-slop, workflows: generic, brand-free
+core/              doctrine, compositions, anti-slop, workflows, design formats: generic, brand-free
 packs/<id>/        one brand pack per company (diametral is the first)
 docs/adr/          architecture decisions
 ```
@@ -46,7 +48,8 @@ validate (lint passes on the template, a test deck renders), publish.
 
 A pack contains `pack.yaml` (manifest), `template.pptx`, `template-map.yaml`, `tokens.json`
 (DTCG, source of truth), generated `DESIGN.md`, optional `voice.md`, `exemplar.md`,
-`storyline.md`, and `fonts/`.
+`storyline.md`, and `fonts/`. Token modes (e.g. `dark`) go in `tokens.json` under
+`$extensions."calque.modes"`.
 
 ## Commands
 
@@ -63,6 +66,7 @@ CALQUE_UPDATE_GOLDEN=1 uv run pytest -m golden   # accept a deliberate visual ch
 uv run python -m calque_engine build deck.json --pack ../packs/<id> --out deck.pptx
 uv run python -m calque_engine lint deck.pptx --pack ../packs/<id> --language fr
 echo '{"op": "build", ...}' | uv run python -m calque_engine call   # the server's JSON interface
+echo '{"op": "design_render", "pack": "../packs/<id>", "design": {...}, "out_dir": "out", "outputs": ["png", "svg"]}' | uv run python -m calque_engine call
 node apps/server/src/main.ts          # MCP (/mcp) + REST (/api) + preview (/decks/:id), see apps/server/README.md
 node apps/server/src/stdio.ts         # MCP over stdio (.mcp.json)
 pnpm --filter @calque/slide-ui build  # deck UI bundle, served as ui:// and /decks/:id
@@ -72,8 +76,10 @@ node apps/web/demo/snapshot.ts        # GitHub Pages demo data; then VITE_DEMO=1
 node apps/server/eval/agent.ts anthropic:<model> openai:<model>  # web agent on real models (needs keys)
 ```
 
-DeckSpec source of truth: `packages/deckspec/src/schema.ts` (Zod). After editing it, run
-`pnpm --filter @calque/deckspec schema` to regenerate the JSON Schema used by the engine.
+DeckSpec source of truth: `packages/deckspec/src/schema.ts` (Zod); DesignSpec:
+`packages/deckspec/src/design.ts`. After editing either, run `pnpm --filter @calque/deckspec schema`
+to regenerate the JSON Schemas used by the engine. Designs need a Chromium: found on PATH or in
+Playwright's cache, or set `CALQUE_CHROMIUM` (`CALQUE_CHROMIUM_NO_SANDBOX=1` in containers).
 
 ## Working method
 

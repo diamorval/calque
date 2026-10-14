@@ -31,6 +31,7 @@ const PROMPTS: Record<string, { workflow: string; title: string }> = {
   "draft-slides": { workflow: "draft", title: "Draft one or a few slides" },
   "edit-slides": { workflow: "edit", title: "Edit an existing deck" },
   "review-deck": { workflow: "review", title: "Review a deck" },
+  "create-design": { workflow: "design", title: "Create a design (social, ad, banner, poster, web)" },
 };
 
 async function coreFiles(): Promise<string[]> {

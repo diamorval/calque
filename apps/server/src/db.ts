@@ -97,6 +97,26 @@ create table if not exists revoked_sessions (
 alter table models add column if not exists label text;
 alter table models add column if not exists options text;
 alter table models add column if not exists headers text;
+-- designs (designs.ts): DesignSpec documents, versioned like decks; owner-only for now
+create table if not exists designs (
+  id uuid primary key,
+  pack_id text not null references packs(id),
+  owner text not null,
+  title text not null,
+  head int not null,
+  pack_version int,
+  created_at timestamptz not null default now()
+);
+create table if not exists design_versions (
+  design_id uuid not null references designs(id),
+  version int not null,
+  spec jsonb not null,
+  note text not null,
+  author text not null,
+  author_name text,
+  created_at timestamptz not null default now(),
+  primary key (design_id, version)
+);
 create table if not exists files (
   id uuid primary key,
   owner text not null,

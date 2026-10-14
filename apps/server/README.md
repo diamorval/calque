@@ -272,6 +272,23 @@ Outputs: `export_pptx` (`/decks/:id/deck.pptx`) and `export_pdf` (`/decks/:id/de
 LibreOffice with the pack's fonts, like the previews; one file per version), `m365_save` to
 OneDrive or SharePoint and `m365_share_teams` to a Teams channel or chat (below).
 
+### Designs (social, ads, banners, posters, web)
+
+Non-slide visuals on the same brand packs (docs/adr/0002). `list_formats` gives the canvas
+presets (`core/formats.yaml`) and, with a `pack_id`, the pack's colour roles, text styles and token
+modes. `create_design` takes a `DesignSpec` (artboards of frames with auto layout, text, images,
+shapes, component instances), lays it out in headless Chromium, lints it and returns each
+artboard's PNG and the `errors` / `warnings` to fix with `patch_design` (`adapt_artboard` copies
+an artboard to another format). `export_design` gives `png` (any `scale`), `pdf`, `svg` (vector)
+or `html` per artboard as URLs under `/designs/:id/<artboard>.<ext>?v=<version>`, or one artboard
+as `react` / `tailwind` code inline. `open_design`, `list_designs` and `restore_design` complete
+the set; the `create-design` prompt is the workflow (`core/workflows/design.md`).
+
+Designs are versioned like decks and owner-only for now (no sharing, comments or approval yet).
+Images are pack files or the caller's own uploads (`"src": "file:<file_id>"`). The server needs a
+Chromium: the image ships Debian's `chromium`; elsewhere one on PATH, Playwright's, or
+`CALQUE_CHROMIUM`.
+
 ### Microsoft 365: OneDrive, SharePoint and Teams
 
 With `CALQUE_M365_CLIENT_ID` set, each user connects their own Microsoft 365 account once, then:

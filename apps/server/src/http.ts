@@ -648,6 +648,35 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
       return fail(c, e);
     }
   });
+  // a design's rendered artboard: <artboard>.png|pdf|svg|html, at ?v= (version) and ?scale=
+  const DESIGN_TYPES: Record<string, string> = { png: "image/png", pdf: "application/pdf", svg: "image/svg+xml", html: "text/html; charset=utf-8" };
+  http.get("/designs/:id/:file", async (c) => {
+    const user = await viewer(c);
+    if (user instanceof Response) return user;
+    const m = /^([A-Za-z0-9_-]+)\.(png|pdf|svg|html)$/.exec(param(c, "file"));
+    if (!m) return c.notFound();
+    const [, artboard, ext] = m as unknown as [string, string, "png" | "pdf" | "svg" | "html"];
+    try {
+      const v = c.req.query("v");
+      const scale = Number(c.req.query("scale") ?? 1);
+      if (!(scale >= 0.25 && scale <= 4)) return c.json({ error: "BadRequest", message: "scale must be 0.25..4" }, 400);
+      const r = await app.designs.render(user, param(c, "id"), v ? Number(v) : undefined, [ext], scale);
+      const path = r.artboards.find((a) => a.id === artboard)?.files[ext];
+      if (!path) return c.notFound();
+      const d = await app.designs.design(user, param(c, "id"));
+      const name = `${d.title.replace(/[^\p{L}\p{N} _-]+/gu, "").trim() || "design"} ${artboard} v${r.version}.${ext}`;
+      return new Response(Readable.toWeb(createReadStream(path)) as ReadableStream, {
+        headers: {
+          "content-type": DESIGN_TYPES[ext] as string,
+          // SVG and HTML open as downloads, offline: they never run in the app's origin
+          ...(ext === "png" ? { "cache-control": "no-cache" } : { "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(name)}` }),
+          "content-security-policy": "default-src 'none'; img-src data:; font-src data:; style-src 'unsafe-inline'",
+        },
+      });
+    } catch (e) {
+      return fail(c, e);
+    }
+  });
   http.get("/decks/:id/deck.pdf", async (c) => {
     const user = await viewer(c);
     if (user instanceof Response) return user;

@@ -3,6 +3,11 @@ on:
   push: { branches: [main] }
   pull_request:
 
+# designs are laid out by the runner's Google Chrome (design_render.py); the page is generated and
+# offline (CSP), and Ubuntu's AppArmor blocks Chrome's user-namespace sandbox on the runners
+env:
+  CALQUE_CHROMIUM_NO_SANDBOX: "1"
+
 jobs:
   ts:
     runs-on: ubuntu-latest
