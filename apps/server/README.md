@@ -284,9 +284,17 @@ or `html` per artboard as URLs under `/designs/:id/<artboard>.<ext>?v=<version>`
 as `react` / `tailwind` code inline. `open_design`, `list_designs` and `restore_design` complete
 the set; the `create-design` prompt is the workflow (`core/workflows/design.md`).
 
-In the web app, **Designs** (`/designs`) lists them and opens one: each artboard as rendered with
-its lint beside it, the colour-mode switch, Adapt to another format, Undo, the file exports and
-the React / Tailwind code. Designs are versioned like decks and owner-only for now (no sharing, comments or approval yet).
+Designs are versioned like decks. Their owner shares them with people and teams
+(`share_design`, `unshare_design`, `list_design_shares`: viewer, commenter or editor, while they
+see the design's pack); comments sit on an artboard or one node of it (`add_design_comment`,
+`list_design_comments`, `resolve_design_comments`, and `resolves` on `patch_design`). No share
+link or approval yet.
+
+In the web app, **Designs** (`/designs`) lists your designs and those shared with you; **New
+design** briefs the agent (the `create-design` workflow) and opens what it makes. A design shows
+each artboard as rendered with its lint and comments beside it; click an element to edit its
+text (a component's prop too) or comment on it. Also there: the colour-mode switch, Adapt to
+another format, Undo, Share, the file exports and the React / Tailwind code.
 Images are pack files or the caller's own uploads (`"src": "file:<file_id>"`). The server needs a
 Chromium: the image ships Debian's `chromium`; elsewhere one on PATH, Playwright's, or
 `CALQUE_CHROMIUM`.

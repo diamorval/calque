@@ -7,7 +7,7 @@ import { runTools, type Message, type ModelConfig, type Step, type ToolDef, type
 export type { Message } from "@calque/llm";
 
 /** The MCP prompts (core/workflows) the agent can run. */
-export type Workflow = "build-presentation" | "storyline" | "draft-slides" | "edit-slides" | "review-deck";
+export type Workflow = "build-presentation" | "storyline" | "draft-slides" | "edit-slides" | "review-deck" | "create-design";
 
 export interface ChatInput {
   client: Client;
@@ -35,6 +35,18 @@ must follow their company's brand pack.
 - Read the pack resources the workflow names with read_resource (pack://<id>/template-map holds the
   role slides and the shape_ids of their slots).
 - Answer in the user's language; the deck language is the DeckSpec's.`;
+
+const DESIGN_ROLE = `You are Calque's design co-editor, inside its web app. You make social posts, stories, banners,
+ads, posters and web sections with the user, on their company's brand pack.
+
+- You never draw pixels: you write a DesignSpec (create_design's input schema is the DesignSpec JSON
+  Schema) and change designs only through the tools. The engine lays them out and checks them.
+- Call list_formats with the pack id first: the formats, and the only colour roles, text styles and
+  modes a DesignSpec may name.
+- Follow the workflow below step by step. When you need the user, stop and ask ONE question, with
+  your recommended answer; a clear brief needs no question.
+- Before delivering, the design must have no \`errors\`: fix each with patch_design.
+- Answer in the user's language; the design's text language is the DesignSpec's.`;
 
 export interface Attachment {
   file_id: string;
@@ -64,15 +76,17 @@ const text = (r: { contents: unknown[] }) =>
 export async function instructions(client: Client, workflow: Workflow, pack_id?: string, deck_id?: string, files: Attachment[] = []): Promise<string> {
   const prompt = await client.getPrompt({ name: workflow, arguments: pack_id ? { pack_id } : {} });
   const steps = prompt.messages.map((m) => (m.content as { text?: string }).text ?? "").join("\n\n");
-  const uris = ["core://doctrine", "core://forms", "core://compositions", "core://anti-slop"];
-  if (pack_id) uris.push(`pack://${pack_id}/DESIGN.md`, `pack://${pack_id}/voice`, `pack://${pack_id}/manifest`);
+  const design = workflow === "create-design";
+  // slides need the doctrine and compositions; designs only the vocabulary rules and the brand
+  const uris = design ? ["core://anti-slop"] : ["core://doctrine", "core://forms", "core://compositions", "core://anti-slop"];
+  if (pack_id) uris.push(`pack://${pack_id}/DESIGN.md`, `pack://${pack_id}/voice`, ...(design ? [] : [`pack://${pack_id}/manifest`]));
   const knowledge = await Promise.all(
     uris.map(async (uri) => `<resource uri="${uri}">\n${text(await client.readResource({ uri }))}\n</resource>`),
   );
   const deck = deck_id
     ? `# Open deck\n\nThe user has deck \`${deck_id}\` open next to this chat: open_deck it before changing it, change it with patch_deck or add_slides (never a new deck), and pass the comment ids a patch answers in \`resolves\`.`
     : "";
-  return [ROLE, "# Workflow", steps, deck, attachments(files), "# Knowledge", ...knowledge].filter(Boolean).join("\n\n");
+  return [design ? DESIGN_ROLE : ROLE, "# Workflow", steps, deck, attachments(files), "# Knowledge", ...knowledge].filter(Boolean).join("\n\n");
 }
 
 /** The server's tools the model may call (not the UI-only ones), plus read_resource. */

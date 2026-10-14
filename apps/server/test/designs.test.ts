@@ -78,12 +78,47 @@ describe("designs", { timeout: ENGINE_TIMEOUT }, () => {
     expect((await http.request(`/designs/${id}/post.exe`)).status).toBe(404);
   });
 
+  it("is shared by role: viewer reads, commenter comments, editor patches and resolves", async () => {
+    const bob = { id: "bob", teams: ["design"] };
+    await expect(run("open_design", app, { design_id: id }, bob)).rejects.toThrow(/no design/);
+    await run("share_design", app, { design_id: id, principal_type: "team", principal: "design", role: "viewer" });
+    const seen = await run("open_design", app, { design_id: id }, bob);
+    expect(seen.role).toBe("viewer");
+    expect((await run("list_designs", app, {}, bob)).designs).toEqual([expect.objectContaining({ design_id: id, role: "viewer", owner: "local" })]);
+    await expect(run("add_design_comment", app, { design_id: id, artboard: "post", text: "x" }, bob)).rejects.toThrow(/commenter access needed/);
+    await expect(run("share_design", app, { design_id: id, principal_type: "user", principal: "eve", role: "viewer" }, bob)).rejects.toThrow(/owner access needed/);
+
+    await run("share_design", app, { design_id: id, principal_type: "user", principal: "bob", role: "commenter" });
+    const { comment } = await run("add_design_comment", app, { design_id: id, artboard: "post", node: "headline", text: "Shorter headline" }, bob);
+    expect(comment).toMatchObject({ artboard: "post", node: "headline", status: "open", author: "bob" });
+    const reply = await run("add_design_comment", app, { design_id: id, parent_id: comment.id, text: "Max 5 words" });
+    expect(reply.comment).toMatchObject({ artboard: "post", node: "headline", parent_id: comment.id });
+    await expect(run("add_design_comment", app, { design_id: id, artboard: "nope", text: "x" }, bob)).rejects.toThrow(/no artboard/);
+    await expect(run("patch_design", app, { design_id: id, ops: [{ op: "set_field", field: "title", value: "x" }] }, bob)).rejects.toThrow(/editor access needed/);
+
+    const open = await run("open_design", app, { design_id: id });
+    expect(open.open_comments).toEqual([expect.objectContaining({ id: comment.id, replies: [expect.objectContaining({ text: "Max 5 words" })] })]);
+
+    await run("share_design", app, { design_id: id, principal_type: "user", principal: "bob", role: "editor" });
+    const p = await run("patch_design", app, { design_id: id, ops: [{ op: "set_node", artboard: "post", node_id: "headline", props: { text: "Decks on brand" } }], resolves: [comment.id] }, bob);
+    expect(p.resolved).toEqual([comment.id]);
+    expect((await run("list_design_comments", app, { design_id: id })).comments).toEqual([]);
+    expect((await run("list_design_shares", app, { design_id: id }, bob)).shares.map((x: Json) => [x.principal, x.role])).toEqual([
+      ["design", "viewer"],
+      ["bob", "editor"],
+    ]);
+    await run("unshare_design", app, { design_id: id, principal_type: "user", principal: "bob" });
+    expect((await run("open_design", app, { design_id: id }, bob)).role).toBe("viewer"); // still through the team
+    await run("unshare_design", app, { design_id: id, principal_type: "team", principal: "design" });
+    await expect(run("open_design", app, { design_id: id }, bob)).rejects.toThrow(/no design/);
+  });
+
   it("is the owner's only, and their uploads only", async () => {
     const other = { id: "other", teams: [] };
     await expect(run("open_design", app, { design_id: id }, other)).rejects.toThrow(/no design/);
     expect((await run("list_designs", app, {}, other)).designs).toEqual([]);
     expect((await run("list_designs", app, {})).designs).toEqual([
-      expect.objectContaining({ design_id: id, title: "Launch campaign", version: 4, cover: "post", artboards: 2 }),
+      expect.objectContaining({ design_id: id, version: 5, cover: "post", artboards: 2, role: "owner" }),
     ]);
     const spec = campaign();
     spec.artboards[0]?.children.push({ type: "image", id: "pic", src: "file:someone-elses", alt: "", width: 10, height: 10 });

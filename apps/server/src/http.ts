@@ -101,7 +101,7 @@ const ChatBody = z.object({
     .min(1)
     .optional()
     .describe("Instead of `messages`: the new user message; the server holds the conversation (the deck's, else your new-deck draft) and adds this turn to it."),
-  workflow: z.enum(["build-presentation", "storyline", "draft-slides", "edit-slides", "review-deck"]).optional(),
+  workflow: z.enum(["build-presentation", "storyline", "draft-slides", "edit-slides", "review-deck", "create-design"]).optional(),
   pack_id: z.string().optional(),
   deck_id: z.string().optional(),
   model: z.string().optional().describe("A configured model id; default: the workspace default."),

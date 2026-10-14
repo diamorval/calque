@@ -876,16 +876,23 @@ export const TOOLS = {
     title: "Patch design",
     description:
       "Edit a design (new version): set_node merges props into a node, replace_node / insert_node / delete_node change the tree, set_artboard / add_artboard / delete_artboard the canvases, adapt_artboard copies an artboard to another format (auto layout reflows, spacing follows the type scale: lint the result), set_component edits a component (every instance follows), set_field the title or mode.",
-    input: z.object({ design_id: designId, ops: z.array(DesignPatchOp).min(1), note: z.string().optional() }),
+    input: z.object({
+      design_id: designId,
+      ops: z.array(DesignPatchOp).min(1),
+      note: z.string().optional(),
+      resolves: z.array(z.number().int()).optional().describe("Comment ids this patch applies (list_design_comments)."),
+    }),
     run: async (app, user, a) => {
       const r = await app.designs.patch(user, a.design_id, a.ops, a.note ?? "patch");
-      return designResult(app, user, r.design_id, r.version, r);
+      const resolved = await app.designs.resolve(user, a.design_id, a.resolves ?? []);
+      return { ...designResult(app, user, r.design_id, r.version, r), resolved };
     },
   }),
 
   open_design: tool({
     title: "Open design",
-    description: "A design's DesignSpec, versions, rendered artboards (PNG URL + node boxes) and lint.",
+    description:
+      "A design's DesignSpec, versions, rendered artboards (PNG URL + node boxes), lint, your role on it (viewer, commenter, editor, owner) and its open comment threads.",
     input: z.object({ design_id: designId, version: version }),
     readOnly: true,
     run: async (app, user, a) => {
@@ -896,8 +903,11 @@ export const TOOLS = {
         title: d.title,
         pack_id: d.pack_id,
         head: d.head,
+        role: d.role,
+        me: user.id,
         versions: await app.designs.versions(a.design_id),
         spec: await app.designs.spec(a.design_id, r.version),
+        open_comments: await app.designs.comments(user, a.design_id, "open"),
       };
     },
   }),
@@ -933,7 +943,7 @@ export const TOOLS = {
 
   list_designs: tool({
     title: "List designs",
-    description: "Your designs, newest first.",
+    description: "Your designs and those shared with you, newest change first, with your role on each.",
     input: z.object({}),
     readOnly: true,
     run: async (app, user) => ({ designs: await app.designs.list(user) }),
@@ -947,6 +957,63 @@ export const TOOLS = {
       const r = await app.designs.restore(user, a.design_id, a.version);
       return designResult(app, user, r.design_id, r.version, r);
     },
+  }),
+
+  share_design: tool({
+    title: "Share design",
+    description: "Owner only. Give a person (user id) or a team (team id) a role on a design: viewer, commenter or editor. Sharing again changes the role.",
+    input: z.object({
+      design_id: designId,
+      principal_type: z.enum(["user", "team"]),
+      principal: z.string().min(1),
+      role: z.enum(["viewer", "commenter", "editor"]),
+    }),
+    run: (app, user, a) => app.designs.share(user, a.design_id, a.principal_type, a.principal, a.role),
+  }),
+
+  unshare_design: tool({
+    title: "Unshare design",
+    description: "Owner only. Remove a person's or a team's access to a design.",
+    input: z.object({ design_id: designId, principal_type: z.enum(["user", "team"]), principal: z.string().min(1) }),
+    run: (app, user, a) => app.designs.unshare(user, a.design_id, a.principal_type, a.principal),
+  }),
+
+  list_design_shares: tool({
+    title: "List design shares",
+    description: "Who has access to a design: its owner, and the people and teams it is shared with, with their role.",
+    input: z.object({ design_id: designId }),
+    readOnly: true,
+    run: (app, user, a) => app.designs.shares(user, a.design_id),
+  }),
+
+  add_design_comment: tool({
+    title: "Comment on a design",
+    description: "Comment on an artboard, or on one node of it (a node id from the spec or the node boxes); with parent_id, reply in that thread.",
+    input: z.object({
+      design_id: designId,
+      artboard: z.string().optional().describe("Required for a new thread."),
+      node: z.string().optional(),
+      text: z.string().min(1).max(4000),
+      parent_id: z.number().int().optional(),
+    }),
+    appOnly: true,
+    run: async (app, user, a) => ({ comment: await app.designs.addComment(user, a.design_id, a) }),
+  }),
+
+  list_design_comments: tool({
+    title: "List design comments",
+    description:
+      "Comment threads on a design, each anchored on an artboard and optionally a node, with status, author and replies (read them: they refine the request). Apply them with patch_design and pass their ids in `resolves`.",
+    input: z.object({ design_id: designId, status: z.enum(["open", "resolved", "all"]).default("open") }),
+    readOnly: true,
+    run: async (app, user, a) => ({ comments: await app.designs.comments(user, a.design_id, a.status === "all" ? undefined : a.status) }),
+  }),
+
+  resolve_design_comments: tool({
+    title: "Resolve design comments",
+    description: "Resolve comment threads by id without editing the design, or reopen them with status 'open'. An editor resolves any thread, a commenter only their own.",
+    input: z.object({ design_id: designId, ids: z.array(z.number().int()).min(1), status: z.enum(["open", "resolved"]).default("resolved") }),
+    run: async (app, user, a) => ({ ids: await app.designs.resolve(user, a.design_id, a.ids, a.status) }),
   }),
 } satisfies Record<string, Tool>;
 

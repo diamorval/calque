@@ -31,6 +31,8 @@ several formats, a carousel) from a brief, laid out by the engine and checked by
 4. **Fix → re-check.** Every `errors` entry must go: shorten text, give it room, switch to a
    role that reads on its background, a larger style. Use `patch_design`. Weigh the
    `warnings`. A second format of the same message is `adapt_artboard`, then fix its lint.
+   Open comments (`open_design`, `list_design_comments`) are requests: apply them with
+   `patch_design` and pass their ids in `resolves`.
 5. **Deliver.** `export_design`: `png` (scale 2 for retina) for social and ads, `pdf` for print,
    `svg` for designers, `react` / `tailwind` for developers (one artboard each).
 

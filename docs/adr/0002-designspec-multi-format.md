@@ -44,8 +44,9 @@ and an export pipeline (raster, vector SVG, code). We took the ideas, not the Ru
 
 - Chromium joins LibreOffice in the server image (about 300 MB). One Chromium start per render
   (about 1 s): measure, then each output.
-- Designs are versioned like decks but are **owner-only** for now: sharing, comments, approval,
-  a design UI in the web app and the MCP Apps UI come next.
+- Designs are versioned like decks, shared with people and teams (viewer, commenter, editor) and
+  commented on an artboard or a node; the web app has a Designs page (brief the agent, edit a
+  text in place, comments, sharing). Not yet: share links, approval, the MCP Apps UI.
 - Not taken from desigma: its desktop editor, GPU renderer, whiteboards and prototyping. Its
   Figma import (`.fig` / REST JSON) is the next candidate, as a CLI the engine calls, to draft a
   pack from a company's Figma design system.

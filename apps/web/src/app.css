@@ -156,6 +156,26 @@
 .cq-board-canvas { display: grid; place-items: center; padding: 16px; background: var(--cq-sunken); border: 1px solid var(--cq-line); border-radius: var(--cq-r); }
 .cq-board-canvas img { display: block; max-width: 100%; max-height: 560px; width: auto; height: auto; outline: 1px solid var(--cq-line); }
 @media (max-width: 760px) { .cq-board-body { grid-template-columns: minmax(0, 1fr); } }
+/* click targets over a rendered artboard (its node boxes, in its own pixels), and its comments */
+.cq-board-frame { position: relative; display: inline-block; max-width: 100%; line-height: 0; }
+.cq-board-hits { position: absolute; inset: 0; width: 100%; height: 100%; }
+.cq-board-hits rect { fill: transparent; stroke: transparent; cursor: pointer; vector-effect: non-scaling-stroke; stroke-width: 1.5px; }
+.cq-board-hits rect:hover, .cq-board-hits rect:focus-visible { stroke: var(--cq-accent); outline: none; }
+.cq-board-hits rect[data-commented] { stroke: var(--cq-accent); stroke-dasharray: 4 3; }
+.cq-board-side { display: grid; gap: 16px; align-content: start; }
+.cq-threads { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.cq-threads > li { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--cq-line); border-radius: var(--cq-r); background: var(--cq-surface); font-size: 13px; }
+.cq-threads p { margin: 0; }
+.cq-thread-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--cq-muted); font-size: 12px; }
+.cq-thread-head strong { color: var(--cq-fg); font-weight: 600; }
+.cq-thread-head button.cq-mono { border: 0; padding: 0; background: none; color: var(--cq-accent); cursor: pointer; font-size: 12px; }
+.cq-thread-head [data-slot="button"] { margin-left: auto; }
+.cq-thread-reply { padding-left: 10px; border-left: 2px solid var(--cq-line); font-size: 13px; }
+.cq-composer-line { display: flex; gap: 8px; }
+.cq-composer-line [data-slot="input"] { flex: 1; min-width: 0; }
+.cq-share-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.cq-share-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 12px; font-size: 13px; }
+.cq-share-list li > span:nth-child(2) { color: var(--cq-muted); }
 .cq-deck-filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .cq-deck-search { position: relative; flex: 1 1 260px; max-width: 480px; }
 .cq-deck-search svg { position: absolute; left: 10px; top: 50%; width: 16px; height: 16px; transform: translateY(-50%); color: var(--cq-muted); pointer-events: none; }

@@ -7,6 +7,7 @@ import { CommandPalette } from "./components/CommandPalette.tsx";
 import { go, PAGES, usePath } from "./nav.ts";
 import { Decks } from "./pages/Decks.tsx";
 import { DesignEditor, Designs } from "./pages/Designs.tsx";
+import { NewDesign } from "./pages/NewDesign.tsx";
 import { Editor } from "./pages/Editor.tsx";
 import { Login } from "./pages/Login.tsx";
 import { Models } from "./pages/Models.tsx";
@@ -22,6 +23,7 @@ function page(path: string, me: Me) {
   if (deck) return <Editor id={deck} />;
   if (path === "/new") return <NewDeck />;
   if (path === "/designs") return <Designs />;
+  if (path === "/designs/new") return <NewDesign />;
   const design = path.match(/^\/designs\/([^/]+)$/)?.[1];
   if (design) return <DesignEditor id={design} />;
   if (path === "/settings/models") return <Models me={me} />;

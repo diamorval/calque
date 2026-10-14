@@ -97,7 +97,7 @@ create table if not exists revoked_sessions (
 alter table models add column if not exists label text;
 alter table models add column if not exists options text;
 alter table models add column if not exists headers text;
--- designs (designs.ts): DesignSpec documents, versioned like decks; owner-only for now
+-- designs (designs.ts): DesignSpec documents, versioned like decks, shared with people and teams
 create table if not exists designs (
   id uuid primary key,
   pack_id text not null references packs(id),
@@ -116,6 +116,28 @@ create table if not exists design_versions (
   author_name text,
   created_at timestamptz not null default now(),
   primary key (design_id, version)
+);
+create table if not exists design_shares (
+  design_id uuid not null references designs(id),
+  principal_type text not null check (principal_type in ('user', 'team')),
+  principal text not null,
+  role text not null check (role in ('viewer', 'commenter', 'editor')),
+  granted_by text not null,
+  created_at timestamptz not null default now(),
+  primary key (design_id, principal_type, principal)
+);
+create table if not exists design_comments (
+  id serial primary key,
+  design_id uuid not null references designs(id),
+  version int not null,
+  artboard text not null,
+  node text,
+  text text not null,
+  author text not null,
+  author_name text,
+  status text not null default 'open' check (status in ('open', 'resolved')),
+  parent_id int references design_comments(id),
+  created_at timestamptz not null default now()
 );
 create table if not exists files (
   id uuid primary key,

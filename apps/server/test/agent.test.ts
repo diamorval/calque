@@ -1,4 +1,7 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { REPO } from "../src/engine.ts";
 import { createHttp } from "../src/http.ts";
 import { Forbidden } from "../src/models.ts";
 import { TOOLS, type App } from "../src/tools.ts";
@@ -134,6 +137,24 @@ describe("web agent", { timeout: ENGINE_TIMEOUT }, () => {
     expect(tools).not.toContain("add_comment"); // UI-only
     expect(JSON.stringify(fake.requests.at(-3))).toContain("slots"); // the template map came back
     expect(r.json.messages.filter((m: Json) => m.role === "tool")).toHaveLength(3);
+  });
+
+  it("creates a design from a brief with the create-design workflow", async () => {
+    const design = JSON.parse(readFileSync(join(REPO, "packages/deckspec/fixtures/design/valid/campaign.json"), "utf8"));
+    script = (b) => {
+      const steps = toolsCalled(b);
+      if (steps === 0) return { tool: { name: "list_formats", args: { pack_id: "acme-test" } } };
+      if (steps === 1) return { tool: { name: "create_design", args: { design } } };
+      return { content: `Created ${lastResult(b).design_id} with ${lastResult(b).errors.length} error(s).` };
+    };
+    const r = await api("/api/agent/chat", { pack_id: "acme-test", workflow: "create-design", message: "A launch post and a banner." });
+    expect(r.status).toBe(200);
+    expect(r.json.text).toMatch(/^Created [0-9a-f-]{36} with \d error\(s\)\.$/);
+    const system = (fake.requests.at(-3) as Json).messages[0].content as string;
+    expect(system).toContain("design co-editor");
+    expect(system).toContain("# Workflow: design");
+    expect(system).not.toContain('<resource uri="core://doctrine">');
+    await api("/api/tools/clear_chat", {});
   });
 
   it("streams a failed tool call with its error, and the model gets the error back", async () => {
