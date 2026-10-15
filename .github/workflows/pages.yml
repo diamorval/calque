@@ -36,14 +36,6 @@ jobs:
       - run: pnpm --filter @calque/web exec playwright install --with-deps chromium
       - run: echo "CALQUE_CHROMIUM=$(node --input-type=module -e "import { chromium } from '@playwright/test'; console.log(chromium.executablePath())")" >> "$GITHUB_ENV"
         working-directory: apps/web
-      - name: DEBUG design render
-        working-directory: engine
-        env: { CALQUE_CHROMIUM_NO_SANDBOX: "1" }
-        run: |
-          "$CALQUE_CHROMIUM" --version || true; /usr/bin/chromium --version || true; nproc; free -m
-          uv run python ../.ci-debug/design.py acme-test
-          uv run python ../.ci-debug/design.py diametral
-          CALQUE_CHROMIUM=/usr/bin/chromium uv run python ../.ci-debug/design.py diametral
       - run: node demo/snapshot.ts
         working-directory: apps/web
         env: { CALQUE_CHROMIUM_NO_SANDBOX: "1" }
