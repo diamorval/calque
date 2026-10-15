@@ -393,10 +393,12 @@ export async function startDemo() {
             },
           },
         ]);
-      // a new design: open the one the real engine built earlier
+      // a new design: open one the real engine built earlier, if the snapshot has one
       if (b.workflow === "create-design") {
         const design = decks.find((d) => d.medium === "design") ?? {};
-        const text = `This is the demo: no model runs here, so here is a design the engine built earlier, "${design.title}". Run Calque locally to make one from your brief.`;
+        const text = design.id
+          ? `This is the demo: no model runs here, so here is a design the engine built earlier, "${design.title}". Run Calque locally to make one from your brief.`
+          : "This is the demo: designs are not part of it. Run Calque locally to make one from your brief.";
         return stream([
           { step: { tools: [{ name: "list_formats" }] } },
           { step: { tools: [{ name: "create_design" }] } },

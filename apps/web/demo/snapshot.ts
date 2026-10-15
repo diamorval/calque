@@ -1,7 +1,7 @@
-// The GitHub Pages demo's data: the real server and engine build the Diametral golden decks and a
-// design, then every response the web app reads is saved as a static file (demo/out). src/demo.ts
-// replays them. Usage: node demo/snapshot.ts (from apps/web; needs the engine's uv env,
-// LibreOffice, pdftoppm, and a Chromium for the design).
+// The GitHub Pages demo's data: the real server and engine build the Diametral golden decks, then
+// every response the web app reads is saved as a static file (demo/out). src/demo.ts replays them.
+// No design: Chromium's cold start on the GitHub runners is too erratic to lay one out reliably.
+// Usage: node demo/snapshot.ts (from apps/web; needs the engine's uv env, LibreOffice, pdftoppm).
 import {
   mkdirSync,
   mkdtempSync,
@@ -96,60 +96,6 @@ for (const name of DECKS) {
   await save(download_url);
   await save(pdf.download_url);
   console.log(`${name}: ${opened.slides.length} slides`);
-}
-// a design on the same pack: a campaign of two artboards, a history, a comment on a node, every export
-{
-  const design = JSON.parse(
-    readFileSync(
-      join(REPO, "packages/deckspec/fixtures/design/valid/campaign.json"),
-      "utf8",
-    ),
-  );
-  const { design_id } = await call("POST", "/api/tools/create_design", {
-    design: { ...design, pack_id: "diametral" },
-  });
-  await call("POST", "/api/tools/patch_design", {
-    design_id,
-    ops: [
-      {
-        op: "set_node",
-        artboard: "post",
-        node_id: "headline",
-        props: { text: "Decks that follow the charter" },
-      },
-    ],
-    note: "Shorter headline",
-  });
-  await call("POST", "/api/tools/add_comment", {
-    deck_id: design_id,
-    slide_id: "post",
-    node: "sub",
-    text: "Say who it is for",
-  });
-  const opened = await call("POST", "/api/tools/open_design", { design_id });
-  await call("POST", "/api/tools/list_formats", { pack_id: "diametral" });
-  // the file exports (any scale or reason answers from these in src/demo.ts), and each artboard's code
-  for (const format of ["png", "svg", "html", "pdf"]) {
-    const r = (await call("POST", "/api/tools/export_design", {
-      design_id,
-      format,
-      reason: "demo",
-    })) as {
-      files: { url: string }[];
-      pdf_url?: string;
-    };
-    api[`export_design ${format}`] = r;
-    for (const f of r.files) await save(f.url);
-    if (r.pdf_url) await save(r.pdf_url);
-  }
-  for (const a of opened.artboards as { id: string }[])
-    for (const format of ["html", "react", "tailwind"])
-      await call("POST", "/api/tools/export_design", {
-        design_id,
-        format,
-        artboard: a.id,
-      });
-  console.log(`design: ${opened.artboards.length} artboards`);
 }
 await call("GET", "/api/decks");
 await call("POST", "/api/tools/list_packs", {});
