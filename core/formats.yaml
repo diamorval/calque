@@ -1,0 +1,20 @@
+# Canvas presets a DesignSpec artboard names in `format` (packages/deckspec/src/design.ts).
+# Generic: sizes come from the channels, never from a brand. Sizes are CSS pixels.
+#   scale    multiplies the pack's slide type scale (role.size.*, in pt) for this canvas
+#   min_text smallest text, in px, a reader can still read on this canvas (design lint)
+#   safe     margin, in px, kept clear of text (crops, UI overlays): one value, or [top and bottom, sides]
+formats:
+  slide_16_9:   { label: "Slide 16:9", kind: slide, width: 1920, height: 1080, scale: 2.0, min_text: 18, safe: 64 }
+  social_square: { label: "Social post 1:1", kind: social, width: 1080, height: 1080, scale: 1.6, min_text: 24, safe: 64 }
+  social_portrait: { label: "Social post 4:5", kind: social, width: 1080, height: 1350, scale: 1.6, min_text: 24, safe: 64 }
+  story:        { label: "Story / reel 9:16", kind: social, width: 1080, height: 1920, scale: 1.8, min_text: 28, safe: [220, 64] }
+  linkedin_banner: { label: "Profile banner", kind: banner, width: 1584, height: 396, scale: 1.2, min_text: 18, safe: 40 }
+  leaderboard:  { label: "Display ad 728x90", kind: ad, width: 728, height: 90, scale: 0.9, min_text: 11, safe: 4 }
+  medium_rectangle: { label: "Display ad 300x250", kind: ad, width: 300, height: 250, scale: 0.8, min_text: 11, safe: 8 }
+  skyscraper:   { label: "Display ad 160x600", kind: ad, width: 160, height: 600, scale: 0.8, min_text: 11, safe: 6 }
+  email_header: { label: "Email header", kind: banner, width: 600, height: 200, scale: 0.9, min_text: 13, safe: 16 }
+  web_hero:     { label: "Web hero", kind: web, width: 1440, height: 800, scale: 1.4, min_text: 14, safe: 80 }
+  web_section:  { label: "Web section", kind: web, width: 1440, height: 900, scale: 1.2, min_text: 14, safe: 80 }
+  poster_a4:    { label: "Poster A4 portrait", kind: print, width: 794, height: 1123, scale: 1.2, min_text: 12, safe: 38 }
+  poster_a3:    { label: "Poster A3 portrait", kind: print, width: 1123, height: 1587, scale: 1.7, min_text: 14, safe: 54 }
+  flyer_a5:     { label: "Flyer A5 portrait", kind: print, width: 559, height: 794, scale: 0.9, min_text: 11, safe: 28 }

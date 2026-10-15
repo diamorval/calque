@@ -4,10 +4,10 @@ import { DialogFooter } from "diametral-ds/dialog";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "diametral-ds/empty";
 import { Input } from "diametral-ds/input";
 import { ToggleGroup, ToggleGroupItem } from "diametral-ds/toggle-group";
-import { Cloud, FileUp, LayoutGrid, Pencil, Plus, Search, Table2, Trash2 } from "lucide-react";
+import { Cloud, FileUp, LayoutGrid, Pencil, Plus, Search, Shapes, Table2, Trash2 } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { api, fileArg, tool, type Pack } from "../api.ts";
-import { DeckActionButtons, DeckTable, ROLE, type DeckActions, type DeckRow } from "../components/DeckTable.tsx";
+import { DeckActionButtons, DeckTable, docHref, ROLE, type DeckActions, type DeckRow } from "../components/DeckTable.tsx";
 import { M365Picker, useM365 } from "../components/M365.tsx";
 import { t } from "../i18n.ts";
 import { go, navigate } from "../nav.ts";
@@ -16,10 +16,14 @@ import { ago, Dialog, Field, FileDrop, PageHead, Spinner } from "../ui.tsx";
 function DeckCard({ d, ...actions }: { d: DeckRow } & DeckActions) {
   return (
     <li className="cq-deck-item">
-      <a className="cq-deck-card" href={`/d/${d.id}`} onClick={(e) => go(e, `/d/${d.id}`)}>
-        <span className="cq-deck-cover">
-          <img src={`${import.meta.env.BASE_URL}decks/${d.id}/slides/1.png?v=${d.head}`} alt="" loading="lazy" />
-        </span>
+      <a className="cq-deck-card" href={docHref(d)} onClick={(e) => go(e, docHref(d))}>
+        {d.medium === "design" ? (
+          <span className="cq-deck-cover cq-design-cover">{d.cover && <img src={`${import.meta.env.BASE_URL}designs/${d.id}/${d.cover}.png?v=${d.head}`} alt="" loading="lazy" />}</span>
+        ) : (
+          <span className="cq-deck-cover">
+            <img src={`${import.meta.env.BASE_URL}decks/${d.id}/slides/1.png?v=${d.head}`} alt="" loading="lazy" />
+          </span>
+        )}
         <span className="cq-deck-info">
           <strong>{d.title}</strong>
           <span>
@@ -40,16 +44,21 @@ function DeckCard({ d, ...actions }: { d: DeckRow } & DeckActions) {
 }
 
 type View = "grid" | "table";
-const VIEW_KEY = "cq-decks-view";
-function savedView(): View {
+const viewKey = (medium: Medium) => (medium === "design" ? "cq-designs-view" : "cq-decks-view");
+type Medium = "deck" | "design";
+function savedView(medium: Medium): View {
   try {
-    return localStorage.getItem(VIEW_KEY) === "table" ? "table" : "grid";
+    return localStorage.getItem(viewKey(medium)) === "table" ? "table" : "grid";
   } catch {
     return "grid";
   }
 }
 
-export function Decks() {
+/** The decks page, and with medium "design" the designs page: the same list, search, filters,
+table and actions over the one document store. */
+export function Decks({ medium = "deck" }: { medium?: Medium } = {}) {
+  const design = medium === "design";
+  const newHref = design ? "/designs/new" : "/new";
   const [all, setAll] = useState<DeckRow[] | null>(null);
   const [packs, setPacks] = useState<Pack[]>([]);
   const [query, setQuery] = useState("");
@@ -59,19 +68,19 @@ export function Decks() {
   const [deleting, setDeleting] = useState<DeckRow | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [view, setView] = useState<View>(savedView);
+  const [view, setView] = useState<View>(() => savedView(medium));
   // one chip at a time: "role:<role>" or "kind:<kind>"; "" is every deck
   const [chip, setChip] = useState("");
   const pickView = (v: View) => {
     setView(v);
     try {
-      localStorage.setItem(VIEW_KEY, v);
+      localStorage.setItem(viewKey(medium), v);
     } catch {
       // storage blocked: the choice lasts for this page only
     }
   };
   const load = () => {
-    const q = new URLSearchParams();
+    const q = new URLSearchParams({ medium });
     if (query.trim()) q.set("q", query.trim());
     if (packId) q.set("pack_id", packId);
     return api<{ decks: DeckRow[] }>(`/api/decks${q.size ? `?${q}` : ""}`).then((r) => setAll(r.decks));
@@ -80,7 +89,7 @@ export function Decks() {
     // the search runs on the server (titles and slide text): wait for the typing to pause
     const t = setTimeout(() => void load(), query ? 250 : 0);
     return () => clearTimeout(t);
-  }, [query, packId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [query, packId, medium]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     tool<{ packs: Pack[] }>("list_packs").then((r) => setPacks(r.packs), () => setPacks([]));
   }, []);
@@ -112,7 +121,7 @@ export function Decks() {
   };
   // the copy opens in the editor, as a new deck of the caller's
   const duplicate = (d: DeckRow) =>
-    run(t("Duplicating {title}", { title: d.title }), async () => navigate(`/d/${(await tool<{ deck_id: string }>("duplicate_deck", { deck_id: d.id })).deck_id}`));
+    run(t("Duplicating {title}", { title: d.title }), async () => navigate(docHref({ id: (await tool<{ deck_id: string }>("duplicate_deck", { deck_id: d.id })).deck_id, medium })));
   const actions = (d: DeckRow): DeckActions => ({
     onRename: d.role === "owner" || d.role === "editor" ? () => setRenaming(d) : undefined,
     onDuplicate: () => void duplicate(d),
@@ -134,19 +143,30 @@ export function Decks() {
 
   return (
     <div className="cq-page">
-      <PageHead title={t("Decks")} description={t("Every deck you co-edit with the agent, newest first.")}>
-        <Button variant="outline" onClick={() => setImporting(true)}>
-          <FileUp /> {t("Import PPTX")}
-        </Button>
-        <Button onClick={() => navigate("/new")}>
-          <Plus /> {t("New deck")}
+      <PageHead
+        title={design ? t("Designs") : t("Decks")}
+        description={design ? t("Social posts, stories, banners, ads, posters and web sections on your brand packs.") : t("Every deck you co-edit with the agent, newest first.")}
+      >
+        {!design && (
+          <Button variant="outline" onClick={() => setImporting(true)}>
+            <FileUp /> {t("Import PPTX")}
+          </Button>
+        )}
+        <Button onClick={() => navigate(newHref)}>
+          <Plus /> {design ? t("New design") : t("New deck")}
         </Button>
       </PageHead>
       {(filtered || !!all?.length) && (
         <div className="cq-deck-filters" role="search">
           <span className="cq-deck-search">
             <Search aria-hidden />
-            <Input type="search" aria-label={t("Search decks")} placeholder={t("Search by title, client or slide text")} value={query} onChange={(e) => setQuery(e.target.value)} />
+            <Input
+              type="search"
+              aria-label={design ? t("Search designs") : t("Search decks")}
+              placeholder={design ? t("Search by title, client or text") : t("Search by title, client or slide text")}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
           </span>
           <select className="cq-select" aria-label={t("Brand pack filter")} value={packId} onChange={(e) => setPackId(e.target.value)}>
             <option value="">{t("All brand packs")}</option>
@@ -165,7 +185,7 @@ export function Decks() {
             </ToggleGroupItem>
           </ToggleGroup>
           {chips.size > 1 && (
-            <div className="flex basis-full flex-wrap gap-2" role="group" aria-label={t("Filter decks")}>
+            <div className="flex basis-full flex-wrap gap-2" role="group" aria-label={design ? t("Filter designs") : t("Filter decks")}>
               {[["", { label: t("All"), n: all?.length ?? 0 }] as const, ...chips].map(([key, c]) => (
                 <Button key={key} size="sm" variant={active === key ? "default" : "outline"} aria-pressed={active === key} onClick={() => setChip(key)}>
                   {c.label} <span className="tabular-nums opacity-70">{c.n}</span>
@@ -181,14 +201,14 @@ export function Decks() {
         </Alert>
       )}
       {busy && <Spinner label={busy} />}
-      {!decks && <Spinner label={t("Loading decks")} />}
+      {!decks && <Spinner label={design ? t("Loading designs") : t("Loading decks")} />}
       {filtered && rows?.length === 0 && (
         <Empty className="border">
           <EmptyHeader>
             <EmptyMedia variant="icon">
               <Search />
             </EmptyMedia>
-            <EmptyTitle>{t("No deck matches")}</EmptyTitle>
+            <EmptyTitle>{design ? t("No design matches") : t("No deck matches")}</EmptyTitle>
             <EmptyDescription>{t("Try other words, or another brand pack.")}</EmptyDescription>
           </EmptyHeader>
         </Empty>
@@ -196,18 +216,22 @@ export function Decks() {
       {!filtered && (view === "grid" ? decks : rows)?.length === 0 && (
         <Empty className="border">
           <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <LayoutGrid />
-            </EmptyMedia>
-            <EmptyTitle>{t("No deck yet")}</EmptyTitle>
-            <EmptyDescription>{t("Describe the deck you need; the agent builds it on your company's brand pack.")}</EmptyDescription>
+            <EmptyMedia variant="icon">{design ? <Shapes /> : <LayoutGrid />}</EmptyMedia>
+            <EmptyTitle>{design ? t("No design yet") : t("No deck yet")}</EmptyTitle>
+            <EmptyDescription>
+              {design
+                ? t("Brief the agent with New design: it lays the design out on your brand pack, checks it and saves it here.")
+                : t("Describe the deck you need; the agent builds it on your company's brand pack.")}
+            </EmptyDescription>
           </EmptyHeader>
           <EmptyContent>
-            <Button variant="outline" onClick={() => setImporting(true)}>
-              <FileUp /> {t("Import PPTX")}
-            </Button>
-            <Button onClick={() => navigate("/new")}>
-              <Plus /> {t("New deck")}
+            {!design && (
+              <Button variant="outline" onClick={() => setImporting(true)}>
+                <FileUp /> {t("Import PPTX")}
+              </Button>
+            )}
+            <Button onClick={() => navigate(newHref)}>
+              <Plus /> {design ? t("New design") : t("New deck")}
             </Button>
           </EmptyContent>
         </Empty>
@@ -217,7 +241,7 @@ export function Decks() {
         <ul className="cq-deck-grid">
           {!filtered && (
             <li>
-              <a className="cq-deck-card cq-deck-new" href="/new" onClick={(e) => go(e, "/new")}>
+              <a className="cq-deck-card cq-deck-new" href={newHref} onClick={(e) => go(e, newHref)}>
                 <Plus />
                 <span>{t("Start from a brief")}</span>
               </a>

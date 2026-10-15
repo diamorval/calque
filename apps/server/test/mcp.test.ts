@@ -47,6 +47,7 @@ describe("MCP server over Streamable HTTP", { timeout: ENGINE_TIMEOUT }, () => {
         "image_library_list", "image_library_add", "image_library_review",
         "m365_list", "m365_import", "m365_save", "m365_teams", "m365_share_teams",
         "update_pack_release",
+        "list_formats", "create_design", "patch_design", "open_design", "export_design",
       ].sort(),
     );
     const open = tools.find((t) => t.name === "open_deck");
@@ -54,7 +55,7 @@ describe("MCP server over Streamable HTTP", { timeout: ENGINE_TIMEOUT }, () => {
     expect(tools.find((t) => t.name === "add_comment")?._meta?.ui).toMatchObject({ visibility: ["app"] });
 
     const prompts = (await client.listPrompts()).prompts.map((p) => p.name).sort();
-    expect(prompts).toEqual(["build-presentation", "draft-slides", "edit-slides", "review-deck", "storyline"]);
+    expect(prompts).toEqual(["build-presentation", "create-design", "draft-slides", "edit-slides", "review-deck", "storyline"]);
     const prompt = await client.getPrompt({ name: "review-deck", arguments: { pack_id: "acme-test" } });
     const text = (prompt.messages[0]?.content as { text: string }).text;
     expect(text).toContain("# Workflow: review");

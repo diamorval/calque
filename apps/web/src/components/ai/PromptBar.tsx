@@ -84,6 +84,8 @@ export function PromptBar(props: {
   disabled: boolean;
   workflow: Workflow | undefined;
   onWorkflow: (w: Workflow | undefined) => void;
+  /** false: the conversation runs one workflow (a new design), no "/" menu */
+  workflows?: boolean;
   /** the deck's slide count, for "@" */
   slides?: number | undefined;
   attached: Attached[];
@@ -112,7 +114,7 @@ export function PromptBar(props: {
   // the open menu, filtered by what follows its "/" or "@"
   const tok = dismissed ? null : token(value, caret);
   const items: { key: string; label: string; pick: () => string }[] =
-    tok?.kind === "/"
+    tok?.kind === "/" && props.workflows !== false
       ? (Object.keys(WORKFLOWS) as Workflow[])
           .filter((w) => w.includes(tok.query.toLowerCase()) || t(WORKFLOWS[w]).toLowerCase().includes(tok.query.toLowerCase()))
           .map((w) => ({ key: w, label: t(WORKFLOWS[w]), pick: () => (props.onWorkflow(w), "") }))
@@ -275,7 +277,13 @@ export function PromptBar(props: {
         )}
         <span className="cq-spacer" />
         <span className="cq-hint cq-keys">
-          <Kbd>↵</Kbd> {t("send")} · <Kbd>⇧↵</Kbd> {t("new line")} · <Kbd>/</Kbd> {t("workflow")}
+          <Kbd>↵</Kbd> {t("send")} · <Kbd>⇧↵</Kbd> {t("new line")}
+          {props.workflows !== false && (
+            <>
+              {" "}
+              · <Kbd>/</Kbd> {t("workflow")}
+            </>
+          )}
           {!!props.slides && (
             <>
               {" "}

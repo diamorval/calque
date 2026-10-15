@@ -1,6 +1,6 @@
 // The e2e stack: a fake OIDC issuer, a fake OpenAI-compatible model, and the real server (engine,
 // PGlite in memory) serving the built web app. Alice is in sales + calque-admins, Bob in ops.
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { serve } from "@hono/node-server";
@@ -12,6 +12,8 @@ import { acmeDeck } from "../../server/test/helpers.ts";
 
 type Json = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
+const campaign = (): Json => JSON.parse(readFileSync(new URL("../../../packages/deckspec/fixtures/design/valid/campaign.json", import.meta.url), "utf8"));
+
 const port = Number(process.argv[2] ?? 4319);
 const publicUrl = `http://localhost:${port}`;
 
@@ -20,6 +22,16 @@ function script(b: Json) {
   const system = String(b.messages[0]?.content ?? "");
   const ask = String(b.messages.findLast((m: Json) => m.role === "user")?.content ?? "");
   const steps = toolsCalled(b);
+  if (ask.startsWith("Apply every open comment on design")) {
+    const deck_id = ask.match(/design (\S+)\./)?.[1];
+    if (steps === 0) return { tool: { name: "list_comments", args: { deck_id } } };
+    if (steps === 1) {
+      const comments = (lastResult(b).comments as Json[]).filter((c) => c.node);
+      const ops = comments.map((c) => ({ op: "set_node", artboard: c.slide_id, node_id: c.node, props: { text: c.text } }));
+      return { tool: { name: "patch_design", args: { design_id: deck_id, ops, resolves: comments.map((c) => c.id) } } };
+    }
+    return { content: `Applied the comments: ${(lastResult(b).errors as Json[]).length} error.` };
+  }
   if (ask.startsWith("Apply every open comment")) {
     const deck_id = ask.match(/deck (\S+)\./)?.[1];
     if (steps === 0) return { tool: { name: "list_comments", args: { deck_id } } };
@@ -40,6 +52,11 @@ function script(b: Json) {
     return { content: "Added 1 slide before the closing slide." };
   }
   const pack = system.match(/Active pack: `([^`]+)`/)?.[1];
+  // the create-design workflow: the campaign fixture on the active pack
+  if (pack && system.includes("design co-editor")) {
+    if (steps === 0) return { tool: { name: "create_design", args: { design: { ...campaign(), pack_id: pack } } } };
+    return { content: `Design ready on ${pack}: ${lastResult(b).errors.length} error.` };
+  }
   if (!pack || system.includes("# Open deck")) return { content: "Noted." };
   if (steps === 0) return { tool: { name: "create_deck", args: { deck: { ...acmeDeck(), pack_id: pack } } } };
   if (steps === 1) return { tool: { name: "lint_deck", args: { deck_id: lastResult(b).deck_id } } };

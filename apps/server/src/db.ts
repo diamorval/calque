@@ -65,6 +65,10 @@ create table if not exists comments (
 -- review (review.ts): comment threads, authors' display names, opt-in approval status
 alter table comments add column if not exists parent_id int references comments(id);
 alter table comments add column if not exists author_name text;
+-- designs (designs.ts) are documents of this store too: medium says which; a design's comment sits
+-- on an artboard (slide_id) and optionally one node of it
+alter table decks add column if not exists medium text not null default 'deck' check (medium in ('deck', 'design'));
+alter table comments add column if not exists node text;
 alter table deck_versions add column if not exists author_name text;
 alter table decks add column if not exists approval text not null default 'draft' check (approval in ('draft', 'in_review', 'approved'));
 create table if not exists models (

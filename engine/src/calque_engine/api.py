@@ -11,6 +11,7 @@ from dataclasses import asdict
 from typing import Any
 
 from .deckspec import DeckSpecError, Issue, validate
+from .design import DesignPatchError, DesignSpecError
 from .pack import PACK_DIRS, PackError, describe, load_pack
 from .patch import PatchError
 
@@ -195,6 +196,70 @@ def op_text(path: str, name: str, limit: int = 100_000) -> dict[str, Any]:
     return {"text": text[:limit], "truncated": len(text) > limit}
 
 
+def op_design_formats(pack: str | None = None) -> dict[str, Any]:
+    """The canvas presets (core/formats.yaml); with `pack`, its colour roles, text styles and
+    token modes: everything a DesignSpec may name."""
+    from . import tokens as tk
+    from .design import color_roles, formats
+
+    out: dict[str, Any] = {"formats": [asdict(f) for f in formats().values()]}
+    if pack:
+        p = load_pack(pack)
+        out["color_roles"] = sorted(color_roles(p))
+        out["text_styles"] = sorted(
+            k.removeprefix("role.size.") for k in p.tokens if k.startswith("role.size.")
+        )
+        out["modes"] = sorted(tk.modes(p.raw_tokens))
+    return out
+
+
+def op_design_validate(pack: str, design: dict[str, Any]) -> dict[str, Any]:
+    from .design import validate as validate_design
+
+    _, warnings = validate_design(design, load_pack(pack))
+    return {"warnings": [asdict(w) for w in warnings]}
+
+
+def op_design_patch(pack: str, design: dict[str, Any], ops: list[dict[str, Any]]) -> dict[str, Any]:
+    from .design import patch
+
+    out, warnings = patch(design, ops, load_pack(pack))
+    return {"design": out, "warnings": [asdict(w) for w in warnings]}
+
+
+def op_design_render(
+    pack: str,
+    design: dict[str, Any],
+    out_dir: str,
+    artboards: list[str] | None = None,
+    outputs: list[str] | None = None,
+    scale: float = 1.0,
+    image_roots: list[str] | None = None,
+    file_root: str | None = None,
+) -> dict[str, Any]:
+    """Each artboard laid out by Chromium: files (png, pdf, svg, html), node boxes, lint.
+    `image_roots`: folders for relative image paths (default: the pack); `file_root`: where
+    `file:<id>` uploads are."""
+    from .design_render import render
+
+    p = load_pack(pack)
+    return render(design, p, out_dir, artboards, outputs or ["png"], scale, image_roots, file_root)
+
+
+def op_design_code(
+    pack: str,
+    design: dict[str, Any],
+    artboard: str,
+    target: str,
+    image_roots: list[str] | None = None,
+    file_root: str | None = None,
+) -> dict[str, Any]:
+    """One artboard as code: target html, react or tailwind."""
+    from .design_render import export_code
+
+    return export_code(design, load_pack(pack), artboard, target, image_roots, file_root)
+
+
 OPS = {
     "validate_pack": op_validate_pack,
     "describe_pack": op_describe_pack,
@@ -210,6 +275,11 @@ OPS = {
     "render": op_render,
     "pdf": op_pdf,
     "text": op_text,
+    "design_formats": op_design_formats,
+    "design_validate": op_design_validate,
+    "design_patch": op_design_patch,
+    "design_render": op_design_render,
+    "design_code": op_design_code,
 }
 
 
@@ -237,7 +307,10 @@ def call(request: dict[str, Any]) -> dict[str, Any]:
         }
     except PackError as e:
         return {"ok": False, "error": "invalid_pack", "message": str(e), "issues": e.problems}
-    except PatchError as e:
+    except DesignSpecError as e:
+        issues = [asdict(i) for i in e.issues]
+        return {"ok": False, "error": "invalid_design", "message": str(e), "issues": issues}
+    except (PatchError, DesignPatchError) as e:
         return {"ok": False, "error": "invalid_patch", "message": str(e)}
     except TypeError as e:
         return {"ok": False, "error": "bad_request", "message": str(e)}

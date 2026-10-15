@@ -27,6 +27,7 @@ const LINTS_PER_CALL = 10;
 type Row = {
   id: string;
   title: string;
+  medium: "deck" | "design";
   owner: string;
   owner_teams: string[];
   head: number;
@@ -58,7 +59,7 @@ export async function compliance(db: Db, decks: Decks, user: User, packId?: stri
   for (const p of packs) {
     const q = () =>
       db.query<Row>(
-        `select d.id, d.title, d.owner, d.owner_teams, d.head, d.approval, v.created_at as updated_at, l.errors, l.warns
+        `select d.id, d.title, d.medium, d.owner, d.owner_teams, d.head, d.approval, v.created_at as updated_at, l.errors, l.warns
          from decks d join deck_versions v on v.deck_id = d.id and v.version = d.head
          left join deck_lint l on l.deck_id = d.id and l.version = d.head
          where d.pack_id = $1 order by v.created_at desc`,
@@ -103,6 +104,7 @@ export async function compliance(db: Db, decks: Decks, user: User, packId?: stri
       decks: rows.map((r) => ({
         id: r.id,
         title: r.title,
+        medium: r.medium,
         owner: r.owner,
         owner_name: names.get(r.owner) ?? null,
         teams: r.owner_teams,

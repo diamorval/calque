@@ -99,6 +99,8 @@ export function Chat(props: {
   footer?: ReactNode;
   /** Sent as soon as it changes; its workflow stays on for the replies that follow. */
   ask?: Ask | null;
+  /** The workflow every message runs unless a toolbar action picked one (a new design's). */
+  workflow?: "create-design";
   /** `conversation`: every message so far, the agent's included */
   onDone?: (r: AgentResult, conversation: ChatMessage[]) => void;
 }) {
@@ -184,7 +186,7 @@ export function Chat(props: {
           message: typed + note,
           pack_id: props.pack_id,
           deck_id: props.deck_id,
-          workflow: flow,
+          workflow: flow ?? props.workflow,
           ...(choice.picked ? { model: choice.picked } : {}),
           ...(files.length ? { files: files.map((f) => f.file_id) } : {}),
         },
@@ -286,6 +288,7 @@ export function Chat(props: {
           disabled={disabled}
           workflow={workflow}
           onWorkflow={setWorkflow}
+          workflows={!props.workflow}
           slides={props.slides}
           attached={pending}
           onDetach={(f) => setPending((p) => p.filter((x) => x !== f))}

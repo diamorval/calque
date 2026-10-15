@@ -1,0 +1,47 @@
+{
+  "pack_id": "acme-test",
+  "language": "en",
+  "title": "Launch campaign",
+  "components": {
+    "cta": {
+      "props": { "label": "Learn more" },
+      "node": {
+        "type": "frame", "id": "cta", "layout": { "direction": "row", "padding": [12, 24, 12, 24], "align": "center", "cross": "center" },
+        "fill": "accent", "radius": 6,
+        "children": [{ "type": "text", "id": "cta-label", "text": "{label}", "style": "label", "color": "background", "bold": true }]
+      },
+      "variants": {
+        "outline": {
+          "type": "frame", "id": "cta", "layout": { "direction": "row", "padding": [12, 24, 12, 24] },
+          "stroke": { "color": "accent", "width": 2 }, "radius": 6,
+          "children": [{ "type": "text", "id": "cta-label", "text": "{label}", "style": "label", "color": "accent" }]
+        }
+      }
+    }
+  },
+  "artboards": [
+    {
+      "id": "post", "format": "social_square",
+      "layout": { "direction": "column", "padding": 64, "gap": 24, "align": "space_between" },
+      "children": [
+        { "type": "text", "id": "eyebrow", "text": "New", "style": "label", "color": "accent", "uppercase": true },
+        {
+          "type": "frame", "id": "body", "width": "fill", "layout": { "direction": "column", "gap": 16 },
+          "children": [
+            { "type": "text", "id": "headline", "text": "Ship decks that follow the charter", "style": "cover_title", "max_lines": 3 },
+            { "type": "text", "id": "sub", "text": "Native, editable, on brand.", "style": "body", "color": "muted" }
+          ]
+        },
+        { "type": "instance", "id": "cta1", "component": "cta", "props": { "label": "Try it" } }
+      ]
+    },
+    {
+      "id": "banner", "format": "leaderboard", "mode": "dark",
+      "layout": { "direction": "row", "padding": [0, 16, 0, 16], "gap": 16, "align": "space_between", "cross": "center" },
+      "children": [
+        { "type": "text", "id": "headline", "text": "Ship decks that follow the charter", "style": "title", "max_lines": 1 },
+        { "type": "instance", "id": "cta1", "component": "cta", "variant": "outline" }
+      ]
+    }
+  ]
+}

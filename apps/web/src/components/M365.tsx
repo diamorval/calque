@@ -206,14 +206,15 @@ export function M365Picker(props: { status: M365Status; accept: RegExp; title?: 
 }
 
 /** Save the deck as PPTX or PDF into a OneDrive or SharePoint folder; lint ERRORs ask why, as Export does. */
-export function SaveToM365(props: { status: M365Status; deck_id: string; errors: number; onClose: () => void; onShareTeams?: (file_url: string) => void }) {
+export function SaveToM365(props: { status: M365Status; deck_id: string; errors: number; onClose: () => void; onShareTeams?: (file_url: string) => void; pdfOnly?: boolean }) {
   const [place, setPlace] = useState<Place>(ONEDRIVE);
-  const [format, setFormat] = useState<"pptx" | "pdf">("pptx");
+  // a design goes out as one PDF, every artboard a page
+  const [format, setFormat] = useState<"pptx" | "pdf">(props.pdfOnly ? "pdf" : "pptx");
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<{ name: string; web_url: string | null } | null>(null);
-  const gate = format === "pptx" && props.errors > 0;
+  const gate = (format === "pptx" || !!props.pdfOnly) && props.errors > 0;
   const folder = place.kind === "drive" ? place : null;
   async function save(e: FormEvent) {
     e.preventDefault();
@@ -278,12 +279,14 @@ export function SaveToM365(props: { status: M365Status; deck_id: string; errors:
               {t("Saves into {place}.", { place: folder ? [folder.label, ...folder.trail.map((f) => f.name)].join(" › ") : t("a document library: open one") })}{" "}
               {t("A name already taken gets a new one: nothing is overwritten.")}
             </p>
-            <Field label={t("Format")} htmlFor="m-format">
-              <select id="m-format" className="cq-select" value={format} onChange={(e) => setFormat(e.target.value as "pptx" | "pdf")}>
-                <option value="pptx">PowerPoint (.pptx)</option>
-                <option value="pdf">PDF</option>
-              </select>
-            </Field>
+            {!props.pdfOnly && (
+              <Field label={t("Format")} htmlFor="m-format">
+                <select id="m-format" className="cq-select" value={format} onChange={(e) => setFormat(e.target.value as "pptx" | "pdf")}>
+                  <option value="pptx">PowerPoint (.pptx)</option>
+                  <option value="pdf">PDF</option>
+                </select>
+              </Field>
+            )}
             {gate && (
               <Field label={tn(props.errors, "This version has {n} lint error: why does it go out anyway?", "This version has {n} lint errors: why does it go out anyway?")} htmlFor="m-reason">
                 <Textarea id="m-reason" rows={2} required value={reason} onChange={(e) => setReason(e.target.value)} />

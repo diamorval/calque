@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./schema.json": "./deckspec.schema.json"
+    "./schema.json": "./deckspec.schema.json",
+    "./design-schema.json": "./designspec.schema.json"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

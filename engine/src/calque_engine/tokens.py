@@ -72,9 +72,30 @@ def flatten(tree: dict[str, Any], prefix: str = "") -> dict[str, dict[str, Any]]
     return out
 
 
-def resolve(tree: dict[str, Any]) -> dict[str, Any]:
-    """Dotted path -> fully resolved `$value`. Raises on unknown or circular aliases."""
+MODES_KEY = "calque.modes"
+
+
+def modes(tree: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Token modes (variables with modes): `$extensions."calque.modes"` maps a mode name to the
+    tokens it overrides, dotted path -> value or alias. `$`-keys (descriptions) are not tokens."""
+    raw = tree.get("$extensions", {}).get(MODES_KEY, {})
+    return {name: {k: v for k, v in o.items() if not k.startswith("$")} for name, o in raw.items()}
+
+
+def resolve(tree: dict[str, Any], mode: str | None = None) -> dict[str, Any]:
+    """Dotted path -> fully resolved `$value`, in `mode` if given. Raises on unknown or circular
+    aliases, an unknown mode, or a mode overriding a token that does not exist."""
     flat = flatten(tree)
+    if mode is not None:
+        all_modes = modes(tree)
+        if mode not in all_modes:
+            raise TokenError(
+                f"unknown mode: {mode} (modes: {', '.join(sorted(all_modes)) or 'none'})"
+            )
+        for path, value in all_modes[mode].items():
+            if path not in flat:
+                raise TokenError(f"mode {mode} overrides an unknown token: {path}")
+            flat[path] = {**flat[path], "$value": value}
     resolved: dict[str, Any] = {}
 
     def value_of(path: str, seen: tuple[str, ...]) -> Any:

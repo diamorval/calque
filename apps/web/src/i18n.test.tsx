@@ -12,7 +12,7 @@ function fakeServer() {
   const routes: Record<string, unknown> = {
     "/api/me": { id: "alice", name: "Alice", teams: [], admin: false, auth: true },
     "/api/branding": { name: "Calque", logo: null },
-    "/api/decks": { decks: [{ id: "d1", title: "Q3 review", pack_id: "acme-test", head: 2, updated_at: minutesAgo(3), owner: "alice", role: "owner" }] },
+    "/api/decks?medium=deck": { decks: [{ id: "d1", title: "Q3 review", pack_id: "acme-test", head: 2, updated_at: minutesAgo(3), owner: "alice", role: "owner" }] },
     "/api/tools/list_packs": { packs: [] },
   };
   vi.stubGlobal("fetch", async (path: string) => new Response(JSON.stringify(routes[path] ?? {}), { status: path in routes ? 200 : 404 }));

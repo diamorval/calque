@@ -38,6 +38,8 @@ export function LibraryPanel(props: {
   me: string | null;
   onInserted: () => void;
   onAsk?: ((a: Ask) => void) | undefined;
+  /** design: the pack's design templates (artboards), inserted into the open design */
+  medium?: "deck" | "design";
 }) {
   const [entries, setEntries] = useState<LibraryEntry[] | null>(null);
   const [query, setQuery] = useState("");
@@ -45,11 +47,11 @@ export function LibraryPanel(props: {
   const [error, setError] = useState<string | null>(null);
   const load = useCallback(
     (q = "") =>
-      tool<{ entries: LibraryEntry[] }>("library_list", { pack_id: props.pack_id, status: "all", ...(q ? { query: q } : {}) }).then(
+      tool<{ entries: LibraryEntry[] }>("library_list", { pack_id: props.pack_id, status: "all", medium: props.medium ?? "deck", ...(q ? { query: q } : {}) }).then(
         (r) => setEntries(r.entries),
         (e: Error) => setError(e.message),
       ),
-    [props.pack_id],
+    [props.pack_id, props.medium],
   );
   useEffect(() => {
     void load();

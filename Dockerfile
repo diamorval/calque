@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1
 # The Calque server: MCP (/mcp), REST (/api), the web app (/) and deck previews (/decks/:id),
-# with the Python engine it spawns per call and LibreOffice + pdftoppm for renders.
+# with the Python engine it spawns per call, LibreOffice + pdftoppm for deck renders and Chromium
+# for design layouts.
 # One image, not three (web, agent, engine): the web app is static files this server serves, the
 # agent runs in the server process, and the engine is a subprocess on stdin/stdout (engine.ts).
 
@@ -17,7 +18,7 @@ RUN pnpm --filter @calque/slide-ui build && pnpm --filter @calque/web build
 
 FROM base
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends python3 libreoffice-impress poppler-utils fonts-liberation fonts-dejavu-core \
+  && apt-get install -y --no-install-recommends python3 libreoffice-impress poppler-utils fonts-liberation fonts-dejavu-core chromium \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
 COPY --from=ghcr.io/astral-sh/uv:0.11.32 /uv /usr/local/bin/uv
 
@@ -50,6 +51,8 @@ RUN mkdir /data && chown node:node /data
 VOLUME /data
 ENV NODE_ENV=production PORT=8787 CALQUE_DATA=/data CALQUE_PACKS=/app/packs \
   CALQUE_ENGINE="/app/engine/.venv/bin/python -m calque_engine call"
+# designs: headless Chromium lays them out; no sandbox in a container (the page is ours, offline)
+ENV CALQUE_CHROMIUM=/usr/bin/chromium CALQUE_CHROMIUM_NO_SANDBOX=1
 USER node
 EXPOSE 8787
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s \

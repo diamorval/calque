@@ -1,11 +1,11 @@
-import { Cpu, LayoutGrid, Palette, Plus, type LucideIcon } from "lucide-react";
+import { Cpu, LayoutGrid, Palette, Plus, Shapes, type LucideIcon } from "lucide-react";
 import { useEffect, useState, type MouseEvent } from "react";
 import type { Key } from "./i18n/fr.ts";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, ""); // "" unless served under a sub-path (the demo)
 const here = () => location.pathname.slice(BASE.length) || "/";
 
-// Five routes: history.pushState is enough, no router.
+// A handful of routes: history.pushState is enough, no router.
 export function navigate(path: string) {
   history.pushState(null, "", BASE + path);
   dispatchEvent(new PopStateEvent("popstate"));
@@ -32,6 +32,7 @@ export function go(e: MouseEvent, href: string) {
 export const PAGES = [
   { href: "/", label: "Decks", short: "Decks (short)", icon: LayoutGrid, active: (p: string) => p === "/" || p.startsWith("/d/") },
   { href: "/new", label: "New deck", short: "New (short)", icon: Plus, active: (p: string) => p === "/new" },
+  { href: "/designs", label: "Designs", short: "Designs (short)", icon: Shapes, active: (p: string) => p.startsWith("/designs") },
   { href: "/settings/models", label: "AI models", short: "Models (short)", icon: Cpu, active: (p: string) => p === "/settings/models" },
   { href: "/settings/packs", label: "Brand packs", short: "Packs (short)", icon: Palette, active: (p: string) => p.startsWith("/settings/packs") || p === "/settings/compliance" },
 ] as const satisfies readonly { href: string; label: Key; short: Key; icon: LucideIcon; active: (path: string) => boolean }[];

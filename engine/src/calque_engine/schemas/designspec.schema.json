@@ -1,0 +1,993 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "pack_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "language": {
+      "type": "string",
+      "minLength": 2,
+      "description": "BCP 47 code of the text language."
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "mode": {
+      "description": "Token mode of every artboard (a pack's tokens.json $extensions calque.modes); default: the base values.",
+      "type": "string"
+    },
+    "components": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_-]+$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "props": {
+            "description": "Default value of each {prop}.",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "node": {
+            "$ref": "#/$defs/__schema0"
+          },
+          "variants": {
+            "description": "Alternative nodes, e.g. primary / secondary.",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "$ref": "#/$defs/__schema0"
+            }
+          }
+        },
+        "required": [
+          "node"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "artboards": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "name": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A core/formats.yaml preset (list_formats), or 'custom' with width and height."
+          },
+          "width": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 8000
+          },
+          "height": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 8000
+          },
+          "mode": {
+            "description": "Token mode for this artboard (e.g. dark); default: the spec's mode.",
+            "type": "string"
+          },
+          "fill": {
+            "description": "Background; default: the background role.",
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z0-9_]+(\\.[a-z0-9_]+)*$",
+                "description": "Pack colour role (role.color.<name> in tokens.json), e.g. ink, background, accent, highlight, series.1."
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "color": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9_]+(\\.[a-z0-9_]+)*$",
+                    "description": "Pack colour role (role.color.<name> in tokens.json), e.g. ink, background, accent, highlight, series.1."
+                  },
+                  "opacity": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                },
+                "required": [
+                  "color",
+                  "opacity"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "layout": {
+            "type": "object",
+            "properties": {
+              "direction": {
+                "type": "string",
+                "enum": [
+                  "row",
+                  "column"
+                ]
+              },
+              "gap": {
+                "type": "number",
+                "minimum": 0
+              },
+              "padding": {
+                "description": "px, or [top, right, bottom, left].",
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "array",
+                    "prefixItems": [
+                      {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "number",
+                        "minimum": 0
+                      }
+                    ],
+                    "items": false,
+                    "minItems": 4,
+                    "maxItems": 4
+                  }
+                ]
+              },
+              "align": {
+                "description": "Along the direction.",
+                "type": "string",
+                "enum": [
+                  "start",
+                  "center",
+                  "end",
+                  "space_between"
+                ]
+              },
+              "cross": {
+                "description": "Across the direction; default start.",
+                "type": "string",
+                "enum": [
+                  "start",
+                  "center",
+                  "end",
+                  "stretch"
+                ]
+              },
+              "wrap": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "direction"
+            ],
+            "additionalProperties": false
+          },
+          "children": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/__schema0"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "format"
+        ],
+        "additionalProperties": false
+      },
+      "description": "One per format or per frame of a carousel."
+    }
+  },
+  "required": [
+    "pack_id",
+    "language",
+    "title",
+    "artboards"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "__schema0": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "frame"
+            },
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "description": "Stable id: patches and lint findings anchor on it."
+            },
+            "name": {
+              "type": "string"
+            },
+            "width": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "hug",
+                    "fill"
+                  ]
+                }
+              ]
+            },
+            "height": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "hug",
+                    "fill"
+                  ]
+                }
+              ]
+            },
+            "position": {
+              "description": "Absolute px from the parent's top-left: out of the parent's auto layout.",
+              "type": "object",
+              "properties": {
+                "x": {
+                  "type": "number"
+                },
+                "y": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "x",
+                "y"
+              ],
+              "additionalProperties": false
+            },
+            "opacity": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "layout": {
+              "description": "Auto layout; without it children need a position.",
+              "type": "object",
+              "properties": {
+                "direction": {
+                  "type": "string",
+                  "enum": [
+                    "row",
+                    "column"
+                  ]
+                },
+                "gap": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "padding": {
+                  "description": "px, or [top, right, bottom, left].",
+                  "anyOf": [
+                    {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        {
+                          "type": "number",
+                          "minimum": 0
+                        }
+                      ],
+                      "items": false,
+                      "minItems": 4,
+                      "maxItems": 4
+                    }
+                  ]
+                },
+                "align": {
+                  "description": "Along the direction.",
+                  "type": "string",
+                  "enum": [
+                    "start",
+                    "center",
+                    "end",
+                    "space_between"
+                  ]
+                },
+                "cross": {
+                  "description": "Across the direction; default start.",
+                  "type": "string",
+                  "enum": [
+                    "start",
+                    "center",
+                    "end",
+                    "stretch"
+                  ]
+                },
+                "wrap": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "direction"
+              ],
+              "additionalProperties": false
+            },
+            "fill": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[a-z0-9_]+(\\.[a-z0-9_]+)*$",
+                  "description": "Pack colour role (role.color.<name> in tokens.json), e.g. ink, background, accent, highlight, series.1."
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "color": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9_]+(\\.[a-z0-9_]+)*$",
+                      "description": "Pack colour role (role.color.<name> in tokens.json), e.g. ink, background, accent, highlight, series.1."
+                    },
+                    "opacity": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    }
+                  },
+                  "required": [
+                    "color",
+                    "opacity"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "stroke": {
+              "type": "object",
+              "properties": {
+                "color": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9_]+(\\.[a-z0-9_]+)*$",
+                  "description": "Pack colour role (role.color.<name> in tokens.json), e.g. ink, background, accent, highlight, series.1."
+                },
+                "width": {
+                  "description": "px; default: the pack's hairline.",
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                }
+              },
+              "required": [
+                "color"
+              ],
+              "additionalProperties": false
+            },
+            "radius": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0
+                },
+                {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  ],
+                  "items": false,
+                  "minItems": 4,
+                  "maxItems": 4
+                }
+              ]
+            },
+            "shadow": {
+              "type": "string",
+              "enum": [
+                "sm",
+                "md",
+                "lg"
+              ]
+            },
+            "clip": {
+              "type": "boolean"
+            },
+            "children": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema0"
+              }
+            }
+          },
+          "required": [
+            "type",
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "text"
+            },
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "description": "Stable id: patches and lint findings anchor on it."
+            },
+            "name": {
+              "type": "string"
+            },
+            "width": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "hug",
+                    "fill"
+                  ]
+                }
+              ]
+            },
+            "height": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "hug",
+                    "fill"
+                  ]
+                }
+              ]
+            },
+            "position": {
+              "description": "Absolute px from the parent's top-left: out of the parent's auto layout.",
+              "type": "object",
+              "properties": {
+                "x": {
+                  "type": "number"
+                },
+                "y": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "x",
+                "y"
+              ],
+              "additionalProperties": false
+            },
+            "opacity": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "description": "\\n is a line break. In a component, {prop} is replaced by the instance's prop."
+            },
+            "style": {
+              "type": "string",
+              "enum": [
+                "cover_title",
+                "divider_title",
+                "title",
+                "body",
+                "label",
+                "caption",
+                "numeral",
+                "numeral_xl"
+              ],
+              "description": "Type scale role (role.size.<style>), scaled to the artboard's format."
+            },
+            "font": {
+              "description": "Font role; default follows the style.",
+              "type": "string",
+              "enum": [
+                "display",
+                "body",
+                "label"
+              ]
+            },
+            "color": {
+              "type": "string",
+              "pattern": "^[a-z0-9_]+(\\.[a-z0-9_]+)*$",
+              "description": "Pack colour role (role.color.<name> in tokens.json), e.g. ink, background, accent, highlight, series.1."
+            },
+            "align": {
+              "type": "string",
+              "enum": [
+                "left",
+                "center",
+                "right"
+              ]
+            },
+            "bold": {
+              "type": "boolean"
+            },
+            "uppercase": {
+              "type": "boolean"
+            },
+            "max_lines": {
+              "description": "Lint fails when the text needs more lines.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "size": {
+              "description": "px, overriding the style's size (needs a reason: lint warns).",
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "text",
+            "style"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "image"
+            },
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "description": "Stable id: patches and lint findings anchor on it."
+            },
+            "name": {
+              "type": "string"
+            },
+            "width": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "hug",
+                    "fill"
+                  ]
+                }
+              ]
+            },
+            "height": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "hug",
+                    "fill"
+                  ]
+                }
+              ]
+            },
+            "position": {
+              "description": "Absolute px from the parent's top-left: out of the parent's auto layout.",
+              "type": "object",
+              "properties": {
+                "x": {
+                  "type": "number"
+                },
+                "y": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "x",
+                "y"
+              ],
+              "additionalProperties": false
+            },
+            "opacity": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "src": {
+              "type": "string",
+              "minLength": 1,
+              "description": "An uploaded file as `file:<file_id>`, or a path relative to the pack's folder."
+            },
+            "alt": {
+              "type": "string",
+              "description": "What the image shows; empty for a decorative image."
+            },
+            "fit": {
+              "type": "string",
+              "enum": [
+                "cover",
+                "contain"
+              ]
+            },
+            "radius": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0
+                },
+                {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  ],
+                  "items": false,
+                  "minItems": 4,
+                  "maxItems": 4
+                }
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "src",
+            "alt"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "shape"
+            },
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "description": "Stable id: patches and lint findings anchor on it."
+            },
+            "name": {
+              "type": "string"
+            },
+            "width": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "hug",
+                    "fill"
+                  ]
+                }
+              ]
+            },
+            "height": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "hug",
+                    "fill"
+                  ]
+                }
+              ]
+            },
+            "position": {
+              "description": "Absolute px from the parent's top-left: out of the parent's auto layout.",
+              "type": "object",
+              "properties": {
+                "x": {
+                  "type": "number"
+                },
+                "y": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "x",
+                "y"
+              ],
+              "additionalProperties": false
+            },
+            "opacity": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "shape": {
+              "type": "string",
+              "enum": [
+                "rect",
+                "ellipse",
+                "line"
+              ]
+            },
+            "fill": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[a-z0-9_]+(\\.[a-z0-9_]+)*$",
+                  "description": "Pack colour role (role.color.<name> in tokens.json), e.g. ink, background, accent, highlight, series.1."
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "color": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9_]+(\\.[a-z0-9_]+)*$",
+                      "description": "Pack colour role (role.color.<name> in tokens.json), e.g. ink, background, accent, highlight, series.1."
+                    },
+                    "opacity": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    }
+                  },
+                  "required": [
+                    "color",
+                    "opacity"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "stroke": {
+              "type": "object",
+              "properties": {
+                "color": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9_]+(\\.[a-z0-9_]+)*$",
+                  "description": "Pack colour role (role.color.<name> in tokens.json), e.g. ink, background, accent, highlight, series.1."
+                },
+                "width": {
+                  "description": "px; default: the pack's hairline.",
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                }
+              },
+              "required": [
+                "color"
+              ],
+              "additionalProperties": false
+            },
+            "radius": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0
+                },
+                {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  ],
+                  "items": false,
+                  "minItems": 4,
+                  "maxItems": 4
+                }
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "shape"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "instance"
+            },
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "description": "Stable id: patches and lint findings anchor on it."
+            },
+            "name": {
+              "type": "string"
+            },
+            "width": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "hug",
+                    "fill"
+                  ]
+                }
+              ]
+            },
+            "height": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "hug",
+                    "fill"
+                  ]
+                }
+              ]
+            },
+            "position": {
+              "description": "Absolute px from the parent's top-left: out of the parent's auto layout.",
+              "type": "object",
+              "properties": {
+                "x": {
+                  "type": "number"
+                },
+                "y": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "x",
+                "y"
+              ],
+              "additionalProperties": false
+            },
+            "opacity": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "component": {
+              "type": "string",
+              "minLength": 1,
+              "description": "A key of the DesignSpec's components."
+            },
+            "variant": {
+              "description": "One of the component's variants; default: its main node.",
+              "type": "string"
+            },
+            "props": {
+              "description": "Values for the component's {prop} placeholders.",
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "component"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

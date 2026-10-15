@@ -92,5 +92,17 @@
       "major": { "$value": "Ufficio 300" },
       "minor": { "$value": "Geist" }
     }
+  },
+  "$extensions": {
+    "calque.modes": {
+      "dark": {
+        "$description": "Dark canvases (social, banners, posters): light ink on the deep surface.",
+        "role.color.background": "{color.neutral.fond_profond}",
+        "role.color.surface": "{color.neutral.ink_900}",
+        "role.color.ink": "{color.blanc}",
+        "role.color.muted": "{color.neutral.ink_300}",
+        "role.color.rule": "{color.neutral.ink_600}"
+      }
+    }
   }
 }
