@@ -281,20 +281,27 @@ shapes, component instances), lays it out in headless Chromium, lints it and ret
 artboard's PNG and the `errors` / `warnings` to fix with `patch_design` (`adapt_artboard` copies
 an artboard to another format). `export_design` gives `png` (any `scale`), `pdf`, `svg` (vector)
 or `html` per artboard as URLs under `/designs/:id/<artboard>.<ext>?v=<version>`, or one artboard
-as `react` / `tailwind` code inline. `open_design`, `list_designs` and `restore_design` complete
-the set; the `create-design` prompt is the workflow (`core/workflows/design.md`).
+as `react` / `tailwind` code inline (an export of a version with lint ERRORs needs a `reason`,
+like a deck's). `open_design` returns the whole document view (spec, artboards, versions,
+comments, approval); the `create-design` prompt is the workflow (`core/workflows/design.md`).
 
-Designs are versioned like decks. Their owner shares them with people and teams
-(`share_design`, `unshare_design`, `list_design_shares`: viewer, commenter or editor, while they
-see the design's pack); comments sit on an artboard or one node of it (`add_design_comment`,
-`list_design_comments`, `resolve_design_comments`, and `resolves` on `patch_design`). No share
-link or approval yet.
+A design is a document of the same store as decks (`decks.medium = 'design'`): every deck tool
+that takes a `deck_id` takes a design's id too. So it has the same versions (`restore_version`),
+sharing and links (`share_deck`, `set_general_access`, `reset_link`: a link opens
+`/designs/:id?k=`, whose page calls the whitelisted `POST /designs/:id/tools/:name`), comments
+on an artboard or one `node` of it (`add_comment`, `list_comments`, `resolve_comments`, and
+`resolves` on `patch_design`), type and approval, chat, audit, compliance and the library (an
+artboard is a library entry of medium `design`; `library_insert` without `deck_id` starts a new
+design from it, a template). `list_decks` and `library_list` take `medium`. Microsoft 365 saves a
+design as its PDF.
 
 In the web app, **Designs** (`/designs`) lists your designs and those shared with you; **New
-design** briefs the agent (the `create-design` workflow) and opens what it makes. A design shows
-each artboard as rendered with its lint and comments beside it; click an element to edit its
-text (a component's prop too) or comment on it. Also there: the colour-mode switch, Adapt to
-another format, Undo, Share, the file exports and the React / Tailwind code.
+design** briefs the agent (the `create-design` workflow) or starts from a library template, and
+opens what it makes. A design shows each artboard as rendered with its lint and comments beside
+it; click an element to edit its text (a component's prop too) or comment on it. Also there: the
+colour-mode switch, Adapt to another format, Undo, History, type and approval, Share, Apply
+comments (the agent), the file exports (with the deck's export gate), the React / Tailwind code,
+and the agent and library panel.
 Images are pack files or the caller's own uploads (`"src": "file:<file_id>"`). The server needs a
 Chromium: the image ships Debian's `chromium`; elsewhere one on PATH, Playwright's, or
 `CALQUE_CHROMIUM`.

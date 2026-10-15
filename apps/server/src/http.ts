@@ -198,6 +198,7 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
     };
     http.use("/api/*", sameOrigin);
     http.use("/decks/*", sameOrigin);
+    http.use("/designs/*", sameOrigin);
   }
 
   // SCIM 2.0 deprovisioning (scim.ts), when the IdP has a token for it.
@@ -295,7 +296,14 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
   );
 
   // ?q=: words in the title or slides; ?pack_id=: one pack (list_decks' query and pack_id)
-  http.get("/api/decks", route(async (c, user) => ({ decks: await app.decks.list(user, { query: c.req.query("q"), pack_id: c.req.query("pack_id") }) })));
+  http.get(
+    "/api/decks",
+    route(async (c, user) => {
+      const m = c.req.query("medium");
+      const medium = m === "deck" || m === "design" ? m : undefined;
+      return { decks: await app.decks.list(user, { query: c.req.query("q"), pack_id: c.req.query("pack_id"), medium }) };
+    }),
+  );
   // the owner, or an admin
   http.delete("/api/decks/:id", route((c, user) => app.decks.remove(user, param(c, "id"))));
 
@@ -538,13 +546,17 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
     };
   type OnStep = (s: Step) => void;
 
+  /** What document `id` is (the agent works on a deck or a design); the tools check access. */
+  const mediumOf = async (id?: string) =>
+    id ? (await app.db.query<{ medium: "deck" | "design" }>("select medium from decks where id = $1", [id]).catch(() => ({ rows: [] as { medium: "deck" | "design" }[] }))).rows[0]?.medium : undefined;
   http.post(
     "/api/agent/chat",
     agentLimit,
     agent("chat", (x) => ChatBody.parse(x), async (client, model, b: z.infer<typeof ChatBody>, onStep, user) => {
       const files = await Promise.all((b.files ?? []).map((id) => attachment(app.db, app.data, user, id)));
+      const medium = await mediumOf(b.deck_id);
       if (b.message === undefined)
-        return chat({ client, model, onStep, messages: b.messages as Message[], workflow: b.workflow, pack_id: b.pack_id, deck_id: b.deck_id, files });
+        return chat({ client, model, onStep, messages: b.messages as Message[], workflow: b.workflow, pack_id: b.pack_id, deck_id: b.deck_id, medium, files });
       // the conversation held here (chats.ts): the files attached earlier come along, those a
       // colleague uploaded (theirs only) left out
       await writable(app.decks, user, b.deck_id);
@@ -560,6 +572,7 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
         workflow: b.workflow,
         pack_id: b.pack_id,
         deck_id: b.deck_id,
+        medium,
         files: [...before.filter((f) => f !== undefined), ...files],
       });
       await appendChat(app.db, user, b.deck_id, [asked, ...r.messages], b.files ?? []);
@@ -576,13 +589,16 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
   http.post(
     "/api/agent/apply-comments",
     agentLimit,
-    agent("apply-comments", ApplyBody.parse, (client, model, b: z.infer<typeof ApplyBody>, onStep) =>
-      applyComments({ client, model, onStep, deck_id: b.deck_id, ...(b.comment_ids ? { comment_ids: b.comment_ids } : {}) }),
+    agent("apply-comments", ApplyBody.parse, async (client, model, b: z.infer<typeof ApplyBody>, onStep) =>
+      applyComments({ client, model, onStep, deck_id: b.deck_id, medium: await mediumOf(b.deck_id), ...(b.comment_ids ? { comment_ids: b.comment_ids } : {}) }),
     ),
   );
 
   // Web preview: the same slide UI as the MCP App, talking REST instead of the host bridge.
   http.get("/decks/:id", async (c) => {
+    // a design's preview and share links open the design page (same query: ?k= or ?t=)
+    const { rows } = await app.db.query<{ medium: string }>("select medium from decks where id = $1", [param(c, "id")]).catch(() => ({ rows: [] as { medium: string }[] }));
+    if (rows[0]?.medium === "design") return c.redirect(`/designs/${encodeURIComponent(param(c, "id"))}${new URL(c.req.url).search}`);
     if (!existsSync(UI_HTML)) return c.text("slide UI not built: pnpm --filter @calque/slide-ui build", 500);
     return c.html(await readFile(UI_HTML, "utf8"));
   });
@@ -648,26 +664,51 @@ export function createHttp(app: App, auth?: AuthConfig, sessions?: Sessions): Ho
       return fail(c, e);
     }
   });
-  // a design's rendered artboard: <artboard>.png|pdf|svg|html, at ?v= (version) and ?scale=
-  const DESIGN_TYPES: Record<string, string> = { png: "image/png", pdf: "application/pdf", svg: "image/svg+xml", html: "text/html; charset=utf-8" };
+  // The design page for whoever holds its share link (?k=) or a per-user token (?t=, the MCP
+  // result links), as /decks/:id/data serves the deck viewer: these tools only, on this design only.
+  const LINK_TOOLS: Record<string, "design_id" | "deck_id"> = {
+    open_design: "design_id",
+    export_design: "design_id",
+    list_comments: "deck_id",
+    add_comment: "deck_id",
+    resolve_comments: "deck_id",
+  };
+  http.post("/designs/:id/tools/:name", jsonLimit, async (c) => {
+    const user = await viewer(c);
+    if (user instanceof Response) return user;
+    const name = param(c, "name");
+    const key = LINK_TOOLS[name];
+    const t = key && toolNamed(name);
+    if (!key || !t) return c.json({ error: "NotFound", message: `no tool ${name} here` }, 404);
+    try {
+      return c.json(await t.run(app, user, t.input.parse({ ...((await c.req.json().catch(() => ({}))) as object), [key]: param(c, "id") })));
+    } catch (e) {
+      return fail(c, e);
+    }
+  });
+
+  // a design's rendered artboard: <artboard>.png|pdf|svg|html, or design.pdf (every artboard), at
+  // ?v= (version) and ?scale=; read like the deck previews (session, per-user token or share link)
+  const DESIGN_TYPES = { png: "image/png", pdf: "application/pdf", svg: "image/svg+xml", html: "text/html; charset=utf-8" } as const;
   http.get("/designs/:id/:file", async (c) => {
     const user = await viewer(c);
     if (user instanceof Response) return user;
     const m = /^([A-Za-z0-9_-]+)\.(png|pdf|svg|html)$/.exec(param(c, "file"));
     if (!m) return c.notFound();
-    const [, artboard, ext] = m as unknown as [string, string, "png" | "pdf" | "svg" | "html"];
+    const [, artboard, ext] = m as unknown as [string, string, keyof typeof DESIGN_TYPES];
     try {
       const v = c.req.query("v");
       const scale = Number(c.req.query("scale") ?? 1);
       if (!(scale >= 0.25 && scale <= 4)) return c.json({ error: "BadRequest", message: "scale must be 0.25..4" }, 400);
-      const r = await app.designs.render(user, param(c, "id"), v ? Number(v) : undefined, [ext], scale);
-      const path = r.artboards.find((a) => a.id === artboard)?.files[ext];
+      const r = await app.decks.designRender(user, param(c, "id"), v ? Number(v) : undefined, [ext], scale);
+      const whole = artboard === "design" && ext === "pdf" && !r.artboards.some((a) => a.id === "design");
+      const path = whole ? r.pdf : r.artboards.find((a) => a.id === artboard)?.files[ext];
       if (!path) return c.notFound();
-      const d = await app.designs.design(user, param(c, "id"));
-      const name = `${d.title.replace(/[^\p{L}\p{N} _-]+/gu, "").trim() || "design"} ${artboard} v${r.version}.${ext}`;
+      const d = await app.decks.deck(user, param(c, "id"), "viewer");
+      const name = `${d.title.replace(/[^\p{L}\p{N} _-]+/gu, "").trim() || "design"}${whole ? "" : ` ${artboard}`} v${r.version}.${ext}`;
       return new Response(Readable.toWeb(createReadStream(path)) as ReadableStream, {
         headers: {
-          "content-type": DESIGN_TYPES[ext] as string,
+          "content-type": DESIGN_TYPES[ext],
           // SVG and HTML open as downloads, offline: they never run in the app's origin
           ...(ext === "png" ? { "cache-control": "no-cache" } : { "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(name)}` }),
           "content-security-policy": "default-src 'none'; img-src data:; font-src data:; style-src 'unsafe-inline'",

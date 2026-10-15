@@ -154,7 +154,16 @@ describe("web agent", { timeout: ENGINE_TIMEOUT }, () => {
     expect(system).toContain("design co-editor");
     expect(system).toContain("# Workflow: design");
     expect(system).not.toContain('<resource uri="core://doctrine">');
-    await api("/api/tools/clear_chat", {});
+    // the draft conversation followed the design it made, and a chat there edits that design
+    const created = r.json.deck_id as string;
+    expect(r.json.text).toContain(created);
+    expect((await api("/api/tools/get_chat", { deck_id: created })).json.messages.length).toBeGreaterThan(0);
+    script = () => ({ content: "On it." });
+    await api("/api/agent/chat", { deck_id: created, message: "Shorter headline" });
+    const open = (fake.requests.at(-1) as Json).messages[0].content as string;
+    expect(open).toContain("# Open design");
+    expect(open).toContain(`design \`${created}\` open`);
+    expect(open).toContain("design co-editor");
   });
 
   it("streams a failed tool call with its error, and the model gets the error back", async () => {

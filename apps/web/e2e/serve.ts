@@ -22,6 +22,16 @@ function script(b: Json) {
   const system = String(b.messages[0]?.content ?? "");
   const ask = String(b.messages.findLast((m: Json) => m.role === "user")?.content ?? "");
   const steps = toolsCalled(b);
+  if (ask.startsWith("Apply every open comment on design")) {
+    const deck_id = ask.match(/design (\S+)\./)?.[1];
+    if (steps === 0) return { tool: { name: "list_comments", args: { deck_id } } };
+    if (steps === 1) {
+      const comments = (lastResult(b).comments as Json[]).filter((c) => c.node);
+      const ops = comments.map((c) => ({ op: "set_node", artboard: c.slide_id, node_id: c.node, props: { text: c.text } }));
+      return { tool: { name: "patch_design", args: { design_id: deck_id, ops, resolves: comments.map((c) => c.id) } } };
+    }
+    return { content: `Applied the comments: ${(lastResult(b).errors as Json[]).length} error.` };
+  }
   if (ask.startsWith("Apply every open comment")) {
     const deck_id = ask.match(/deck (\S+)\./)?.[1];
     if (steps === 0) return { tool: { name: "list_comments", args: { deck_id } } };

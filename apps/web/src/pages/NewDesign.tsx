@@ -10,13 +10,24 @@ const BRIEFS = [
   "An A4 poster for the office: our three values, one line each.",
 ] as const;
 
-/** The design a reply created, from its tool results. */
-const createdDesign = (r: AgentResult) => JSON.stringify(r.messages).match(/\\?"design_id\\?":\s*\\?"([0-9a-f-]{36})/)?.[1];
+/** A design template: an approved artboard of the pack's library. */
+interface Template {
+  entry_id: string;
+  title: string;
+  thumbnail_url: string;
+}
 
-/** A new design: pick its brand pack, then brief the agent (create-design); once it creates the design, open it. */
+/** A new design: pick its brand pack, then brief the agent (create-design), or start from one of
+the pack's templates; once the design exists, open it. */
 export function NewDesign() {
   const [packs, setPacks] = useState<Pack[]>([]);
   const [pack, setPack] = useState<string>("");
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!pack) return setTemplates([]);
+    tool<{ entries: Template[] }>("library_list", { pack_id: pack, medium: "design" }).then((r) => setTemplates(r.entries), () => setTemplates([]));
+  }, [pack]);
   useEffect(() => {
     tool<{ packs: Pack[] }>("list_packs").then((r) => {
       setPacks(r.packs);
@@ -25,13 +36,15 @@ export function NewDesign() {
     });
   }, []);
 
-  // the draft conversation made the design: start the next brief from a clean draft
-  async function done(r: AgentResult) {
-    const id = createdDesign(r);
-    if (!id) return;
-    await tool("clear_chat", {}).catch(() => undefined);
-    navigate(`/designs/${id}`);
+  // the server moved the draft conversation to the design it created: it follows the design
+  function done(r: AgentResult) {
+    if (r.deck_id) navigate(`/designs/${r.deck_id}`);
   }
+  const start = (e: Template) =>
+    tool<{ deck_id: string }>("library_insert", { entry_id: e.entry_id }).then(
+      (r) => navigate(`/designs/${r.deck_id}`),
+      (err: Error) => setError(err.message),
+    );
 
   return (
     <div className="cq-brief">
@@ -45,6 +58,22 @@ export function NewDesign() {
           <div className="cq-brief-hero">
             <h1>{t("What are we designing?")}</h1>
             <p>{t("Brief the agent: the channel, the audience, the message. It lays out the design on your brand pack in every format you need, checks it, then you refine it together.")}</p>
+            {error && <p role="alert">{error}</p>}
+            {templates.length > 0 && (
+              <section className="cq-templates" aria-label={t("Start from a template")}>
+                <h2>{t("Or start from a template")}</h2>
+                <ul>
+                  {templates.map((e) => (
+                    <li key={e.entry_id}>
+                      <button type="button" onClick={() => void start(e)}>
+                        <img src={e.thumbnail_url} alt="" loading="lazy" />
+                        <span>{e.title}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
           </div>
         }
         footer={

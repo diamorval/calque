@@ -14,12 +14,14 @@ import { FileText, Moon, Plus, Search, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../api.ts";
 import { t } from "../i18n.ts";
+import { docHref } from "./DeckTable.tsx";
 import { navigate, PAGES } from "../nav.ts";
 
 interface DeckRow {
   id: string;
   title: string;
   pack_id: string;
+  medium?: "deck" | "design";
 }
 
 const MOD =
@@ -117,7 +119,7 @@ export function CommandPalette({
                       key={d.id}
                       value={`${d.title} ${d.id}`}
                       keywords={[d.pack_id]}
-                      onSelect={run(() => navigate(`/d/${d.id}`))}
+                      onSelect={run(() => navigate(docHref(d)))}
                     >
                       <FileText /> <span className="truncate">{d.title}</span>
                       <span className="ms-auto shrink-0 text-xs text-muted-foreground">

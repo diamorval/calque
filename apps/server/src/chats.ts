@@ -91,7 +91,7 @@ export async function adoptDraft(db: Db, user: User, named: string[], since: Dat
   return undefined;
 }
 
-/** The deck ids a run's tool results name (create_deck, import_pptx…), first first. */
+/** The deck and design ids a run's tool results name (create_deck, create_design, import_pptx…), first first. */
 export function decksIn(messages: Message[]): string[] {
-  return [...new Set([...JSON.stringify(messages).matchAll(/\\?"deck_id\\?":\s*\\?"([0-9a-f-]{36})\\?"/g)].map((m) => m[1] as string))];
+  return [...new Set([...JSON.stringify(messages).matchAll(/\\?"(?:deck|design)_id\\?":\s*\\?"([0-9a-f-]{36})\\?"/g)].map((m) => m[1] as string))];
 }

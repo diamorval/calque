@@ -15,7 +15,13 @@ export interface DeckRow {
   updated_at: string;
   owner: string;
   role: "owner" | "editor" | "commenter" | "viewer";
+  /** deck or design; a design's first artboard is its cover */
+  medium?: "deck" | "design";
+  cover?: string | null;
 }
+
+/** Where a row opens: the deck editor, or the design page. */
+export const docHref = (d: Pick<DeckRow, "id" | "medium">) => (d.medium === "design" ? `/designs/${d.id}` : `/d/${d.id}`);
 
 export const ROLE = { owner: "Owner", editor: "Editor", commenter: "Commenter", viewer: "Viewer" } as const;
 
@@ -53,7 +59,7 @@ export function DeckTable({ decks, packName, actions }: { decks: DeckRow[]; pack
       accessorKey: "title",
       header: t("Title"),
       cell: ({ row: { original: d } }) => (
-        <a className="font-medium whitespace-nowrap hover:underline" href={`/d/${d.id}`} onClick={(e) => go(e, `/d/${d.id}`)}>
+        <a className="font-medium whitespace-nowrap hover:underline" href={docHref(d)} onClick={(e) => go(e, docHref(d))}>
           {d.title}
         </a>
       ),

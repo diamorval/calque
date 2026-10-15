@@ -8,7 +8,7 @@ import type { Access } from "./access.ts";
 import { audit } from "./audit.ts";
 import { clearChat, getChat } from "./chats.ts";
 import type { Db } from "./db.ts";
-import { CODE_TARGETS, OUTPUTS, type DesignRender, type Designs } from "./designs.ts";
+import { CODE_TARGETS, OUTPUTS, type DesignRender } from "./designs.ts";
 import { linkExpired, type Decks, type Finding, type Role } from "./decks.ts";
 import { engine, REPO } from "./engine.ts";
 import { getFile, MAX_UPLOAD, TooLarge, uploadTicket } from "./files.ts";
@@ -26,7 +26,6 @@ import { usageReport } from "./usage.ts";
 export interface App {
   db: Db;
   decks: Decks;
-  designs: Designs;
   models: Models;
   /** session revocation and SCIM deprovisioning */
   access: Access;
@@ -112,7 +111,7 @@ function designResult(app: App, user: User, id: string, version: number, r: Desi
   };
 }
 
-const designId = z.string().describe("Design id, as returned by create_design.");
+const designId = z.string().describe("Design id, as returned by create_design (a design is a document: the deck tools that take a deck_id take it too).");
 
 /** The deck's share link, the one people copy. */
 const shareUrl = (app: App, id: string, key: string) => `${app.publicUrl}/decks/${id}?k=${encodeURIComponent(key)}`;
@@ -322,11 +321,12 @@ export const TOOLS = {
   add_comment: tool({
     title: "Comment",
     description:
-      "Comment on a slide, or on one shape of it (shape_id from the shape map); with parent_id, reply in that comment's thread. `type` required: the deck cannot be approved until the thread is resolved.",
+      "Comment on a slide, or on one shape of it (shape_id from the shape map); on a design, on an artboard (its id as slide_id) or one node of it (`node`). With parent_id, reply in that comment's thread. `type` required: the deck cannot be approved until the thread is resolved.",
     input: z.object({
       deck_id: deckId,
-      slide_id: z.string().optional(),
+      slide_id: z.string().optional().describe("A slide id; a design's artboard id."),
       shape_id: z.number().int().optional(),
+      node: z.string().optional().describe("A design's node id (from its spec or node boxes)."),
       parent_id: z.number().int().optional().describe("The comment this replies to (a reply sits on its slide and shape)."),
       text: z.string().min(1),
       type: z.enum(["suggestion", "required"]).optional().describe("A new thread's weight (default suggestion); a required one blocks approval until resolved."),
@@ -339,7 +339,7 @@ export const TOOLS = {
   list_comments: tool({
     title: "List comments",
     description:
-      "Comment threads left on the deck (in the preview or the in-chat UI), each anchored on a slide id and shape_id, with its status (open or resolved), type (suggestion, or required: it blocks approval until resolved), author (id and author_name) and replies (read them: they refine the request). Apply them with patch_deck and pass their ids in `resolves`.",
+      "Comment threads left on the deck or design (in the preview or the in-chat UI), each anchored on a slide id and shape_id (a design's: an artboard id and a node), with its status (open or resolved), type (suggestion, or required: it blocks approval until resolved), author (id and author_name) and replies (read them: they refine the request). Apply them with patch_deck and pass their ids in `resolves`.",
     input: z.object({ deck_id: deckId, status: z.enum(["open", "resolved", "all"]).optional().default("open") }),
     readOnly: true,
     role: "viewer",
@@ -382,6 +382,18 @@ export const TOOLS = {
     role: "editor",
     run: async (app, user, a) => {
       const before = await app.decks.lint(user, a.deck_id);
+      if ((await app.decks.deck(user, a.deck_id, "viewer")).medium === "design") {
+        // a design has no safe auto-fix: every finding is a judgment call, fixed with patch_design
+        const r = await app.decks.designRender(user, a.deck_id, before.version, ["png"]);
+        const q = `v=${r.version}&${token(app, user, a.deck_id)}`;
+        return {
+          report: { version: before.version, ...bySeverity(before.findings), safe_fixes: [], judgment_calls: before.findings },
+          applied: [],
+          artboards: r.artboards.map((b) => ({ id: b.id, image_url: `${app.publicUrl}/designs/${a.deck_id}/${b.id}.png?${q}` })),
+          visual_checklist: await checklist(),
+          ...links(app, user, a.deck_id),
+        };
+      }
       const spec = await app.decks.spec(a.deck_id, before.version);
       // safe fixes edit the imported file; a generated deck is redrawn from its DeckSpec instead
       const safe = (f: Finding) => !!spec.base && f.severity === "ERROR" && before.safe_checks.includes(f.check);
@@ -479,10 +491,11 @@ export const TOOLS = {
   list_decks: tool({
     title: "List decks",
     description:
-      "Your decks and the decks shared with you, newest change first: id, title, pack, owner, version and your role (owner, editor, commenter, viewer). Find one with `query` (words in its title or slides, e.g. the client's name) and `pack_id`.",
+      "Your decks and designs and those shared with you, newest change first: id, title, pack, owner, version, medium (deck or design; a design's cover artboard) and your role (owner, editor, commenter, viewer). Find one with `query` (words in its title or text, e.g. the client's name), `pack_id` and `medium`.",
     input: z.object({
-      query: z.string().optional().describe("Words the deck's title or slide text must all contain (case and accents ignored)."),
-      pack_id: z.string().optional().describe("Only the decks on this pack."),
+      query: z.string().optional().describe("Words the title or text must all contain (case and accents ignored)."),
+      pack_id: z.string().optional().describe("Only those on this pack."),
+      medium: z.enum(["deck", "design"]).optional().describe("Only decks, or only designs."),
     }),
     readOnly: true,
     run: async (app, user, a) => ({ decks: await app.decks.list(user, a) }),
@@ -675,12 +688,13 @@ export const TOOLS = {
   library_list: tool({
     title: "List slide library",
     description:
-      "The approved slides of a brand pack's library (case studies, references, client logos, team bios, boilerplate), newest first: entry_id, title, tags and a thumbnail_url. Search with `query` (words of the title or tags) and `tags`. Look here for proof points before naming a gap. Pack managers pass status 'pending' to see the proposals to review.",
+      "The approved slides of a brand pack's library (case studies, references, client logos, team bios, boilerplate) and its design templates (artboards: medium design), newest first: entry_id, title, tags, medium and a thumbnail_url. Search with `query` (words of the title or tags), `tags` and `medium`. Look here for proof points before naming a gap, and for a template before starting a design. Pack managers pass status 'pending' to see the proposals to review.",
     input: z.object({
       pack_id: z.string().optional().describe("Default: every pack you see."),
       query: z.string().optional(),
       tags: z.array(z.string()).optional().describe("Entries carrying every one of these tags."),
       status: z.enum(["approved", "pending", "all"]).default("approved"),
+      medium: z.enum(["deck", "design"]).optional().describe("Only slides, or only design templates."),
     }),
     readOnly: true,
     run: (app, user, a) => libraryList(app, user, a),
@@ -689,17 +703,24 @@ export const TOOLS = {
   library_insert: tool({
     title: "Insert library slide",
     description:
-      "Insert an approved library slide into a deck, as a new version (like copy_slides): a chart, diagram or composition goes into a deck on any pack, a template or imported slide only into a deck on the entry's pack. `at` is the 0-based position (default: before the closing slide, else at the end). Adapt its text with patch_deck if the audience needs it.",
-    input: z.object({ entry_id: z.string(), deck_id: deckId, at: z.number().int().min(0).optional() }),
+      "Insert an approved library slide into a deck, as a new version (like copy_slides): a chart, diagram or composition goes into a deck on any pack, a template or imported slide only into a deck on the entry's pack. `at` is the 0-based position (default: before the closing slide, else at the end). Adapt its text with patch_deck if the audience needs it. A design entry (an artboard, medium design) goes into a design; without deck_id it starts a new design from it (a template: then adapt its text with patch_design).",
+    input: z.object({
+      entry_id: z.string(),
+      deck_id: deckId.optional().describe("The deck or design to insert into (edit access); a design entry without it starts a new design."),
+      at: z.number().int().min(0).optional(),
+      title: z.string().max(200).optional().describe("A new design's title (default: the entry's)."),
+    }),
     ui: true,
-    role: "editor",
-    run: async (app, user, a) => ({ ...(await libraryInsert(app, user, a)), ...links(app, user, a.deck_id) }),
+    run: async (app, user, a) => {
+      const r = (await libraryInsert(app, user, a)) as Record<string, unknown> & { deck_id: string };
+      return { ...r, ...links(app, user, a.deck_id ?? r.deck_id) };
+    },
   }),
 
   library_add: tool({
     title: "Add to slide library",
     description:
-      "Propose a slide of a deck you edit for its pack's library, with a title and tags (e.g. case-study, reference, team, boilerplate, the sector). The pack's owner or an admin approves it; their own additions are approved at once. Only add a slide the user asked to share: everyone who sees the pack will reuse it.",
+      "Propose a slide of a deck you edit (or an artboard of a design: slide_id is its id, it becomes a design template) for its pack's library, with a title and tags (e.g. case-study, reference, team, boilerplate, the sector, a format). The pack's owner or an admin approves it; their own additions are approved at once. Only add a slide the user asked to share: everyone who sees the pack will reuse it.",
     input: z.object({
       deck_id: deckId,
       slide_id: z.string(),
@@ -776,7 +797,7 @@ export const TOOLS = {
   m365_save: tool({
     title: "Save to Microsoft 365",
     description:
-      "Save the deck as PPTX (default) or PDF into a OneDrive or SharePoint folder (default: the user's OneDrive root) and return its `web_url`. A name already taken gets a new one: nothing is overwritten. Like export_pptx, a PPTX with lint ERRORs goes out with a `reason`, recorded.",
+      "Save the deck as PPTX (default) or PDF (a design: always one PDF, every artboard a page) into a OneDrive or SharePoint folder (default: the user's OneDrive root) and return its `web_url`. A name already taken gets a new one: nothing is overwritten. Like export_pptx, a PPTX with lint ERRORs goes out with a `reason`, recorded.",
     input: z.object({
       deck_id: deckId,
       version,
@@ -790,19 +811,22 @@ export const TOOLS = {
     run: async (app, user, a) => {
       const client = m365(app);
       const deck = await app.decks.deck(user, a.deck_id, "viewer");
-      const r = a.format === "pdf" ? await app.decks.exportPdf(user, a.deck_id, a.version) : await app.decks.exportPath(user, a.deck_id, a.version);
+      // a design goes out as one PDF, every artboard a page
+      const format = deck.medium === "design" ? "pdf" : a.format;
+      const r = format === "pdf" ? await app.decks.exportPdf(user, a.deck_id, a.version) : await app.decks.exportPath(user, a.deck_id, a.version);
       let errors = 0;
-      if (a.format === "pptx") {
+      if (format === "pptx" || deck.medium === "design") {
         errors = (await app.decks.lint(user, a.deck_id, r.version)).findings.filter((f) => f.severity === "ERROR").length;
         await recordExport(app.decks, user, a.deck_id, r.version, errors, a.reason);
       }
-      const name = fileName(a.name?.replace(/\.(pptx|pdf)$/i, "") || `${deck.title} v${r.version}`, `.${a.format}`);
+      const name = fileName(a.name?.replace(/\.(pptx|pdf)$/i, "") || `${deck.title} v${r.version}`, `.${format}`);
       const saved = await client.save(user, r.path, name, a);
-      await audit(app.db, user, "save_m365", "deck", a.deck_id, { version: r.version, format: a.format, name: saved.name, drive_id: saved.drive_id });
+      await audit(app.db, user, "save_m365", "deck", a.deck_id, { version: r.version, format, name: saved.name, drive_id: saved.drive_id });
       return {
         version: r.version,
+        format,
         ...saved,
-        ...(a.format === "pptx" ? { lint_errors: errors } : {}),
+        ...(format === "pptx" || deck.medium === "design" ? { lint_errors: errors } : {}),
         ...(errors && !a.reason?.trim() ? { warning: `v${r.version} has ${errors} lint ERROR(s): pass \`reason\` to record why it goes out anyway` } : {}),
       };
     },
@@ -864,50 +888,57 @@ export const TOOLS = {
   create_design: tool({
     title: "Create design",
     description:
-      "Create a design from a DesignSpec: one or more artboards (a social post, a story, a banner, an ad, a poster, a web section), each a node tree with auto layout (frames), text in the pack's type scale, images, shapes and component instances. Colours are pack roles, never hex; a token mode (e.g. dark) re-colours an artboard. Laid out and linted before it is saved: `errors` (overflow, off canvas, too-small text, contrast, slop) must be fixed with patch_design; `warnings` are worth a look. Returns the design id and each artboard's PNG.",
+      "Create a design from a DesignSpec: one or more artboards (a social post, a story, a banner, an ad, a poster, a web section), each a node tree with auto layout (frames), text in the pack's type scale, images, shapes and component instances. Colours are pack roles, never hex; a token mode (e.g. dark) re-colours an artboard. Laid out and linted before it is saved: `errors` (overflow, off canvas, too-small text, contrast, slop) must be fixed with patch_design; `warnings` are worth a look. Returns the design id and each artboard's PNG. A design is a document like a deck: share_deck, set_general_access, list_comments, restore_version, rename_deck, duplicate_deck, set_approval… take its id.",
     input: z.object({ design: DesignSpec, note: z.string().optional() }),
     run: async (app, user, a) => {
-      const r = await app.designs.create(user, a.design, a.note ?? "create");
-      return designResult(app, user, r.design_id, r.version, r);
+      const r = await app.decks.createDesign(user, a.design, a.note ?? "create");
+      return designResult(app, user, r.deck_id, r.version, r);
     },
   }),
 
   patch_design: tool({
     title: "Patch design",
     description:
-      "Edit a design (new version): set_node merges props into a node, replace_node / insert_node / delete_node change the tree, set_artboard / add_artboard / delete_artboard the canvases, adapt_artboard copies an artboard to another format (auto layout reflows, spacing follows the type scale: lint the result), set_component edits a component (every instance follows), set_field the title or mode.",
+      "Edit a design (new version): set_node merges props into a node, replace_node / insert_node / delete_node change the tree, set_artboard / add_artboard / delete_artboard the canvases, adapt_artboard copies an artboard to another format (auto layout reflows, spacing follows the type scale: lint the result), set_component edits a component (every instance follows), set_field the title or mode. Pass the comment ids the patch answers in `resolves`.",
     input: z.object({
       design_id: designId,
       ops: z.array(DesignPatchOp).min(1),
       note: z.string().optional(),
-      resolves: z.array(z.number().int()).optional().describe("Comment ids this patch applies (list_design_comments)."),
+      resolves: z.array(z.number().int()).optional().describe("Comment ids this patch applies (list_comments)."),
     }),
     run: async (app, user, a) => {
-      const r = await app.designs.patch(user, a.design_id, a.ops, a.note ?? "patch");
-      const resolved = await app.designs.resolve(user, a.design_id, a.resolves ?? []);
-      return { ...designResult(app, user, r.design_id, r.version, r), resolved };
+      const r = await app.decks.patchDesign(user, a.design_id, a.ops, a.note ?? "patch");
+      const resolved = await app.decks.resolve(user, a.design_id, a.resolves ?? []);
+      return { ...designResult(app, user, r.deck_id, r.version, r), resolved };
     },
   }),
 
   open_design: tool({
     title: "Open design",
     description:
-      "A design's DesignSpec, versions, rendered artboards (PNG URL + node boxes), lint, your role on it (viewer, commenter, editor, owner) and its open comment threads.",
-    input: z.object({ design_id: designId, version: version }),
+      "A design's DesignSpec, versions, rendered artboards (PNG URL + node boxes), lint, your role on it, its type and approval status, and its comment threads (each on an artboard, `slide_id`, and optionally a `node`).",
+    input: z.object({ design_id: designId, version }),
     readOnly: true,
     run: async (app, user, a) => {
-      const d = await app.designs.design(user, a.design_id);
-      const r = await app.designs.render(user, a.design_id, a.version, ["png"]);
+      const d = await app.decks.deck(user, a.design_id, "viewer");
+      const r = await app.decks.designRender(user, a.design_id, a.version, ["png"]);
+      const threads = await app.decks.comments(user, a.design_id);
       return {
         ...designResult(app, user, a.design_id, r.version, r),
         title: d.title,
         pack_id: d.pack_id,
+        pack_version: d.pack_version,
+        pack_latest: d.pack.version,
         head: d.head,
         role: d.role,
-        me: user.id,
-        versions: await app.designs.versions(a.design_id),
-        spec: await app.designs.spec(a.design_id, r.version),
-        open_comments: await app.designs.comments(user, a.design_id, "open"),
+        me: user.anonymous ? null : user.id,
+        kind: d.kind,
+        kinds: (await approvalConfig(d.packDir)).kinds,
+        approval: await approvalOf(app.decks, user, a.design_id),
+        versions: await app.decks.versions(a.design_id),
+        spec: await app.decks.designSpec(a.design_id, r.version),
+        open_comments: threads.filter((c) => c.status === "open"),
+        resolved_comments: threads.filter((c) => c.status === "resolved"),
       };
     },
   }),
@@ -915,105 +946,42 @@ export const TOOLS = {
   export_design: tool({
     title: "Export design",
     description:
-      "Export a design: png (at `scale`), pdf (vector, selectable text) or svg (vector: rects, paths, one text element per line) as download URLs, one per artboard; or one artboard as code (html, react, tailwind), returned inline, colours and fonts as CSS variables named after the pack's roles.",
+      "Export a design: png (at `scale`), pdf (vector, selectable text) or svg (vector: rects, paths, one text element per line) as download URLs, one per artboard, and for pdf the whole design in one file (`pdf_url`); or one artboard as code (html, react, tailwind), returned inline, colours and fonts as CSS variables named after the pack's roles.",
     input: z.object({
       design_id: designId,
       format: z.enum([...OUTPUTS, ...CODE_TARGETS.filter((t) => t !== "html")]),
       artboard: z.string().optional().describe("Required for react and tailwind; default: every artboard."),
       scale: z.number().min(0.25).max(4).default(1).describe("PNG pixel density (2 = retina)."),
       version,
+      reason: z.string().optional().describe("Why a version with lint ERRORs is exported anyway (recorded)."),
     }),
     readOnly: true,
     run: async (app, user, a) => {
       if (a.format === "react" || a.format === "tailwind") {
         if (!a.artboard) throw new Error(`${a.format} exports one artboard: pass artboard`);
-        return app.designs.code(user, a.design_id, a.artboard, a.format, a.version);
+        return app.decks.designCode(user, a.design_id, a.artboard, a.format, a.version);
       }
       const format = a.format;
-      const r = await app.designs.render(user, a.design_id, a.version, [format], a.scale);
-      const q = `v=${r.version}${a.scale === 1 ? "" : `&scale=${a.scale}`}&${token(app, user, a.design_id)}`;
+      const scale = a.scale ?? 1;
+      const r = await app.decks.designRender(user, a.design_id, a.version, [format], scale);
+      // the export gate, as export_pptx: a version with lint ERRORs goes out with a recorded reason
+      const errors = r.findings.filter((f) => f.severity === "ERROR").length;
+      await recordExport(app.decks, user, a.design_id, r.version, errors, a.reason);
+      const q = `v=${r.version}${scale === 1 ? "" : `&scale=${scale}`}&${token(app, user, a.design_id)}`;
       const files = r.artboards
         .filter((b) => !a.artboard || b.id === a.artboard)
         .map((b) => ({ artboard: b.id, url: `${app.publicUrl}/designs/${a.design_id}/${b.id}.${format}?${q}` }));
       if (!files.length) throw new Error(`no artboard ${JSON.stringify(a.artboard)}`);
-      await audit(app.db, user, "export", "design", a.design_id, { format, version: r.version });
-      return { version: r.version, format, files };
+      await audit(app.db, user, "export", "deck", a.design_id, { format, version: r.version });
+      return {
+        version: r.version,
+        format,
+        files,
+        ...(format === "pdf" && !a.artboard ? { pdf_url: `${app.publicUrl}/designs/${a.design_id}/design.pdf?${q}` } : {}),
+        lint_errors: errors,
+        ...(errors && !a.reason?.trim() ? { warning: `v${r.version} has ${errors} lint ERROR(s): pass \`reason\` to record why it goes out anyway` } : {}),
+      };
     },
-  }),
-
-  list_designs: tool({
-    title: "List designs",
-    description: "Your designs and those shared with you, newest change first, with your role on each.",
-    input: z.object({}),
-    readOnly: true,
-    run: async (app, user) => ({ designs: await app.designs.list(user) }),
-  }),
-
-  restore_design: tool({
-    title: "Restore design version",
-    description: "Undo the last change of a design, or go back to a given version, as a new version: nothing is lost.",
-    input: z.object({ design_id: designId, version }),
-    run: async (app, user, a) => {
-      const r = await app.designs.restore(user, a.design_id, a.version);
-      return designResult(app, user, r.design_id, r.version, r);
-    },
-  }),
-
-  share_design: tool({
-    title: "Share design",
-    description: "Owner only. Give a person (user id) or a team (team id) a role on a design: viewer, commenter or editor. Sharing again changes the role.",
-    input: z.object({
-      design_id: designId,
-      principal_type: z.enum(["user", "team"]),
-      principal: z.string().min(1),
-      role: z.enum(["viewer", "commenter", "editor"]),
-    }),
-    run: (app, user, a) => app.designs.share(user, a.design_id, a.principal_type, a.principal, a.role),
-  }),
-
-  unshare_design: tool({
-    title: "Unshare design",
-    description: "Owner only. Remove a person's or a team's access to a design.",
-    input: z.object({ design_id: designId, principal_type: z.enum(["user", "team"]), principal: z.string().min(1) }),
-    run: (app, user, a) => app.designs.unshare(user, a.design_id, a.principal_type, a.principal),
-  }),
-
-  list_design_shares: tool({
-    title: "List design shares",
-    description: "Who has access to a design: its owner, and the people and teams it is shared with, with their role.",
-    input: z.object({ design_id: designId }),
-    readOnly: true,
-    run: (app, user, a) => app.designs.shares(user, a.design_id),
-  }),
-
-  add_design_comment: tool({
-    title: "Comment on a design",
-    description: "Comment on an artboard, or on one node of it (a node id from the spec or the node boxes); with parent_id, reply in that thread.",
-    input: z.object({
-      design_id: designId,
-      artboard: z.string().optional().describe("Required for a new thread."),
-      node: z.string().optional(),
-      text: z.string().min(1).max(4000),
-      parent_id: z.number().int().optional(),
-    }),
-    appOnly: true,
-    run: async (app, user, a) => ({ comment: await app.designs.addComment(user, a.design_id, a) }),
-  }),
-
-  list_design_comments: tool({
-    title: "List design comments",
-    description:
-      "Comment threads on a design, each anchored on an artboard and optionally a node, with status, author and replies (read them: they refine the request). Apply them with patch_design and pass their ids in `resolves`.",
-    input: z.object({ design_id: designId, status: z.enum(["open", "resolved", "all"]).default("open") }),
-    readOnly: true,
-    run: async (app, user, a) => ({ comments: await app.designs.comments(user, a.design_id, a.status === "all" ? undefined : a.status) }),
-  }),
-
-  resolve_design_comments: tool({
-    title: "Resolve design comments",
-    description: "Resolve comment threads by id without editing the design, or reopen them with status 'open'. An editor resolves any thread, a commenter only their own.",
-    input: z.object({ design_id: designId, ids: z.array(z.number().int()).min(1), status: z.enum(["open", "resolved"]).default("resolved") }),
-    run: async (app, user, a) => ({ ids: await app.designs.resolve(user, a.design_id, a.ids, a.status) }),
   }),
 } satisfies Record<string, Tool>;
 

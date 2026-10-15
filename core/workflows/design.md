@@ -27,11 +27,12 @@ several formats, a carousel) from a brief, laid out by the engine and checked by
    - Repeated pieces (a button, a tag, a card) are `components` with `{prop}` placeholders and
      `variants`; artboards hold `instance` nodes.
    - `max_lines` on headlines, `alt` on every image (empty for decorative ones).
-3. **Create.** `create_design`. Look at every artboard's `image_url`.
+3. **Create.** `create_design`, or start from an approved template (`library_list` with
+   `medium: "design"`, then `library_insert` without `deck_id`) and adapt its text. Look at every artboard's `image_url`.
 4. **Fix → re-check.** Every `errors` entry must go: shorten text, give it room, switch to a
    role that reads on its background, a larger style. Use `patch_design`. Weigh the
    `warnings`. A second format of the same message is `adapt_artboard`, then fix its lint.
-   Open comments (`open_design`, `list_design_comments`) are requests: apply them with
+   Open comments (`open_design`, `list_comments`) are requests: apply them with
    `patch_design` and pass their ids in `resolves`.
 5. **Deliver.** `export_design`: `png` (scale 2 for retina) for social and ads, `pdf` for print,
    `svg` for designers, `react` / `tailwind` for developers (one artboard each).

@@ -2,7 +2,8 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLang } from "../i18n.ts";
-import { DesignEditor, Designs, textTarget } from "./Designs.tsx";
+import { Decks } from "./Decks.tsx";
+import { DesignEditor, textTarget } from "./Designs.tsx";
 
 type Json = Record<string, unknown>;
 
@@ -41,8 +42,15 @@ const DESIGN = {
   },
   role: "owner",
   me: "local",
+  kind: null,
+  kinds: ["marketing"],
+  approval: { enabled: false },
+  versions: [
+    { version: 1, note: "create", author: "local", author_name: null, created_at: new Date().toISOString(), pack_version: 1 },
+    { version: 2, note: "patch", author: "local", author_name: null, created_at: new Date().toISOString(), pack_version: 1 },
+  ],
   open_comments: [
-    { id: 7, artboard: "post", node: "headline", text: "Shorter please", author: "bob", author_name: "Bob", status: "open", created_at: new Date().toISOString(), replies: [] },
+    { id: 7, slide_id: "post", node: "headline", text: "Shorter please", author: "bob", author_name: "Bob", status: "open", type: "suggestion", created_at: new Date().toISOString(), replies: [] },
   ],
 };
 const FORMATS = {
@@ -53,24 +61,36 @@ const FORMATS = {
   ],
   modes: ["dark"],
 };
+const ROWS = [
+  { id: "g1", title: "Launch campaign", pack_id: "acme-test", head: 2, owner: "me", role: "owner", kind: null, medium: "design", cover: "post", updated_at: new Date().toISOString() },
+];
 
-let calls: { name: string; args: Json }[];
+let calls: { url: string; name: string; args: Json }[];
 beforeEach(() => {
   setLang("en");
+  localStorage.clear();
+  Element.prototype.scrollTo = () => {}; // the agent panel scrolls its log; jsdom has no layout
   calls = [];
   vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
-    const name = url.replace("/api/tools/", "");
-    calls.push({ name, args: JSON.parse(String(init?.body ?? "{}")) });
-    const body: Json =
-      name === "list_designs"
-        ? { designs: [{ design_id: "g1", title: "Launch campaign", pack_id: "acme-test", version: 2, cover: "post", artboards: 2, updated_at: new Date().toISOString() }] }
-        : name === "list_formats"
-          ? FORMATS
+    const name = url.replace(/^.*\/tools\//, "").replace(/\?.*$/, "");
+    calls.push({ url, name, args: JSON.parse(String(init?.body ?? "{}")) });
+    // the app's other calls (models, Microsoft 365, me): not configured here
+    if (!url.includes("/tools/") && !url.startsWith("/api/decks")) return new Response(JSON.stringify({ message: "not here" }), { status: 404 });
+    const body: Json = url.startsWith("/api/decks")
+      ? { decks: ROWS }
+      : name === "list_formats"
+        ? FORMATS
+        : name === "list_packs"
+          ? { packs: [{ id: "acme-test", name: "Acme" }] }
           : name === "export_design"
             ? { filename: "LaunchCampaignPost.tsx", code: "export default function LaunchCampaignPost() {}" }
-            : name === "list_design_shares"
-              ? { shares: [{ principal_type: "team", principal: "design", role: "viewer" }] }
-              : DESIGN;
+            : name === "list_shares"
+              ? { owner: "local", people: [], general: { access: "private", role: "viewer", expires_at: null }, url: "" }
+              : name === "get_chat"
+                ? { messages: [], can_write: true }
+                : name === "library_list"
+                  ? { entries: [] }
+                  : DESIGN;
     return new Response(JSON.stringify(body));
   });
 });
@@ -80,12 +100,15 @@ afterEach(() => {
 });
 
 describe("designs", () => {
-  it("lists designs with their cover artboard", async () => {
-    render(<Designs />);
+  it("lists designs on the decks page, by medium, with their cover artboard", async () => {
+    render(<Decks medium="design" />);
+    expect(await screen.findByRole("heading", { name: "Designs" })).toBeTruthy();
     const link = await screen.findByRole("link", { name: /Launch campaign/ });
     expect(link.getAttribute("href")).toBe("/designs/g1");
-    expect(within(link).getByText(/acme-test · 2 artboards · v2/)).toBeTruthy();
     expect(link.querySelector("img")?.getAttribute("src")).toBe("/designs/g1/post.png?v=2");
+    expect(calls.find((c) => c.url.startsWith("/api/decks"))?.url).toContain("medium=design");
+    expect(screen.queryByRole("button", { name: /Import PPTX/ })).toBeNull();
+    expect(screen.getAllByRole("button", { name: /New design/ }).length).toBeGreaterThan(0);
   });
 
   it("shows each artboard with its own checks, and edits through the tools", async () => {
@@ -116,7 +139,7 @@ describe("designs", () => {
     expect(calls.find((c) => c.name === "export_design")?.args).toEqual({ design_id: "g1", format: "react", artboard: "post" });
   });
 
-  it("edits a text in place, a component's prop too, and comments on a node", async () => {
+  it("edits a text in place, a component's prop too, and comments on a node like on a deck", async () => {
     render(<DesignEditor id="g1" />);
     const post = await screen.findByRole("region", { name: "Artboard post" });
     expect(within(post).getByText("Shorter please")).toBeTruthy();
@@ -134,22 +157,43 @@ describe("designs", () => {
     expect((within(cta).getByLabelText("Text") as HTMLTextAreaElement).value).toBe("Try it");
     fireEvent.change(within(cta).getByLabelText("Comment"), { target: { value: "Bigger button" } });
     fireEvent.click(within(cta).getByRole("button", { name: "Comment" }));
-    await waitFor(() => expect(calls.find((c) => c.name === "add_design_comment")).toBeTruthy());
-    expect(calls.find((c) => c.name === "add_design_comment")?.args).toEqual({ design_id: "g1", artboard: "post", node: "cta__label", text: "Bigger button" });
+    await waitFor(() => expect(calls.find((c) => c.name === "add_comment")).toBeTruthy());
+    expect(calls.find((c) => c.name === "add_comment")?.args).toEqual({ deck_id: "g1", slide_id: "post", node: "cta__label", text: "Bigger button" });
 
     fireEvent.click(within(post).getByRole("button", { name: "Resolve" }));
-    await waitFor(() => expect(calls.find((c) => c.name === "resolve_design_comments")?.args).toEqual({ design_id: "g1", ids: [7] }));
+    await waitFor(() => expect(calls.find((c) => c.name === "resolve_comments")?.args).toEqual({ deck_id: "g1", comment_ids: [7] }));
   });
 
-  it("shares with people and teams", async () => {
+  it("has a deck's history, type, share and export gate", async () => {
     render(<DesignEditor id="g1" />);
-    fireEvent.click(await screen.findByRole("button", { name: "Share" }));
-    const dialog = await screen.findByRole("dialog", { name: "Share design" });
-    expect(await within(dialog).findByText("design")).toBeTruthy();
-    fireEvent.change(within(dialog).getByLabelText("User id"), { target: { value: "bob" } });
-    fireEvent.change(within(dialog).getByLabelText("Role"), { target: { value: "editor" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Add" }));
-    await waitFor(() => expect(calls.find((c) => c.name === "share_design")?.args).toEqual({ design_id: "g1", principal_type: "user", principal: "bob", role: "editor" }));
+    await screen.findByRole("region", { name: "Artboard post" });
+    fireEvent.click(screen.getByRole("button", { name: /History/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Restore v1" }));
+    await waitFor(() => expect(calls.find((c) => c.name === "restore_version")?.args).toEqual({ deck_id: "g1", version: 1 }));
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Deck type" }), { target: { value: "marketing" } });
+    await waitFor(() => expect(calls.find((c) => c.name === "set_deck_kind")?.args).toEqual({ deck_id: "g1", kind: "marketing" }));
+
+    fireEvent.click(screen.getByRole("button", { name: /^Share$/ }));
+    await waitFor(() => expect(calls.find((c) => c.name === "list_shares")?.args).toEqual({ deck_id: "g1" }));
+  });
+
+  it("asks why before a version with lint ERRORs goes out", async () => {
+    render(<DesignEditor id="g1" />);
+    await screen.findByRole("region", { name: "Artboard post" });
+    fireEvent.click(screen.getByRole("button", { name: "PDF" }));
+    expect(await screen.findByRole("dialog")).toBeTruthy();
+    expect(calls.find((c) => c.name === "export_design")).toBeUndefined();
+  });
+
+  it("opens with a share link through the design's own tools", async () => {
+    render(<DesignEditor id="g1" link="k=abc" />);
+    const post = await screen.findByRole("region", { name: "Artboard post" });
+    expect(calls.some((c) => c.url === "/designs/g1/tools/open_design?k=abc")).toBe(true);
+    expect(calls.some((c) => c.url.startsWith("/api/tools/"))).toBe(false);
+    expect(within(post).getByRole("img", { name: "Artboard post" }).getAttribute("src")).toBe("/designs/g1/post.png?v=2&k=abc");
+    expect(screen.queryByRole("button", { name: /History/ })).toBeNull();
+    expect(screen.queryByRole("complementary", { name: "Agent and library" })).toBeNull();
   });
 
   it("finds the text behind a node: its own, or the instance prop it shows", () => {

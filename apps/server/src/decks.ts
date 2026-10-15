@@ -2,12 +2,13 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import { existsSync, statSync } from "node:fs";
 import { cp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import type { DeckSpec, PatchOp } from "@calque/deckspec";
+import type { DeckSpec, DesignPatchOp, DesignSpec, PatchOp } from "@calque/deckspec";
 import { audit } from "./audit.ts";
 import { recordLint } from "./compliance.ts";
 import type { Db } from "./db.ts";
 import { engine } from "./engine.ts";
 import { copyFile, FILE_REF, getFile, saveFile, uploadPath } from "./files.ts";
+import { CODE_TARGETS, designStrings, isDesign, mapDesignRefs, pickArtboards, renderDesign, type DesignRender, type Medium, type Output, OUTPUTS } from "./designs.ts";
 import { libraryImages } from "./images.ts";
 import { isAdmin } from "./models.ts";
 import { Forbidden, getPack, listPacks, NotFound, visible, type PackRow, type User } from "./packs.ts";
@@ -32,6 +33,8 @@ export interface Finding {
   slide: number | null;
   slide_id?: string | null;
   shape_id: number | null;
+  /** a design's node (slide_id is its artboard) */
+  node?: string | null;
   check: string;
   message: string;
 }
@@ -53,8 +56,11 @@ export interface Comment {
   id: number;
   deck_id: string;
   version: number;
+  /** a slide id, or a design's artboard id */
   slide_id: string;
   shape_id: number | null;
+  /** a design's node id, null on a deck */
+  node: string | null;
   text: string;
   author: string;
   /** The author's display name (the token's `name` claim), null for a guest or a nameless user. */
@@ -90,7 +96,12 @@ interface DeckRow {
   pack_version: number | null;
   /** The deck's type (internal, external, marketing…): approval may apply to some types only (review.ts). */
   kind: string | null;
+  /** deck (PPTX, DeckSpec) or design (DesignSpec: social, ads, banners, posters, web) */
+  medium: Medium;
 }
+
+/** A version's spec, whatever the medium. */
+export type AnySpec = DeckSpec | DesignSpec;
 
 /** What an import recognised: slides kept drawn, imported as clones, demoted (and why), and
 drawn slides changed in Calque after the file was exported (the file wins). */
@@ -102,6 +113,11 @@ export interface ImportReport {
 }
 
 export class Conflict extends Error {}
+
+/** Every `file:<id>` image of a deck's clone values or a design's image nodes, rewritten by `fn`. */
+function mapRefs<S extends AnySpec>(spec: S, fn: (id: string) => string): S {
+  return (isDesign(spec) ? mapDesignRefs(spec, fn) : mapFileRefs(spec, fn)) as S;
+}
 
 /** Every `file:<id>` image reference in a DeckSpec's clone values, rewritten by `fn`. */
 function mapFileRefs(spec: DeckSpec, fn: (id: string) => string): DeckSpec {
@@ -242,31 +258,34 @@ export class Decks {
   on packs they no longer see are left out). `pack_id` keeps the decks on that pack; `query` the
   decks whose name or current slides' text contain every word of it (case and accents ignored), so
   a client's name finds the decks made for it. */
-  async list(user: User, filter: { query?: string | undefined; pack_id?: string | undefined } = {}) {
-    const { rows } = await this.db.query<DeckRow & { updated_at: string; spec: DeckSpec }>(
+  async list(user: User, filter: { query?: string | undefined; pack_id?: string | undefined; medium?: Medium | undefined } = {}) {
+    const { rows } = await this.db.query<DeckRow & { updated_at: string; spec: AnySpec }>(
       `select d.*, v.created_at as updated_at, v.spec from decks d
        join deck_versions v on v.deck_id = d.id and v.version = d.head
        where (d.owner = $1 or d.id in (select deck_id from deck_shares
          where (principal_type = 'user' and principal = $1) or (principal_type = 'team' and principal = any($2::text[]))))
-         and ($3::text is null or d.pack_id = $3)
+         and ($3::text is null or d.pack_id = $3) and ($4::text is null or d.medium = $4)
        order by v.created_at desc`,
-      [user.id, user.teams, filter.pack_id || null],
+      [user.id, user.teams, filter.pack_id || null, filter.medium ?? null],
     );
     const seen = new Set((await listPacks(this.db, user, { archived: true })).map((p) => p.id));
     const words = fold(filter.query ?? "").split(/\s+/).filter(Boolean);
-    const matches = (r: DeckRow & { spec: DeckSpec }) => {
+    const matches = (r: DeckRow & { spec: AnySpec }) => {
       if (!words.length) return true;
-      const text = fold([r.name ?? "", ...strings(r.spec)].join("\n"));
+      const text = fold([r.name ?? "", ...(isDesign(r.spec) ? designStrings(r.spec) : strings(r.spec))].join("\n"));
       return words.every((w) => text.includes(w));
     };
     const grants = await granted(this.db, user, rows.filter((r) => r.owner !== user.id).map((r) => r.id));
     return rows
       .filter((r) => seen.has(r.pack_id) && matches(r))
-      .map(({ id, pack_id, pack_version, owner, title, name, head, updated_at, kind }) => ({
+      .map(({ id, pack_id, pack_version, owner, title, name, head, updated_at, kind, medium, spec }) => ({
         id,
         pack_id,
         pack_version,
         kind,
+        medium,
+        // a design's first artboard: the cover the lists show
+        ...(isDesign(spec) ? { cover: spec.artboards[0]?.id ?? null, artboards: spec.artboards.length } : {}),
         owner,
         title: name ?? title,
         head,
@@ -292,20 +311,20 @@ export class Decks {
   async duplicate(user: User, id: string, name?: string) {
     if (user.anonymous) throw new Forbidden("sign in to duplicate a deck");
     const src = await this.deck(user, id, "viewer");
-    let spec = await this.spec(id, src.head);
+    let spec = await this.anySpec(id, src.head);
     const copy = randomUUID();
     await mkdir(this.dir(copy), { recursive: true });
     try {
-      if (spec.base) await cp(this.basePath(id, spec.base), join(this.dir(copy), spec.base));
+      if (!isDesign(spec) && spec.base) await cp(this.basePath(id, spec.base), join(this.dir(copy), spec.base));
       const refs = new Map<string, string>();
-      mapFileRefs(spec, (fid) => (refs.set(fid, fid), fid));
+      mapRefs(spec, (fid) => (refs.set(fid, fid), fid));
       for (const fid of refs.keys()) {
         const { rows } = await this.db.query<{ name: string; type: string }>("select name, type from files where id = $1", [fid]);
         if (!rows[0]) throw new NotFound(`deck ${id} places file ${fid}, which no longer exists`);
         const f = await saveFile(this.db, this.data, user, rows[0].name, rows[0].type, await readFile(uploadPath(this.data, fid)));
         refs.set(fid, f.file_id);
       }
-      spec = mapFileRefs(spec, (fid) => `${FILE_REF}${refs.get(fid) ?? fid}`);
+      spec = isDesign(spec) ? mapDesignRefs(spec, (fid) => refs.get(fid) ?? fid) : mapFileRefs(spec, (fid) => `${FILE_REF}${refs.get(fid) ?? fid}`);
       const r = await this.create(user, spec, `duplicate of ${src.title} v${src.head}`, copy);
       const title = name?.trim() || `${src.title} (copy)`;
       await this.db.query("update decks set name = $2 where id = $1", [copy, title]);
@@ -316,11 +335,22 @@ export class Decks {
     }
   }
 
+  /** A deck version's DeckSpec. A design is refused: the deck tools that read slides do not apply. */
   async spec(id: string, version: number): Promise<DeckSpec> {
-    const { rows } = await this.db.query<{ spec: DeckSpec }>(
-      "select spec from deck_versions where deck_id = $1 and version = $2",
-      [id, version],
-    );
+    const spec = await this.anySpec(id, version);
+    if (isDesign(spec)) throw new Error(`${id} is a design, not a deck: use open_design, patch_design and export_design`);
+    return spec;
+  }
+
+  /** A design version's DesignSpec; a deck is refused. */
+  async designSpec(id: string, version: number): Promise<DesignSpec> {
+    const spec = await this.anySpec(id, version);
+    if (!isDesign(spec)) throw new Error(`${id} is a deck, not a design: use open_deck and patch_deck`);
+    return spec;
+  }
+
+  async anySpec(id: string, version: number): Promise<AnySpec> {
+    const { rows } = await this.db.query<{ spec: AnySpec }>("select spec from deck_versions where deck_id = $1 and version = $2", [id, version]);
     if (!rows[0]) throw new NotFound(`deck ${id} has no version ${version}`);
     return rows[0].spec;
   }
@@ -333,28 +363,42 @@ export class Decks {
     return rows;
   }
 
-  /** New deck: builds before anything is stored, so a deck that does not build is never saved. */
-  async create(user: User, spec: DeckSpec, note: string, id: string = randomUUID()) {
+  /** New deck or design: built (laid out) before anything is stored, so one that does not build
+  is never saved. */
+  async create(user: User, spec: AnySpec, note: string, id: string = randomUUID()) {
     const pack = await getPack(this.db, user, spec.pack_id);
-    if (pack.archived) throw new Error(`pack ${spec.pack_id} is archived: no new decks on it`);
+    if (pack.archived) throw new Error(`pack ${spec.pack_id} is archived: nothing new on it`);
     spec = await this.adoptLibraryImages(user, spec);
     await this.ownFiles(user, spec);
     await mkdir(this.dir(id), { recursive: true });
-    const report = await this.build(pack.dir, id, spec, 1);
-    await this.db.query("insert into decks (id, pack_id, owner, title, head, pack_version, owner_teams) values ($1, $2, $3, $4, 1, $5, $6)", [
+    const report = await this.buildAny(pack.dir, id, spec, 1);
+    await this.db.query("insert into decks (id, pack_id, owner, title, head, pack_version, owner_teams, medium) values ($1, $2, $3, $4, 1, $5, $6, $7)", [
       id,
       spec.pack_id,
       user.id,
       spec.title,
       pack.version,
       JSON.stringify(user.teams),
+      isDesign(spec) ? "design" : "deck",
     ]);
     await this.db.query(
       "insert into deck_versions (deck_id, version, spec, note, author, author_name, pack_version) values ($1, 1, $2, $3, $4, $5, $6)",
       [id, JSON.stringify(spec), note, user.id, nameOf(user), pack.version],
     );
-    await audit(this.db, user, "create", "deck", id, { title: spec.title, pack_id: spec.pack_id, note });
-    return { deck_id: id, version: 1, ...summary(report) };
+    await audit(this.db, user, "create", "deck", id, { title: spec.title, pack_id: spec.pack_id, note, ...(isDesign(spec) ? { medium: "design" } : {}) });
+    return { deck_id: id, version: 1, ...report };
+  }
+
+  /** Build a deck version (PPTX), or lay a design version out (PNG per artboard): the summary a
+  create or a commit returns. */
+  private async buildAny(packDir: string, id: string, spec: AnySpec, version: number): Promise<ReturnType<typeof summary> | DesignRender> {
+    if (isDesign(spec)) return renderDesign(this.data, packDir, spec, this.designDir(id, version), ["png"], 1);
+    return summary(await this.build(packDir, id, spec, version));
+  }
+
+  /** Where a design version's renders are cached (one folder per version, and per scale). */
+  designDir(id: string, version: number, scale = 1): string {
+    return join(this.dir(id), `design-v${version}${scale === 1 ? "" : `-x${scale}`}`);
   }
 
   /** Run one mutation of deck `id` at a time: versions are built to `v<n>.pptx` before commit. */
@@ -368,7 +412,7 @@ export class Decks {
   /** Store `spec` as the next version of `id`, if `id` is still at `from` (else Conflict). It is
   built on pack release `packVersion`; by default the release the deck is on, or the latest one of
   another pack. */
-  async commit(user: User, id: string, from: number, spec: DeckSpec, note: string, undoTo: number | null = from, packVersion?: number | null) {
+  async commit(user: User, id: string, from: number, spec: AnySpec, note: string, undoTo: number | null = from, packVersion?: number | null) {
     const deck = await this.deck(user, id, "editor");
     // a version on another pack is a re-brand (or a restore across one): the caller must see it
     const pack = spec.pack_id === deck.pack_id ? deck.pack : await getPack(this.db, user, spec.pack_id);
@@ -377,7 +421,8 @@ export class Decks {
     spec = await this.adoptLibraryImages(user, spec);
     await this.ownFiles(user, spec);
     const next = from + 1;
-    const report = await this.build(packDir, id, spec, next);
+    if (isDesign(spec) !== (deck.medium === "design")) throw new Error(`${id} is a ${deck.medium}: a version must be one too`);
+    const report = await this.buildAny(packDir, id, spec, next);
     // an approval is for the version approved: a change sends the deck back to draft (review.ts);
     // a commit on another pack (rebrand_deck, or restoring a version from before it) moves the deck
     const { rows } = await this.db.query(
@@ -392,7 +437,7 @@ export class Decks {
       [id, next, JSON.stringify(spec), note, user.id, nameOf(user), undoTo, release],
     );
     await audit(this.db, user, "edit", "deck", id, { version: next, note });
-    return { deck_id: id, version: next, ...summary(report) };
+    return { deck_id: id, version: next, ...report };
   }
 
   patch(user: User, id: string, ops: PatchOp[], note: string) {
@@ -404,6 +449,68 @@ export class Decks {
     const spec = await this.spec(id, deck.head);
     const res = await engine<{ deck: DeckSpec }>("patch", { pack: deck.packDir, deck: spec, ops });
     return this.commit(user, id, deck.head, res.deck, note);
+  }
+
+  /** A new design (create, typed for the design tools). */
+  async createDesign(user: User, spec: DesignSpec, note: string) {
+    return (await this.create(user, spec, note)) as { deck_id: string; version: number } & DesignRender;
+  }
+
+  /** Apply design patch ops (the engine's design_patch) as the next version of design `id`. */
+  patchDesign(user: User, id: string, ops: DesignPatchOp[], note: string) {
+    return this.serial(id, async () => {
+      const deck = await this.deck(user, id, "editor");
+      const spec = await this.designSpec(id, deck.head);
+      const res = await engine<{ design: DesignSpec }>("design_patch", { pack: deck.packDir, design: spec, ops });
+      return (await this.commit(user, id, deck.head, res.design, note)) as { deck_id: string; version: number } & DesignRender;
+    });
+  }
+
+  /** A design version's renders: `outputs` at `scale`, cached per version and scale (one render of
+  a design at a time: they share its cache folders). */
+  async designRender(user: User, id: string, version: number | undefined, outputs: Output[], scale = 1): Promise<DesignRender & { version: number }> {
+    const deck = await this.deck(user, id, "viewer");
+    const v = version ?? deck.head;
+    const spec = await this.designSpec(id, v);
+    const dir = this.designDir(id, v, scale);
+    const meta = join(dir, "render.json");
+    return this.serial(`${id}:render`, async () => {
+      let have: Output[] = [];
+      if (existsSync(meta)) {
+        const cached = JSON.parse(await readFile(meta, "utf8")) as DesignRender;
+        const all = cached.artboards.every((a) => outputs.every((o) => a.files[o] && existsSync(a.files[o])));
+        if (all && (!outputs.includes("pdf") || (cached.pdf && existsSync(cached.pdf)))) return { version: v, ...cached };
+        have = OUTPUTS.filter((o) => cached.artboards.every((a) => a.files[o]));
+      }
+      // re-render what was there too: the folder is replaced as a whole
+      const packDir = await this.packDirOf(user, deck, id, v, spec.pack_id);
+      return { version: v, ...(await renderDesign(this.data, packDir, spec, dir, [...have, ...outputs], scale)) };
+    });
+  }
+
+  /** One artboard of a design as html, react or tailwind code. */
+  async designCode(user: User, id: string, artboard: string, target: (typeof CODE_TARGETS)[number], version?: number) {
+    const deck = await this.deck(user, id, "viewer");
+    const v = version ?? deck.head;
+    const spec = await this.designSpec(id, v);
+    const r = await engine<{ filename: string; code: string }>("design_code", {
+      pack: await this.packDirOf(user, deck, id, v, spec.pack_id),
+      design: spec,
+      artboard,
+      target,
+      image_roots: [deck.packDir],
+      file_root: join(this.data, "uploads"),
+    });
+    return { version: v, filename: r.filename, code: r.code };
+  }
+
+  /** The pack release version `v` of document `id` builds on: the one it recorded (its own pack,
+  before a re-brand); the document's release for the head of versions that recorded none. */
+  private async packDirOf(user: User, deck: DeckRow & { packDir: string; pack: PackRow }, id: string, v: number, packId: string): Promise<string> {
+    const { rows } = await this.db.query<{ pack_version: number | null }>("select pack_version from deck_versions where deck_id = $1 and version = $2", [id, v]);
+    const release = rows[0]?.pack_version ?? (v === deck.head ? deck.pack_version : null);
+    if (packId === deck.pack_id && release === deck.pack_version) return deck.packDir;
+    return this.releaseDir(packId === deck.pack_id ? deck.pack : await getPack(this.db, user, packId), release);
   }
 
   /** Back to `version` as a new version; no version = undo the last change. */
@@ -428,23 +535,24 @@ export class Decks {
     );
     if (!rows[0]) throw new NotFound(`deck ${id} has no version ${target}`);
     // undoing the restore walks on back from the restored version, on the pack release it was on
-    return this.commit(user, id, deck.head, await this.spec(id, target), `restore v${target}`, rows[0].undo_to, rows[0].pack_version);
+    return this.commit(user, id, deck.head, await this.anySpec(id, target), `restore v${target}`, rows[0].undo_to, rows[0].pack_version);
   }
 
   /** `spec` with the approved library images it places (images.ts, `file:<id>`) copied to `user`'s
   uploads: the deck keeps its own copy, whatever happens to the library. */
-  private async adoptLibraryImages(user: User, spec: DeckSpec): Promise<DeckSpec> {
+  private async adoptLibraryImages<S extends AnySpec>(user: User, spec: S): Promise<S> {
     const ids = new Set<string>();
-    mapFileRefs(spec, (fid) => (ids.add(fid), fid));
+    mapRefs(spec, (fid) => (ids.add(fid), fid));
     const copies = new Map<string, string>();
     for (const fid of await libraryImages({ db: this.db }, user, [...ids])) copies.set(fid, (await copyFile(this.db, this.data, user, fid)).file_id);
-    return copies.size ? mapFileRefs(spec, (fid) => `${FILE_REF}${copies.get(fid) ?? fid}`) : spec;
+    if (!copies.size) return spec;
+    return (isDesign(spec) ? mapDesignRefs(spec, (fid) => copies.get(fid) ?? fid) : mapFileRefs(spec, (fid) => `${FILE_REF}${copies.get(fid) ?? fid}`)) as S;
   }
 
-  /** A DeckSpec may only place the uploaded files of the user writing it. */
-  private async ownFiles(user: User, spec: DeckSpec) {
+  /** A spec may only place the uploaded files of the user writing it. */
+  private async ownFiles(user: User, spec: AnySpec) {
     const ids: string[] = [];
-    mapFileRefs(spec, (fid) => (ids.push(fid), fid));
+    mapRefs(spec, (fid) => (ids.push(fid), fid));
     for (const fid of ids) await getFile(this.db, this.data, user, fid);
   }
 
@@ -485,6 +593,13 @@ export class Decks {
   }
 
   async lint(user: User, id: string, version?: number): Promise<{ version: number; findings: Finding[]; safe_checks: string[] }> {
+    if ((await this.deck(user, id, "viewer")).medium === "design") {
+      // a design's lint comes with its layout: each finding on an artboard (slide_id) and a node
+      const r = await this.designRender(user, id, version, ["png"]);
+      const findings: Finding[] = r.findings.map((f) => ({ severity: f.severity, slide: null, slide_id: f.artboard, shape_id: null, node: f.node, check: f.check, message: f.message }));
+      await recordLint(this.db, id, r.version, findings);
+      return { version: r.version, findings, safe_checks: [] };
+    }
     const { deck, version: v, spec, report } = await this.report(user, id, version);
     const byPos = new Map(Object.entries(report.slides).map(([sid, s]) => [s.position, sid]));
     // template slide numbers only mean something for slides cloned from the pack template
@@ -601,6 +716,13 @@ export class Decks {
     const deck = await this.deck(user, id, "editor");
     if (packId === deck.pack_id) throw new Error(`deck ${id} is already on ${packId}`);
     const to = await getPack(this.db, user, packId);
+    if (deck.medium === "design") {
+      // a design names roles, not values: it moves as is and lays out on the new pack (the
+      // validation names any colour role or mode the new pack lacks)
+      const design = await this.designSpec(id, deck.head);
+      const r = await this.commit(user, id, deck.head, { ...design, pack_id: to.id }, `re-brand ${deck.pack_id} -> ${packId}`);
+      return { ...r, rebrand: {} };
+    }
     const spec = await this.spec(id, deck.head);
     const res = await engine<{ deck: DeckSpec; report: Record<string, unknown> }>("rebrand", {
       pack: deck.packDir,
@@ -624,9 +746,9 @@ export class Decks {
     const deck = await this.deck(user, id, "editor");
     const latest = deck.pack.version;
     if (deck.pack_version === latest) throw new Error(`deck ${id} is already on the latest release of ${deck.pack_id} (${latest})`);
-    let spec = await this.spec(id, deck.head);
+    let spec: AnySpec = await this.anySpec(id, deck.head);
     let rebrand: Record<string, unknown> | undefined;
-    if (!(await sameTemplate(deck.packDir, deck.pack.dir))) {
+    if (!isDesign(spec) && !(await sameTemplate(deck.packDir, deck.pack.dir))) {
       const res = await engine<{ deck: DeckSpec; report: Record<string, unknown> }>("rebrand", { pack: deck.packDir, to_pack: deck.pack.dir, deck: spec, drop });
       spec = res.deck;
       rebrand = res.report;
@@ -666,6 +788,16 @@ export class Decks {
   of its own. Returns the new deck's id. */
   async snapshot(user: User, from: string, slideId: string, owner: User, title: string): Promise<string> {
     const src = await this.deck(user, from, "viewer");
+    if (src.medium === "design") {
+      // a design's artboard (a template for others): a one-artboard design of the library's
+      const design = await this.designSpec(from, src.head);
+      const picked = pickArtboards(design, [slideId], { ...design, artboards: [] });
+      const one = await this.adoptOthersFiles(owner, { ...design, title, artboards: picked.artboards, components: picked.components });
+      if (!Object.keys(one.components ?? {}).length) delete one.components;
+      const id = randomUUID();
+      await this.create(owner, one, `from ${src.title}`, id);
+      return id;
+    }
     const spec = await this.spec(from, src.head);
     const found = spec.slides.find((x) => x.id === slideId);
     if (!found) throw new NotFound(`deck ${from} has no slide ${JSON.stringify(slideId)}`);
@@ -695,6 +827,9 @@ export class Decks {
 
   private async copyNow(user: User, from: string, ids: string[], to: string, at?: number, version?: number, reader: User = user) {
     const src = await this.deck(reader, from, "viewer");
+    const dstRow = await this.deck(user, to, "editor");
+    if ((src.medium === "design") !== (dstRow.medium === "design")) throw new Error(`slides copy between decks, artboards between designs: ${from} is a ${src.medium}, ${to} a ${dstRow.medium}`);
+    if (src.medium === "design") return this.copyArtboards(user, src, ids, dstRow, at, version);
     const srcSpec = await this.spec(from, version ?? src.head);
     const dst = await this.deck(user, to, "editor");
     const spec = structuredClone(await this.spec(to, dst.head));
@@ -745,6 +880,40 @@ export class Decks {
     }
   }
 
+  /** Artboards `ids` of design `src` (with the components they use) into design `dst` at `at`
+  (default: the end), as the next version of `dst`; components `dst` already has keep its own. */
+  private async copyArtboards(user: User, src: DeckRow, ids: string[], dst: DeckRow, at?: number, version?: number) {
+    const from = await this.designSpec(src.id, version ?? src.head);
+    const spec = structuredClone(await this.designSpec(dst.id, dst.head));
+    const picked = pickArtboards(from, ids, spec);
+    let moved = { ...from, artboards: picked.artboards, components: picked.components } as DesignSpec;
+    moved = await this.adoptOthersFiles(user, moved);
+    spec.artboards.splice(Math.min(at ?? spec.artboards.length, spec.artboards.length), 0, ...moved.artboards);
+    const components = { ...(moved.components ?? {}), ...(spec.components ?? {}) };
+    if (Object.keys(components).length) spec.components = components;
+    const r = await this.commit(user, dst.id, dst.head, spec, `copy ${ids.length} artboard(s) from ${src.title}`);
+    return { ...r, copied: picked.renamed };
+  }
+
+  /** `spec` with the `file:<id>` images `user` does not own rewritten to copies of their own. */
+  adoptFilesOf(user: User, spec: DesignSpec): Promise<DesignSpec> {
+    return this.adoptOthersFiles(user, spec);
+  }
+
+  private async adoptOthersFiles(user: User, spec: DesignSpec): Promise<DesignSpec> {
+    const ids = new Set<string>();
+    mapDesignRefs(spec, (fid) => (ids.add(fid), fid));
+    const copies = new Map<string, string>();
+    for (const fid of ids) {
+      const mine = await getFile(this.db, this.data, user, fid).then(
+        () => true,
+        () => false,
+      );
+      if (!mine) copies.set(fid, (await copyFile(this.db, this.data, user, fid)).file_id);
+    }
+    return copies.size ? mapDesignRefs(spec, (fid) => copies.get(fid) ?? fid) : spec;
+  }
+
   async exportPath(user: User, id: string, version?: number): Promise<{ version: number; path: string }> {
     const { version: v, report } = await this.report(user, id, version);
     await audit(this.db, user, "export", "deck", id, { version: v });
@@ -753,6 +922,10 @@ export class Decks {
 
   /** The version as a PDF, rendered by LibreOffice as the previews are; redone when the PPTX is newer. */
   async exportPdf(user: User, id: string, version?: number): Promise<{ version: number; path: string }> {
+    if ((await this.deck(user, id, "viewer")).medium === "design") {
+      const r = await this.designRender(user, id, version, ["pdf"]);
+      return { version: r.version, path: r.pdf as string };
+    }
     const { deck, version: v, report } = await this.report(user, id, version);
     const out = join(this.dir(id), `v${v}.pdf`);
     if (!existsSync(out) || statSync(out).mtimeMs < statSync(report.path).mtimeMs)
@@ -786,22 +959,24 @@ export class Decks {
   async addComment(
     user: User,
     id: string,
-    c: { slide_id?: string | undefined; shape_id?: number | null | undefined; text: string; parent_id?: number | undefined; type?: Comment["type"] | undefined },
+    c: { slide_id?: string | undefined; shape_id?: number | null | undefined; node?: string | null | undefined; text: string; parent_id?: number | undefined; type?: Comment["type"] | undefined },
   ) {
     const deck = await this.deck(user, id, "commenter");
-    let anchor = { slide_id: c.slide_id, shape_id: c.shape_id ?? null };
+    let anchor = { slide_id: c.slide_id, shape_id: c.shape_id ?? null, node: c.node ?? null };
     if (c.parent_id !== undefined) {
       const { rows } = await this.db.query<Comment>("select * from comments where deck_id = $1 and id = $2", [id, c.parent_id]);
       const parent = rows[0];
       if (!parent) throw new NotFound(`deck ${id} has no comment ${c.parent_id}`);
       if (parent.parent_id !== null) throw new Error("reply to the thread's first comment: threads are one level deep");
-      anchor = { slide_id: parent.slide_id, shape_id: parent.shape_id };
+      anchor = { slide_id: parent.slide_id, shape_id: parent.shape_id, node: parent.node };
     }
-    if (!anchor.slide_id) throw new Error("a comment needs a slide_id (or a parent_id to reply)");
+    if (!anchor.slide_id) throw new Error("a comment needs a slide_id (a design's: an artboard id), or a parent_id to reply");
+    if (deck.medium === "design" && !(await this.designSpec(id, deck.head)).artboards.some((b) => b.id === anchor.slide_id))
+      throw new Error(`design ${id} has no artboard ${JSON.stringify(anchor.slide_id)}`);
     const { rows } = await this.db.query<Comment>(
-      `insert into comments (deck_id, version, slide_id, shape_id, text, author, author_name, parent_id, type) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      `insert into comments (deck_id, version, slide_id, shape_id, node, text, author, author_name, parent_id, type) values ($1, $2, $3, $4, $10, $5, $6, $7, $8, $9)
        returning *`,
-      [id, deck.head, anchor.slide_id, anchor.shape_id, c.text, user.anonymous ? "guest" : user.id, nameOf(user), c.parent_id ?? null, c.parent_id === undefined ? (c.type ?? "suggestion") : "suggestion"],
+      [id, deck.head, anchor.slide_id, anchor.shape_id, c.text, user.anonymous ? "guest" : user.id, nameOf(user), c.parent_id ?? null, c.parent_id === undefined ? (c.type ?? "suggestion") : "suggestion", anchor.node],
     );
     return rows[0] as Comment;
   }

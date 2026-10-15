@@ -286,6 +286,9 @@ def test_render_exports_and_lint(PACK, spec, tmp_path):
     post, banner = r["artboards"]
     assert png_size(post["files"]["png"]) == (540, 540)
     assert Path(post["files"]["pdf"]).read_bytes().startswith(b"%PDF")
+    from pypdf import PdfReader
+
+    assert len(PdfReader(r["pdf"]).pages) == 2  # the whole design: one page per artboard
     svg = Path(post["files"]["svg"]).read_text()
     assert "<text" in svg and "Ship decks" in svg and 'id="cta1"' in svg
     assert post["boxes"]["post"] == {"x": 0, "y": 0, "w": 1080, "h": 1080}

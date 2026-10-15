@@ -15,8 +15,10 @@ export interface ChatInput {
   messages: Message[];
   workflow?: Workflow | undefined;
   pack_id?: string | undefined;
-  /** The deck the user has open: the chat edits it rather than building a new one. */
+  /** The deck (or design) the user has open: the chat edits it rather than building a new one. */
   deck_id?: string | undefined;
+  /** what `deck_id` is: a deck (default) or a design */
+  medium?: "deck" | "design" | undefined;
   /** Files the user attached, as the server prepared them: an image's `ref`, a document's `text`. */
   files?: Attachment[] | undefined;
   /** after each step: the tools called, a failed one with its `error` */
@@ -73,7 +75,7 @@ const text = (r: { contents: unknown[] }) =>
   r.contents.map((c) => (c as { text?: string }).text ?? "").join("\n");
 
 /** The system prompt: role, the workflow (MCP prompt) and the always-needed knowledge, inlined. */
-export async function instructions(client: Client, workflow: Workflow, pack_id?: string, deck_id?: string, files: Attachment[] = []): Promise<string> {
+export async function instructions(client: Client, workflow: Workflow, pack_id?: string, deck_id?: string, files: Attachment[] = [], medium: "deck" | "design" = "deck"): Promise<string> {
   const prompt = await client.getPrompt({ name: workflow, arguments: pack_id ? { pack_id } : {} });
   const steps = prompt.messages.map((m) => (m.content as { text?: string }).text ?? "").join("\n\n");
   const design = workflow === "create-design";
@@ -83,9 +85,11 @@ export async function instructions(client: Client, workflow: Workflow, pack_id?:
   const knowledge = await Promise.all(
     uris.map(async (uri) => `<resource uri="${uri}">\n${text(await client.readResource({ uri }))}\n</resource>`),
   );
-  const deck = deck_id
-    ? `# Open deck\n\nThe user has deck \`${deck_id}\` open next to this chat: open_deck it before changing it, change it with patch_deck or add_slides (never a new deck), and pass the comment ids a patch answers in \`resolves\`.`
-    : "";
+  const deck = !deck_id
+    ? ""
+    : medium === "design"
+      ? `# Open design\n\nThe user has design \`${deck_id}\` open next to this chat: open_design it before changing it, change it with patch_design (never a new design), and pass the comment ids a patch answers in \`resolves\`.`
+      : `# Open deck\n\nThe user has deck \`${deck_id}\` open next to this chat: open_deck it before changing it, change it with patch_deck or add_slides (never a new deck), and pass the comment ids a patch answers in \`resolves\`.`;
   return [design ? DESIGN_ROLE : ROLE, "# Workflow", steps, deck, attachments(files), "# Knowledge", ...knowledge].filter(Boolean).join("\n\n");
 }
 
@@ -120,7 +124,14 @@ async function tools(client: Client): Promise<ToolDef[]> {
 export async function chat(i: ChatInput): Promise<{ text: string; messages: Message[]; usage: Usage }> {
   return runTools({
     model: i.model,
-    instructions: await instructions(i.client, i.workflow ?? (i.deck_id ? "edit-slides" : "build-presentation"), i.pack_id, i.deck_id, i.files),
+    instructions: await instructions(
+      i.client,
+      i.workflow ?? (i.medium === "design" ? "create-design" : i.deck_id ? "edit-slides" : "build-presentation"),
+      i.pack_id,
+      i.deck_id,
+      i.files,
+      i.medium,
+    ),
     messages: i.messages,
     tools: await tools(i.client),
     ...(i.onStep ? { onStep: i.onStep } : {}),
@@ -132,6 +143,12 @@ export async function applyComments({ comment_ids, ...i }: Omit<ChatInput, "mess
   const which = comment_ids?.length
     ? `the open comment${comment_ids.length > 1 ? "s" : ""} ${comment_ids.join(", ")} (only these: leave the others open)`
     : "every open comment";
+  if (i.medium === "design") {
+    const ask = `Apply ${which} on design ${i.deck_id}. list_comments (read each thread's replies; slide_id is the artboard, node the
+element), open_design to see the artboards, then one patch_design per comment (or one for all) passing the comment ids in
+\`resolves\`. A comment you cannot apply safely: leave it open and say why. Finish with no \`errors\`, then list what changed.`;
+    return chat({ ...i, workflow: "create-design", messages: [{ role: "user", content: ask }] });
+  }
   const ask = `Apply ${which} on deck ${i.deck_id}. list_comments (read each thread's replies), open_deck to see the slides and shape_ids,
 then one patch_deck per comment (or one for all) passing the comment ids in \`resolves\`. A comment you cannot
 apply safely: leave it open and say why. Finish with lint_deck at 0 ERROR, then list what changed.`;

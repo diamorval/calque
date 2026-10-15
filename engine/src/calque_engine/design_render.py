@@ -913,8 +913,22 @@ def render(
                 },
             }
         )
+    merged = None
+    if "pdf" in outputs and len(result) > 1:
+        # the whole design in one file (export, Microsoft 365): one page per artboard, in order
+        from pypdf import PdfWriter
+
+        writer = PdfWriter()
+        for a in result:
+            writer.append(a["files"]["pdf"])
+        merged = out / "design.pdf"
+        with merged.open("wb") as f:
+            writer.write(f)
+    elif "pdf" in outputs and result:
+        merged = Path(result[0]["files"]["pdf"])
     return {
         "artboards": result,
+        **({"pdf": str(merged)} if merged else {}),
         "findings": [asdict(f) for f in findings],
         "warnings": [asdict(w) for w in warnings],
     }

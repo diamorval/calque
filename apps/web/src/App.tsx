@@ -6,7 +6,7 @@ import { LANGS, setLang, t, useLang } from "./i18n.ts";
 import { CommandPalette } from "./components/CommandPalette.tsx";
 import { go, PAGES, usePath } from "./nav.ts";
 import { Decks } from "./pages/Decks.tsx";
-import { DesignEditor, Designs } from "./pages/Designs.tsx";
+import { DesignEditor } from "./pages/Designs.tsx";
 import { NewDesign } from "./pages/NewDesign.tsx";
 import { Editor } from "./pages/Editor.tsx";
 import { Login } from "./pages/Login.tsx";
@@ -22,7 +22,7 @@ function page(path: string, me: Me) {
   const deck = path.match(/^\/d\/([^/]+)/)?.[1];
   if (deck) return <Editor id={deck} />;
   if (path === "/new") return <NewDeck />;
-  if (path === "/designs") return <Designs />;
+  if (path === "/designs") return <Decks medium="design" />;
   if (path === "/designs/new") return <NewDesign />;
   const design = path.match(/^\/designs\/([^/]+)$/)?.[1];
   if (design) return <DesignEditor id={design} />;
@@ -91,6 +91,17 @@ export function App() {
     document.title = brand.name;
   }, [brand.name]);
 
+  // a design opened with its share link (?k=) or a per-user token (?t=, from an agent's result):
+  // the design page for that link, signed in or not
+  const linked = path.match(/^\/designs\/([^/]+)$/)?.[1];
+  const key = new URLSearchParams(location.search);
+  const link = key.get("k") ? `k=${encodeURIComponent(key.get("k") as string)}` : key.get("t") ? `t=${encodeURIComponent(key.get("t") as string)}` : undefined;
+  if (linked && linked !== "new" && link && me !== null)
+    return (
+      <main className="cq-main cq-linked">
+        <DesignEditor id={linked} link={link} />
+      </main>
+    );
   if (me === "signed-out") return <Login brand={brand} />;
   if (!me)
     return (

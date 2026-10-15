@@ -1,23 +1,23 @@
 import { DeckViewer, type DeckView, type NewComment, type NewReply } from "@calque/slide-ui";
 import { Alert, AlertDescription } from "diametral-ds/alert";
 import { Button } from "diametral-ds/button";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "diametral-ds/table";
 import { Tag } from "diametral-ds/tag";
-import { BadgeCheck, BookMarked, ChevronLeft, CircleCheck, Cloud, Download, FileText, GitCompare, History, ListChecks, ListPlus, MessageSquareShare, Play, RefreshCw, Send, Share2, Sparkles, TriangleAlert, Undo2, X } from "lucide-react";
+import { BookMarked, ChevronLeft, CircleCheck, Cloud, Download, FileText, History, ListChecks, ListPlus, MessageSquareShare, Play, RefreshCw, Share2, Sparkles, TriangleAlert, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { agent, api, tool, type Me, type Pack } from "../api.ts";
 import { DeckDiff } from "../components/ai/DeckDiff.tsx";
 import { FindingCard, fixAsk } from "../components/ai/FindingCard.tsx";
 import { Chat, type Ask } from "../components/Chat.tsx";
 import { AddSlides, ReviewDeck } from "../components/DeckActions.tsx";
+import { TypeAndApproval, VersionHistory } from "../components/Document.tsx";
 import { ExportWithErrors } from "../components/ExportGate.tsx";
 import { AddToLibrary, LibraryPanel } from "../components/Library.tsx";
 import { SaveToM365, ShareToTeams, useM365 } from "../components/M365.tsx";
 import { ShareDeck } from "../components/Share.tsx";
-import { slideUiStrings, t, tn } from "../i18n.ts";
+import { slideUiStrings, t } from "../i18n.ts";
 import { bySeverity, type Finding, lintSummary } from "../lint.ts";
 import { go, navigate } from "../nav.ts";
-import { ago, Dialog, Spinner } from "../ui.tsx";
+import { Dialog, Spinner } from "../ui.tsx";
 
 type Deck = DeckView & {
   versions: { version: number; note: string; author: string; author_name: string | null; created_at: string; pack_version: number | null }[];
@@ -28,7 +28,6 @@ type Deck = DeckView & {
   kind?: string | null;
   kinds?: string[];
 };
-const APPROVAL = { draft: "Draft", in_review: "In review", approved: "Approved" } as const;
 
 const EDITS = ["Tighten every title to one line", "Add an agenda slide after the cover", "Review the deck against the brand pack"] as const;
 
@@ -40,8 +39,6 @@ export function Editor({ id }: { id: string }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [history, setHistory] = useState(false);
-  // the version whose changes the history shows, against the one before it
-  const [compare, setCompare] = useState<number | null>(null);
   // toolbar actions that go through the agent chat, and their dialogs
   const [ask, setAsk] = useState<Ask | null>(null);
   const [dialog, setDialog] = useState<"add" | "review" | "share" | "export" | "m365" | "teams" | null>(null);
@@ -63,6 +60,8 @@ export function Editor({ id }: { id: string }) {
       setDeck(await tool<Deck>("open_deck", { deck_id: id }));
       setFindings((await tool<{ findings: Finding[] }>("lint_deck", { deck_id: id })).findings);
     } catch (e) {
+      // a design's id (an old link): its own page
+      if (/is a design, not a deck/.test((e as Error).message)) return navigate(`/designs/${id}`);
       setError((e as Error).message);
     }
   }, [id]);
@@ -102,7 +101,6 @@ export function Editor({ id }: { id: string }) {
   const errors = findings?.filter((f) => f.severity === "ERROR") ?? [];
   const exportPptx = async (reason?: string) =>
     location.assign((await tool<{ download_url: string }>("export_pptx", { deck_id: id, ...(reason ? { reason } : {}) })).download_url);
-  const approval = deck.approval?.enabled ? deck.approval : null;
   const setApproval = (status: "draft" | "in_review" | "approved", label: string) =>
     void run(label, () => tool("set_approval", { deck_id: id, status }));
   const manages = packs.find((p) => p.id === deck.pack_id)?.editable ?? false;
@@ -166,55 +164,15 @@ export function Editor({ id }: { id: string }) {
             <Button variant="outline" onClick={() => navigate(`/present/${id}`)}>
               <Play /> {t("Present")}
             </Button>
-            {edits && !!deck.kinds?.length ? (
-              <select
-                className="cq-select"
-                aria-label={t("Deck type")}
-                title={t("The deck's type: the brand pack may require approval for some types")}
-                value={deck.kind ?? ""}
-                disabled={busy !== null}
-                onChange={(e) => void run(t("Setting the deck type"), () => tool("set_deck_kind", { deck_id: id, kind: e.target.value || null }))}
-              >
-                <option value="">{t("No type")}</option>
-                {deck.kinds.map((k) => (
-                  <option key={k} value={k}>
-                    {k}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              deck.kind && <Tag>{deck.kind}</Tag>
-            )}
-            {approval && (
-              <>
-                <Tag tone={approval.status === "approved" ? "success" : approval.status === "in_review" ? "warning" : "neutral"}>{t(APPROVAL[approval.status])}</Tag>
-                {approval.status === "in_review" && !!approval.blocking?.length && (
-                  <Tag tone="danger" title={t("Required comments block approval until they are resolved")}>
-                    {tn(approval.blocking.length, "{n} required comment open", "{n} required comments open")}
-                  </Tag>
-                )}
-                {approval.can_request && (
-                  <Button variant="ghost" onClick={() => setApproval("in_review", t("Requesting review"))}>
-                    <Send /> {t("Request review")}
-                  </Button>
-                )}
-                {approval.can_approve && (
-                  <>
-                    <Button variant="ghost" onClick={() => setApproval("approved", t("Approving"))}>
-                      <BadgeCheck /> {t("Approve")}
-                    </Button>
-                    <Button variant="ghost" onClick={() => setApproval("draft", t("Requesting changes"))}>
-                      <Undo2 /> {t("Request changes")}
-                    </Button>
-                  </>
-                )}
-                {approval.can_withdraw && !approval.can_approve && (
-                  <Button variant="ghost" onClick={() => setApproval("draft", t("Back to draft"))}>
-                    <Undo2 /> {t("Back to draft")}
-                  </Button>
-                )}
-              </>
-            )}
+            <TypeAndApproval
+              kind={deck.kind}
+              kinds={deck.kinds}
+              approval={deck.approval}
+              edits={edits}
+              busy={busy !== null}
+              onKind={(kind) => void run(t("Setting the deck type"), () => tool("set_deck_kind", { deck_id: id, kind }))}
+              onApproval={setApproval}
+            />
             <Button
               variant="outline"
               disabled={busy !== null}
@@ -356,77 +314,17 @@ export function Editor({ id }: { id: string }) {
         />
       )}
       {history && (
-        <Dialog
-          title={t("Version history")}
-          wide
-          onClose={() => {
+        <VersionHistory
+          versions={deck.versions}
+          head={deck.head}
+          canRestore={edits}
+          onClose={() => setHistory(false)}
+          onRestore={(version) => {
             setHistory(false);
-            setCompare(null);
+            void run(t("Restoring"), () => tool("restore_version", { deck_id: id, version }));
           }}
-        >
-          <div className="cq-dialog-body">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t("Version")}</TableHead>
-                  <TableHead>{t("Change")}</TableHead>
-                  <TableHead>{t("By")}</TableHead>
-                  <TableHead />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {[...deck.versions].reverse().map((v) => (
-                  <TableRow key={v.version} data-state={compare === v.version ? "selected" : undefined}>
-                    <TableCell>
-                      <span className="cq-mono">v{v.version}</span>
-                    </TableCell>
-                    <TableCell>
-                      {v.note}
-                      <div className="cq-hint">
-                        {ago(v.created_at)}
-                        {v.pack_version != null && ` · ${t("pack release {n}", { n: v.pack_version })}`}
-                      </div>
-                    </TableCell>
-                    <TableCell>{v.author_name || v.author}</TableCell>
-                    <TableCell>
-                      <div className="flex items-center justify-end gap-2">
-                        {v.version > 1 && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            aria-label={t("Changes in v{version}", { version: v.version })}
-                            aria-pressed={compare === v.version}
-                            onClick={() => setCompare(compare === v.version ? null : v.version)}
-                          >
-                            <GitCompare /> {t("Changes")}
-                          </Button>
-                        )}
-                        {v.version === deck.head ? (
-                          <Tag>{t("Current")}</Tag>
-                        ) : (
-                          edits && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              aria-label={t("Restore v{version}", { version: v.version })}
-                              onClick={() => {
-                                setHistory(false);
-                                void run(t("Restoring"), () => tool("restore_version", { deck_id: id, version: v.version }));
-                              }}
-                            >
-                              {t("Restore")}
-                            </Button>
-                          )
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-            {compare !== null && <DeckDiff deck_id={id} version={compare} />}
-          </div>
-        </Dialog>
+          changes={(version) => <DeckDiff deck_id={id} version={version} />}
+        />
       )}
       {report && findings && (
         <Dialog title={t("Lint: {summary}", { summary: summary?.label ?? "" })} wide onClose={() => setReport(false)}>
