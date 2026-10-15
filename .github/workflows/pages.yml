@@ -31,11 +31,7 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libreoffice-impress poppler-utils
       - if: env.GH_TOKEN != ''
         run: pnpm pack:sync diametral
-      # the demo design is laid out by Playwright's Chromium, without its sandbox (see ci.yml): the
-      # runner image's /usr/bin/chromium hung on it (60 s timeout)
-      - run: pnpm --filter @calque/web exec playwright install --with-deps chromium
-      - run: echo "CALQUE_CHROMIUM=$(node --input-type=module -e "import { chromium } from '@playwright/test'; console.log(chromium.executablePath())")" >> "$GITHUB_ENV"
-        working-directory: apps/web
+      # the demo design is laid out by the runner's Google Chrome, without its sandbox (see ci.yml)
       - run: node demo/snapshot.ts
         working-directory: apps/web
         env: { CALQUE_CHROMIUM_NO_SANDBOX: "1" }

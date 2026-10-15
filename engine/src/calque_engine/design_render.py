@@ -341,8 +341,10 @@ CSP = (
 )
 
 MEASURE_JS = r"""
-(async () => {
-  await document.fonts.ready;
+// Measured in the load event, synchronously: headless Chromium dumps the DOM right after it and
+// nothing async (fonts.ready, a frame) is guaranteed to run in between. The layout forced at the
+// end starts the @font-face and image loads now, so the load event waits for them.
+window.addEventListener('load', () => {
   const board = document.querySelector('.cq-artboard');
   const B = board.getBoundingClientRect();
   const out = {};
@@ -390,7 +392,8 @@ MEASURE_JS = r"""
   m.id = 'calque-measure';
   m.setAttribute('data-m', JSON.stringify(out));
   document.body.appendChild(m);
-})();
+});
+document.documentElement.getBoundingClientRect();
 """
 
 
@@ -529,7 +532,7 @@ MEASURE_RE = re.compile(r'id="calque-measure" data-m="([^"]*)"')
 
 
 def measure(page: Path) -> dict[str, Any]:
-    dom = _run(page, ["--dump-dom", "--virtual-time-budget=5000"])
+    dom = _run(page, ["--dump-dom"])
     m = MEASURE_RE.search(dom)
     if not m:
         raise RenderError("Chromium returned no measurement (the page did not finish loading)")
@@ -542,7 +545,6 @@ def screenshot(page: Path, out: Path, fmt: DesignFormat, scale: float = 1.0) -> 
         [
             f"--window-size={fmt.width},{fmt.height}",
             f"--force-device-scale-factor={scale:g}",
-            "--virtual-time-budget=5000",
             f"--screenshot={out.resolve()}",
         ],
     )
@@ -552,7 +554,7 @@ def screenshot(page: Path, out: Path, fmt: DesignFormat, scale: float = 1.0) -> 
 def pdf(page: Path, out: Path) -> Path:
     _run(
         page,
-        ["--no-pdf-header-footer", "--virtual-time-budget=5000", f"--print-to-pdf={out.resolve()}"],
+        ["--no-pdf-header-footer", f"--print-to-pdf={out.resolve()}"],
     )
     return out
 
