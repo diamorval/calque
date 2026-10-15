@@ -37,8 +37,14 @@ export async function startDemo() {
   const models: Json = api["GET /api/models"];
   const draft: Json = api["POST /api/packs/diametral/edit {}"];
   const decks: Json[] = api["GET /api/decks"].decks;
+  const deckOn = (pack: string): Json | undefined => {
+    const all = decks.filter((d) => d.medium !== "design");
+    return all.find((d) => d.pack_id === pack) ?? all[0];
+  };
+  // a deck or a design (one document store): what its editor opened
   const opened = (id: string): Json =>
-    api[`POST /api/tools/open_deck ${JSON.stringify({ deck_id: id })}`];
+    api[`POST /api/tools/open_deck ${JSON.stringify({ deck_id: id })}`] ??
+    api[`POST /api/tools/open_design ${JSON.stringify({ design_id: id })}`];
   const fonts: string[] = [...draft.fonts];
   if (!models.models.length)
     models.models = [
@@ -140,6 +146,7 @@ export async function startDemo() {
         return {
           decks: decks.filter(
             (d) =>
+              (!p.get("medium") || d.medium === p.get("medium")) &&
               (!p.get("pack_id") || d.pack_id === p.get("pack_id")) &&
               words.every((w) => String(d.title).toLowerCase().includes(w)),
           ),
@@ -248,6 +255,7 @@ export async function startDemo() {
           version: deck.head,
           slide_id: parent?.slide_id ?? b.slide_id,
           shape_id: parent ? parent.shape_id : (b.shape_id ?? null),
+          node: parent ? parent.node : (b.node ?? null),
           text: b.text,
           author: "demo",
           author_name: "Demo",
@@ -323,9 +331,11 @@ export async function startDemo() {
     [
       /^POST \/api\/tools\/import_pptx$/,
       (_, b) => ({
-        deck_id: (decks.find((d) => d.pack_id === b.pack_id) ?? decks[0])?.id,
+        deck_id: deckOn(b.pack_id)?.id,
       }),
     ],
+    // a design's exports: the files saved by the snapshot, whatever the scale (code replays as saved)
+    [/^POST \/api\/tools\/export_design$/, (_, b) => api[`export_design ${b.format}`] ?? Response.json(READ_ONLY, { status: 403 })],
     // the review report, from the saved lint: a generated deck has no safe fixes to apply
     [
       /^POST \/api\/tools\/review_deck$/,
@@ -374,7 +384,7 @@ export async function startDemo() {
       const b = JSON.parse(String(init?.body));
       if (b.deck_id)
         return stream([
-          { step: { tools: [{ name: "open_deck" }] } },
+          { step: { tools: [{ name: opened(b.deck_id)?.artboards ? "open_design" : "open_deck" }] } },
           {
             done: {
               model: "demo",
@@ -383,8 +393,18 @@ export async function startDemo() {
             },
           },
         ]);
+      // a new design: open the one the real engine built earlier
+      if (b.workflow === "create-design") {
+        const design = decks.find((d) => d.medium === "design") ?? {};
+        const text = `This is the demo: no model runs here, so here is a design the engine built earlier, "${design.title}". Run Calque locally to make one from your brief.`;
+        return stream([
+          { step: { tools: [{ name: "list_formats" }] } },
+          { step: { tools: [{ name: "create_design" }] } },
+          { done: { model: "demo", text, messages: [{ role: "assistant", content: text }], deck_id: design.id } },
+        ]);
+      }
       // a new deck: open one the real engine built earlier on this pack
-      const deck = decks.find((d) => d.pack_id === b.pack_id) ?? decks[0] ?? {};
+      const deck = deckOn(b.pack_id) ?? {};
       const text = `This is the demo: no model runs here, so here is a deck the engine built earlier on this pack, "${deck.title}". Run Calque locally to build one from your brief.`;
       const messages = [
         {
